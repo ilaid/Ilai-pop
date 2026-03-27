@@ -1,0 +1,827 @@
+<!DOCTYPE html>  
+  
+<html lang="en">  
+<head>  
+<meta charset="UTF-8"/>  
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>  
+<title>Trade Journal</title>  
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>  
+<link href="https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@400;500;600;700&family=Syne:wght@700;800&display=swap" rel="stylesheet"/>  
+<style>  
+*{box-sizing:border-box;margin:0;padding:0;}  
+body{background:#070a0e;color:#c9d1d9;font-family:'Azeret Mono',monospace;min-height:100vh;}  
+::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-track{background:#070a0e;}::-webkit-scrollbar-thumb{background:#1e2635;border-radius:2px;}  
+input,textarea,select{font-family:'Azeret Mono',monospace;font-size:13px;}  
+.pill{padding:6px 12px;border-radius:6px;border:1px solid #1e2635;background:transparent;color:#555;cursor:pointer;font-family:'Azeret Mono',monospace;font-size:11px;transition:all .15s;}  
+.pill:hover{border-color:#3b82f6;color:#c9d1d9;}  
+.pill.on{background:#1d3461;border-color:#3b82f6;color:#60a5fa;}  
+.pill.g{background:#052e16;border-color:#00c07a;color:#00c07a;}  
+.pill.r{background:#3b0d14;border-color:#ef4444;color:#ef4444;}  
+.inp{width:100%;background:#111827;border:1px solid #1e2635;border-radius:8px;color:#e5e7eb;padding:10px 14px;font-size:14px;outline:none;transition:border-color .2s;}  
+.inp:focus{border-color:#3b82f6;}  
+.ta{resize:vertical;min-height:70px;line-height:1.5;}  
+.fl{font-size:10px;color:#4b5563;margin-bottom:6px;text-transform:uppercase;letter-spacing:.08em;display:block;}  
+.sc{background:#0f1318;border:1px solid #1e2635;border-radius:12px;padding:16px 20px;}  
+.tr-row{background:#0f1318;border:1px solid #1e2635;border-radius:10px;padding:13px 16px;display:flex;align-items:center;gap:10px;margin-bottom:8px;cursor:pointer;transition:border-color .15s;}  
+.tr-row:hover{border-color:#374151;}  
+.bp{background:linear-gradient(135deg,#1d3461,#1e40af);border:1px solid #3b82f6;border-radius:8px;color:#93c5fd;padding:10px 20px;cursor:pointer;font-size:13px;font-family:'Azeret Mono',monospace;}  
+.bp:hover{filter:brightness(1.15);}  
+.bs{background:linear-gradient(135deg,#052e16,#064e3b);border:1px solid #00c07a;border-radius:8px;color:#00c07a;padding:10px 22px;cursor:pointer;font-size:13px;font-family:'Azeret Mono',monospace;}  
+.bb{background:linear-gradient(135deg,#1c1340,#2e1065);border:1px solid #7c3aed;border-radius:8px;color:#a78bfa;padding:10px 16px;cursor:pointer;font-size:13px;font-family:'Azeret Mono',monospace;}  
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:200;display:flex;align-items:center;justify-content:center;padding:20px;}  
+.modal-box{background:#0c1017;border:1px solid #1e2635;border-radius:18px;width:100%;max-width:680px;max-height:90vh;overflow-y:auto;}  
+.nav-btn{padding:9px 16px;border-radius:8px;cursor:pointer;font-size:12px;color:#4b5563;background:none;border:1px solid transparent;font-family:'Azeret Mono',monospace;transition:all .15s;white-space:nowrap;}  
+.nav-btn:hover{color:#9ca3af;}  
+.nav-btn.on{background:#111827;color:#e5e7eb;border-color:#1e2635;}  
+.stat-card{background:#0f1318;border:1px solid #1e2635;border-radius:12px;padding:14px 10px;text-align:center;}  
+.day-cell{flex:1;border-radius:5px;padding:6px 2px;text-align:center;cursor:pointer;transition:transform .1s;}  
+.day-cell:hover{transform:scale(1.05);}  
+.login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;}  
+.login-box{background:#0c1017;border:1px solid #1e2635;border-radius:20px;padding:36px 32px;width:100%;max-width:400px;}  
+</style>  
+</head>  
+<body>  
+  
+<div id="app"></div>  
+  
+<script>  
+// ââ Supabase init ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ  
+const SUPA_URL = "https://vgawekccutlsodnohxmf.supabase.co";  
+const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZnYXdla2NjdXRsc29kbm9oeG1mIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1NDgwNDIsImV4cCI6MjA5MDEyNDA0Mn0.tbqCFY_ZS2FF9Y2B5M1_XBwXbPj4_kEMN_yKYBvMyVQ";  
+const sb = supabase.createClient(SUPA_URL, SUPA_KEY);  
+  
+// ââ Constants ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ  
+const CT={  
+  ES:[{id:"ES_mini",label:"E-mini ES",ts:0.25,tv:12.5},{id:"MES_micro",label:"Micro MES",ts:0.25,tv:1.25}],  
+  NQ:[{id:"NQ_mini",label:"E-mini NQ",ts:0.25,tv:5},{id:"MNQ_micro",label:"Micro MNQ",ts:0.25,tv:0.5}]  
+};  
+const INST=["ES","NQ"],DIRS=["Long","Short"];  
+const EMO=["ð§ Focused","ð Confident","ð Neutral","ð° Anxious","ð¤ Frustrated","ð¤ Greedy","ð´ Tired","ð¤ FOMO"];  
+const MIS=["Over-leveraged","Moved SL","Chased entry","Ignored plan","Exited early","Held too long","Revenge trade","None"];  
+const DAYS=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];  
+const TCOLORS=["#3b82f6","#f59e0b","#8b5cf6","#10b981","#ef4444","#ec4899","#06b6d4","#84cc16"];  
+const ITAGS=[  
+  {id:1,name:"Breakout",color:"#3b82f6"},{id:2,name:"Reversal",color:"#f59e0b"},  
+  {id:3,name:"VWAP Reclaim",color:"#8b5cf6"},{id:4,name:"Trend Follow",color:"#10b981"},  
+  {id:5,name:"Gap Fill",color:"#ef4444"},{id:6,name:"Range",color:"#ec4899"},  
+];  
+const EVENTS=[  
+  {id:"NFP",label:"NFP",color:"#ef4444",bg:"#3b0d14",desc:"Non-Farm Payrolls"},  
+  {id:"CPI",label:"CPI",color:"#f59e0b",bg:"#1a0f00",desc:"Consumer Price Index"},  
+  {id:"PPI",label:"PPI",color:"#f97316",bg:"#1a0900",desc:"Producer Price Index"},  
+  {id:"FOMC",label:"FOMC",color:"#8b5cf6",bg:"#1c1040",desc:"Fed Rate Decision"},  
+  {id:"JOBLESS",label:"Jobless",color:"#60a5fa",bg:"#0d1f40",desc:"Jobless Claims"},  
+  {id:"GDP",label:"GDP",color:"#00c07a",bg:"#052e16",desc:"GDP Release"},  
+  {id:"RETAIL",label:"Retail",color:"#ec4899",bg:"#2d0a1e",desc:"Retail Sales"},  
+  {id:"ISM",label:"ISM",color:"#06b6d4",bg:"#031e26",desc:"ISM Manufacturing"},  
+  {id:"PMI",label:"PMI",color:"#84cc16",bg:"#132008",desc:"PMI Data"},  
+];  
+const MONTH_NAMES=["January","February","March","April","May","June","July","August","September","October","November","December"];  
+  
+// ââ State ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ  
+let trades=[], tags=[...ITAGS], dayNotes={};  
+let curTab="dash", calYear=new Date().getFullYear(), calMonth=new Date().getMonth();  
+let currentUser=null, saveTimer=null;  
+  
+// ââ Helpers ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ  
+const gs=(i,c)=>{const l=CT[i]||CT.ES;return l.find(x=>x.id===c)||l[0];};  
+const lp=(en,ex,co,sp,dir)=>{  
+  if(!en||!ex||!co||!sp)return null;  
+  const d=dir==="Short"?-1:1;  
+  return parseFloat((d*(parseFloat(ex)-parseFloat(en))/sp.ts*sp.tv*parseFloat(co)).toFixed(2));  
+};  
+const calcRR=(en,sl,tp,d)=>{  
+  if(!en||!sl||!tp)return null;  
+  const x=d==="Long"?1:-1,r=Math.abs(parseFloat(en)-parseFloat(sl)),w=x*(parseFloat(tp)-parseFloat(en));  
+  return r===0?null:parseFloat((w/r).toFixed(2));  
+};  
+const td=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;};  
+const nt=()=>new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});  
+const tPnL=t=>t.exits?.length>0?t.exits.reduce((s,l)=>s+(l.pnl||0),0):(t.pnl||0);  
+const f$=v=>`${v>=0?"+":"-"}$${Math.abs(v).toFixed(2)}`;  
+const be=()=>({id:Date.now()+Math.random(),exitPrice:"",contracts:"",pnl:null});  
+const allPnL=()=>trades.map(tPnL);  
+const tot=()=>allPnL().reduce((a,b)=>a+b,0);  
+const wins=()=>allPnL().filter(p=>p>0).length;  
+const losses=()=>allPnL().filter(p=>p<0).length;  
+const wr=()=>trades.length?Math.round((wins()/trades.length)*100):0;  
+const byDay=()=>trades.reduce((a,t)=>{a[t.date]=(a[t.date]||0)+tPnL(t);return a;},{});  
+const byMonth=()=>trades.reduce((a,t)=>{const k=t.date.slice(0,7);a[k]=(a[k]||0)+tPnL(t);return a;},{});  
+const tradesByDay=()=>trades.reduce((a,t)=>{if(!a[t.date])a[t.date]=[];a[t.date].push(t);return a;},{});  
+const profitF=()=>{const g=allPnL().filter(p=>p>0).reduce((a,b)=>a+b,0),l=Math.abs(allPnL().filter(p=>p<0).reduce((a,b)=>a+b,0));return l>0?(g/l).toFixed(2):"â";};  
+const avgRR=()=>{const rs=trades.filter(t=>t.rr);return rs.length?(rs.reduce((s,t)=>s+(t.rr||0),0)/rs.length).toFixed(2):"â";};  
+  
+// ââ Supabase DB ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ  
+async function loadData(){  
+  if(!currentUser)return;  
+  const {data,error}=await sb.from("journal_data").select("*").eq("user_id",currentUser).single();  
+  if(data){  
+    trades=data.trades||[];  
+    tags=data.tags||[...ITAGS];  
+    dayNotes=data.day_notes||{};  
+  }  
+}  
+  
+async function saveData(){  
+  if(!currentUser)return;  
+  setSaveInd("savingâ¦","#4b5563");  
+  const {error}=await sb.from("journal_data").upsert({  
+    user_id:currentUser,  
+    trades,tags,day_notes:dayNotes,  
+    updated_at:new Date().toISOString()  
+  },{onConflict:"user_id"});  
+  if(error){setSaveInd("â  ×©××××","#ef4444");}  
+  else{setSaveInd("â saved","#00c07a");setTimeout(()=>setSaveInd("",""),2000);}  
+}  
+  
+function scheduleSave(){  
+  clearTimeout(saveTimer);  
+  saveTimer=setTimeout(saveData,1200);  
+}  
+  
+function setSaveInd(txt,color){  
+  const el=document.getElementById("save-ind");  
+  if(el){el.textContent=txt;el.style.color=color;}  
+}  
+  
+// ââ Auth âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ  
+function renderLogin(){  
+  document.getElementById("app").innerHTML=`  
+  <div class="login-wrap">  
+    <div class="login-box">  
+      <div style="text-align:center;margin-bottom:28px;">  
+        <div style="display:inline-flex;align-items:center;gap:10px;">  
+          <div style="width:10px;height:10px;border-radius:50%;background:#3b82f6;box-shadow:0 0 12px #3b82f6;"></div>  
+          <span style="font-family:'Syne',sans-serif;font-size:20px;font-weight:800;color:#f9fafb;letter-spacing:.04em;">TRADE JOURNAL</span>  
+        </div>  
+        <div style="font-size:12px;color:#374151;margin-top:8px;">×× ××¡× ×××©×××</div>  
+      </div>  
+      <div id="auth-err" style="background:#3b0d14;border:1px solid #ef4444;border-radius:8px;padding:10px 14px;font-size:12px;color:#ef4444;margin-bottom:14px;display:none;"></div>  
+      <div style="margin-bottom:14px;">  
+        <span class="fl">×©× ××©×ª××© (username)</span>  
+        <input id="auth-user" class="inp" placeholder="myusername" autocomplete="username"/>  
+      </div>  
+      <div style="margin-bottom:20px;">  
+        <span class="fl">×¡××¡××</span>  
+        <input id="auth-pass" class="inp" type="password" placeholder="â¢â¢â¢â¢â¢â¢â¢â¢" autocomplete="current-password"/>  
+      </div>  
+      <div style="display:flex;gap:10px;">  
+        <button class="bp" style="flex:1;" onclick="doLogin()">×× ××¡×</button>  
+        <button class="bs" style="flex:1;" onclick="doRegister()">××¨×©××</button>  
+      </div>  
+      <div style="font-size:11px;color:#374151;margin-top:16px;text-align:center;line-height:1.7;">  
+        ××¨×©×× = ××¦××¨×ª ××©××× ×××©<br/>  
+        ×× ××¡× = ×× ××¡× ×××©××× ×§×××  
+      </div>  
+    </div>  
+  </div>`;  
+}  
+  
+function getAuthEmail(username){  
+  // We use username@tradejournal.app as email (Supabase needs email format)  
+  return `${username.toLowerCase().trim()}@tradejournal.app`;  
+}  
+  
+async function doLogin(){  
+  const u=document.getElementById("auth-user").value.trim();  
+  const p=document.getElementById("auth-pass").value;  
+  if(!u||!p)return showAuthErr("××× ×©× ××©×ª××© ××¡××¡××");  
+  const {data,error}=await sb.auth.signInWithPassword({email:getAuthEmail(u),password:p});  
+  if(error)return showAuthErr("×©× ××©×ª××© ×× ×¡××¡×× ×©×××××");  
+  currentUser=data.user.id;  
+  await loadData();  
+  renderApp();  
+}  
+  
+async function doRegister(){  
+  const u=document.getElementById("auth-user").value.trim();  
+  const p=document.getElementById("auth-pass").value;  
+  if(!u||!p)return showAuthErr("××× ×©× ××©×ª××© ××¡××¡××");  
+  if(p.length<6)return showAuthErr("××¡××¡×× ×××××ª ×××××ª ××¤×××ª 6 ×ª××××");  
+  const {data,error}=await sb.auth.signUp({email:getAuthEmail(u),password:p});  
+  if(error)return showAuthErr("×©× ××©×ª××© ×××¨ ×§××× ×× ×©××××: "+error.message);  
+  if(data.user){  
+    currentUser=data.user.id;  
+    tags=[...ITAGS];  
+    await saveData();  
+    renderApp();  
+  }  
+}  
+  
+function showAuthErr(msg){  
+  const el=document.getElementById("auth-err");  
+  if(el){el.textContent=msg;el.style.display="block";}  
+}  
+  
+async function doLogout(){  
+  await sb.auth.signOut();  
+  currentUser=null;trades=[];tags=[...ITAGS];dayNotes={};  
+  renderLogin();  
+}  
+  
+// ââ App render âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ  
+function renderApp(){  
+  document.getElementById("app").innerHTML=`  
+  <div style="border-bottom:1px solid #111827;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:#070a0e;z-index:10;">  
+    <div style="display:flex;align-items:center;gap:10px;">  
+      <div style="width:8px;height:8px;border-radius:50%;background:#3b82f6;box-shadow:0 0 10px #3b82f6;"></div>  
+      <span style="font-family:'Syne',sans-serif;font-size:17px;font-weight:800;color:#f9fafb;letter-spacing:.04em;">TRADE JOURNAL</span>  
+      <span id="save-ind" style="font-size:10px;margin-left:4px;"></span>  
+    </div>  
+    <div style="display:flex;gap:8px;">  
+      <button class="bb" onclick="openBT()">âª Backtest</button>  
+      <button class="bp" onclick="openAdd()">+ New Trade</button>  
+      <button onclick="doLogout()" style="background:none;border:1px solid #1e2635;border-radius:8px;color:#374151;padding:8px 14px;cursor:pointer;font-size:12px;font-family:'Azeret Mono',monospace;">â ××¦×××</button>  
+    </div>  
+  </div>  
+  <div style="display:flex;gap:4px;padding:10px 20px 0;border-bottom:1px solid #0d1117;overflow-x:auto;">  
+    <button class="nav-btn on" id="nav-dash" onclick="showTab('dash')">ð Dashboard</button>  
+    <button class="nav-btn" id="nav-trades" onclick="showTab('trades')">ð Trades</button>  
+    <button class="nav-btn" id="nav-stats" onclick="showTab('stats')">ð Analytics</button>  
+    <button class="nav-btn" id="nav-tags" onclick="showTab('tags')">ð·ï¸ Setups</button>  
+    <button class="nav-btn" id="nav-settings" onclick="showTab('settings')">âï¸ Settings</button>  
+  </div>  
+  <div id="content" style="padding:20px;max-width:1100px;margin:0 auto;"></div>  
+  <div id="modal-area"></div>`;  
+  renderContent();  
+}  
+  
+// ââ Check existing session âââââââââââââââââââââââââââââââââââââââââââââââââ  
+async function init(){  
+  document.getElementById("app").innerHTML=`<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;color:#374151;font-size:13px;">×××¢×â¦</div>`;  
+  const {data:{session}}=await sb.auth.getSession();  
+  if(session){  
+    currentUser=session.user.id;  
+    await loadData();  
+    renderApp();  
+  } else {  
+    renderLogin();  
+  }  
+}  
+  
+// ââ Tabs âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ  
+function showTab(t){  
+  curTab=t;  
+  document.querySelectorAll(".nav-btn").forEach(b=>b.classList.remove("on"));  
+  const el=document.getElementById("nav-"+t);  
+  if(el)el.classList.add("on");  
+  renderContent();  
+}  
+  
+function renderContent(){  
+  const el=document.getElementById("content");  
+  if(!el)return;  
+  if(curTab==="dash")el.innerHTML=renderDash();  
+  else if(curTab==="trades")el.innerHTML=renderTradesList();  
+  else if(curTab==="stats")el.innerHTML=renderStats();  
+  else if(curTab==="tags")el.innerHTML=renderTagsTab();  
+  else if(curTab==="settings")el.innerHTML=renderSettings();  
+}  
+  
+// ââ Calendar âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ  
+function navMonth(delta){  
+  calMonth+=delta;  
+  if(calMonth>11){calMonth=0;calYear++;}  
+  if(calMonth<0){calMonth=11;calYear--;}  
+  renderContent();  
+}  
+  
+function monthCalendarDays(){  
+  const bd=byDay(),tbd=tradesByDay();  
+  const firstDay=new Date(calYear,calMonth,1).getDay();  
+  const daysInMonth=new Date(calYear,calMonth+1,0).getDate();  
+  const todayKey=td();  
+  const r=[];  
+  for(let i=0;i<firstDay;i++)r.push(null);  
+  for(let d=1;d<=daysInMonth;d++){  
+    const k=`${calYear}-${String(calMonth+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;  
+    r.push({key:k,day:d,pnl:bd[k]??null,count:(tbd[k]||[]).length,isToday:k===todayKey,hasNote:!!(dayNotes[k]?.trim())});  
+  }  
+  while(r.length%7!==0)r.push(null);  
+  return r;  
+}  
+  
+// ââ Dashboard ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ  
+function renderDash(){  
+  const now=new Date();  
+  const isCurrentMonth=(calYear===now.getFullYear()&&calMonth===now.getMonth());  
+  const mKey=`${calYear}-${String(calMonth+1).padStart(2,"0")}`;  
+  const mTrades=trades.filter(t=>t.date.startsWith(mKey));  
+  const mPnl=mTrades.reduce((s,t)=>s+tPnL(t),0);  
+  const mWins=mTrades.filter(t=>tPnL(t)>0).length;  
+  const mWr=mTrades.length?Math.round((mWins/mTrades.length)*100):0;  
+  const mGW=mTrades.filter(t=>tPnL(t)>0).reduce((s,t)=>s+tPnL(t),0);  
+  const mGL=Math.abs(mTrades.filter(t=>tPnL(t)<0).reduce((s,t)=>s+tPnL(t),0));  
+  const mPf=mGL>0?(mGW/mGL).toFixed(2):"â";  
+  const mRRs=mTrades.filter(t=>t.rr);  
+  const mAvgRR=mRRs.length?(mRRs.reduce((s,t)=>s+(t.rr||0),0)/mRRs.length).toFixed(2):"â";  
+  const days=monthCalendarDays();  
+  while(days.length%7!==0)days.push(null);  
+  
+  const calRows=[];  
+  for(let i=0;i<days.length;i+=7){  
+    const row=days.slice(i,i+7);  
+    calRows.push(`<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:4px;">  
+    ${row.map(c=>{  
+      if(!c)return`<div style="min-height:54px;"></div>`;  
+      return`<div onclick="openDayPopup('${c.key}')" style="min-height:54px;padding:6px 4px;border-radius:6px;cursor:pointer;  
+        background:${c.pnl!==null?(c.pnl>0?"rgba(0,192,122,.13)":"rgba(239,68,68,.13)"):c.hasNote?"rgba(59,130,246,.07)":"#0d1117"};  
+        border:${c.isToday?"2px solid #3b82f6":`1px solid ${c.pnl!==null?(c.pnl>0?"rgba(0,192,122,.3)":"rgba(239,68,68,.3)"):c.hasNote?"rgba(59,130,246,.3)":"#1e2635"}`};  
+        transition:transform .1s;" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform=''">  
+        <div style="font-size:11px;font-weight:${c.isToday?"700":"400"};color:${c.isToday?"#60a5fa":c.count>0?"#9ca3af":c.hasNote?"#6b7280":"#374151"}">${c.day}</div>  
+        ${c.pnl!==null?`<div style="font-size:10px;color:${c.pnl>=0?"#00c07a":"#ef4444"};font-weight:600;margin-top:2px;">${c.pnl>=0?"+":"-"}$${Math.abs(c.pnl).toFixed(0)}</div>`:""}  
+        ${c.count>0?`<div style="font-size:9px;color:#4b5563;margin-top:1px;">${c.count}T</div>`:""}  
+        ${c.hasNote&&c.count===0?`<div style="font-size:9px;color:#3b82f6;margin-top:2px;">ð</div>`:""}  
+      </div>`;  
+    }).join("")}  
+    </div>`);  
+  }  
+  
+  return `  
+  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:18px;">  
+    ${[["P&L",f$(mPnl),mPnl>=0?"#00c07a":"#ef4444"],["Win Rate",mTrades.length?`${mWr}%`:"â","#60a5fa"],["Trades",mTrades.length,"#e5e7eb"],["Profit Factor",mPf,"#f59e0b"],["Avg R:R",mAvgRR,"#8b5cf6"]].map(([l,v,c])=>`  
+    <div class="stat-card"><div style="font-size:9px;color:#4b5563;margin-bottom:5px;text-transform:uppercase;letter-spacing:.08em">${l}</div><div style="font-size:20px;font-weight:700;color:${c}">${v}</div></div>`).join("")}  
+  </div>  
+  <div class="sc" style="margin-bottom:16px;">  
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">  
+      <button onclick="navMonth(-1)" style="background:#111827;border:1px solid #1e2635;border-radius:8px;color:#9ca3af;cursor:pointer;font-size:16px;padding:6px 14px;font-family:'Azeret Mono',monospace;">â¹</button>  
+      <div style="text-align:center;">  
+        <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#f9fafb;">${MONTH_NAMES[calMonth]} ${calYear}</div>  
+        <div style="font-size:11px;margin-top:3px;color:${mPnl>=0?"#00c07a":"#ef4444"};font-weight:600;">${mTrades.length>0?`${f$(mPnl)} Â· ${mTrades.length} trades Â· ${mWr}% WR`:"No trades this month"}</div>  
+      </div>  
+      <div style="display:flex;gap:6px;">  
+        ${!isCurrentMonth?`<button onclick="calYear=${now.getFullYear()};calMonth=${now.getMonth()};renderContent()" style="background:#111827;border:1px solid #1e2635;border-radius:7px;color:#6b7280;cursor:pointer;font-size:11px;padding:6px 12px;font-family:'Azeret Mono',monospace;">Today</button>`:""}  
+        <button onclick="navMonth(1)" style="background:#111827;border:1px solid #1e2635;border-radius:8px;color:#9ca3af;cursor:pointer;font-size:16px;padding:6px 14px;font-family:'Azeret Mono',monospace;">âº</button>  
+      </div>  
+    </div>  
+    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:6px;">  
+      ${DAYS.map(d=>`<div style="text-align:center;font-size:10px;color:#374151;padding:4px 0;">${d}</div>`).join("")}  
+    </div>  
+    ${calRows.join("")}  
+    <div style="margin-top:8px;font-size:10px;color:#374151;">×××¥ ×¢× ××× ××¦×¤××× ××¢×¡×§×××ª ×× ×××¡×¤×ª ××¢×¨×</div>  
+  </div>  
+  <div style="font-size:10px;color:#4b5563;margin-bottom:12px;text-transform:uppercase;letter-spacing:.08em;">×¢×¡×§×××ª ×××¨×× ××ª â ${MONTH_NAMES[calMonth]}</div>  
+  ${mTrades.length===0  
+    ?`<div style="text-align:center;padding:40px 0;color:#1e2635;"><div style="font-size:36px;">ð</div><div style="font-size:13px;margin-top:8px;">No trades in ${MONTH_NAMES[calMonth]}</div></div>`  
+    :mTrades.slice(0,6).map(renderTRowHTML).join("")}`;  
+}  
+  
+// ââ Trade Row ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ  
+function renderTRowHTML(t){  
+  const pnl=tPnL(t);  
+  const tagH=(t.tags||[]).map(x=>{const tag=tags.find(g=>g.name===x);return`<span style="font-size:10px;padding:2px 6px;border-radius:3px;border:1px solid ${tag?.color||"#3b82f6"}55;color:${tag?.color||"#60a5fa"}">${x}</span>`;}).join(" ");  
+  const evtH=(t.events||[]).map(eid=>{const ev=EVENTS.find(e=>e.id===eid);return ev?`<span style="padding:2px 7px;border-radius:4px;font-size:10px;background:${ev.bg};color:${ev.color};border:1px solid ${ev.color}44">${ev.label}</span>`:""}).join(" ");  
+  return`<div class="tr-row" onclick="openEdit(${t.id})">  
+    <div style="display:flex;align-items:center;gap:8px;flex:1;flex-wrap:wrap;">  
+      <span style="font-size:10px;padding:2px 8px;border-radius:4px;background:${t.instrument==="ES"?"#1d3461":"#1a1040"};color:${t.instrument==="ES"?"#60a5fa":"#a78bfa"}">${t.instrument}</span>  
+      <span style="font-size:10px;padding:2px 8px;border-radius:4px;background:${t.direction==="Long"?"#052e16":"#3b0d14"};color:${t.direction==="Long"?"#00c07a":"#ef4444"}">${t.direction}</span>  
+      ${t.isHistorical?'<span style="font-size:10px;padding:2px 6px;border-radius:3px;background:#1a120a;color:#f59e0b;border:1px solid #92400e55">HIST</span>':""}  
+      <span style="font-size:11px;color:#374151">${t.date} ${t.time||""}</span>  
+      <span style="font-size:11px;color:#4b5563">${t.totalContracts}c</span>  
+      ${tagH} ${evtH}  
+    </div>  
+    <div style="display:flex;align-items:center;gap:12px;">  
+      ${t.rr?`<span style="font-size:11px;color:#4b5563">1:${t.rr}</span>`:""}  
+      <span style="font-size:16px;font-weight:700;color:${pnl>=0?"#00c07a":"#ef4444"};min-width:80px;text-align:right;">${f$(pnl)}</span>  
+      <button onclick="event.stopPropagation();if(confirm('Delete?')){deleteTrade(${t.id})}" style="background:#3b0d14;border:1px solid #ef4444;border-radius:6px;color:#ef4444;cursor:pointer;font-size:11px;padding:5px 9px;font-family:'Azeret Mono',monospace;">Delete</button>  
+    </div>  
+  </div>`;  
+}  
+  
+function renderTradesList(){  
+  return`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">  
+    <span style="font-size:12px;color:#4b5563;">${trades.length} trades total</span>  
+    ${trades.length>0?`<button onclick="if(confirm('Delete ALL?')){trades=[];scheduleSave();renderContent();}" style="background:#3b0d14;border:1px solid #ef4444;border-radius:6px;color:#ef4444;cursor:pointer;font-size:11px;padding:5px 12px;font-family:'Azeret Mono',monospace;">Delete All</button>`:""}  
+  </div>  
+  ${trades.length===0?`<div style="text-align:center;padding:60px 0;color:#1e2635;font-size:48px;">ð</div>`:trades.map(renderTRowHTML).join("")}`;  
+}  
+  
+// ââ Stats ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ  
+function renderStats(){  
+  const w=wins(),l=losses(),r=wr();  
+  const bm=byMonth();  
+  const allPnls=allPnL();  
+  const grossW=allPnls.filter(p=>p>0).reduce((a,b)=>a+b,0);  
+  const grossL=Math.abs(allPnls.filter(p=>p<0).reduce((a,b)=>a+b,0));  
+  const byYear=trades.reduce((acc,t)=>{  
+    const y=t.date.slice(0,4);  
+    if(!acc[y])acc[y]={pnl:0,wins:0,losses:0,trades:0,grossW:0,grossL:0};  
+    const p=tPnL(t);acc[y].pnl+=p;acc[y].trades++;  
+    if(p>0){acc[y].wins++;acc[y].grossW+=p;}else if(p<0){acc[y].losses++;acc[y].grossL+=Math.abs(p);}  
+    return acc;  
+  },{});  
+  
+  return`  
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px;">  
+    ${[["Total P&L",f$(tot()),tot()>=0?"#00c07a":"#ef4444"],["Win Rate",`${r}%`,"#60a5fa"],["Gross Profit",`+$${grossW.toFixed(0)}`,"#00c07a"],["Gross Loss",`-$${grossL.toFixed(0)}`,"#ef4444"]].map(([l,v,c])=>`  
+    <div class="stat-card"><div style="font-size:9px;color:#4b5563;margin-bottom:5px;text-transform:uppercase;">${l}</div><div style="font-size:18px;font-weight:700;color:${c}">${v}</div></div>`).join("")}  
+  </div>  
+  ${Object.keys(byYear).length>0?`  
+  <div class="sc" style="margin-bottom:14px;">  
+    <div style="font-size:10px;color:#4b5563;margin-bottom:14px;text-transform:uppercase;">Yearly Performance</div>  
+    ${Object.entries(byYear).sort((a,b)=>b[0].localeCompare(a[0])).map(([year,y])=>{  
+      const yWr=y.trades?Math.round((y.wins/y.trades)*100):0;  
+      const yPf=y.grossL>0?(y.grossW/y.grossL).toFixed(2):"â";  
+      return`<div style="background:#111827;border-radius:10px;padding:14px 18px;margin-bottom:10px;cursor:pointer;" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">  
+        <div style="display:flex;justify-content:space-between;align-items:center;">  
+          <div style="display:flex;align-items:center;gap:12px;">  
+            <span style="font-family:'Syne',sans-serif;font-size:16px;font-weight:800;color:#f9fafb;">${year}</span>  
+            <span style="font-size:11px;color:#4b5563;">${y.trades} trades Â· ${yWr}% WR</span>  
+          </div>  
+          <span style="font-size:18px;font-weight:700;color:${y.pnl>=0?"#00c07a":"#ef4444"};">${f$(y.pnl)}</span>  
+        </div>  
+      </div>  
+      <div style="display:none;background:#0d1117;border-radius:10px;padding:14px 18px;margin-top:-6px;margin-bottom:10px;border:1px solid #1e2635;">  
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:12px;">  
+          ${[["Gross Profit",`+$${y.grossW.toFixed(0)}`,"#00c07a"],["Gross Loss",`-$${y.grossL.toFixed(0)}`,"#ef4444"],["Profit Factor",yPf,"#f59e0b"],["W/L",`${y.wins}W/${y.losses}L`,"#60a5fa"]].map(([ll,vv,cc])=>`<div><div style="font-size:9px;color:#4b5563;margin-bottom:3px;text-transform:uppercase;">${ll}</div><div style="font-size:14px;font-weight:700;color:${cc};">${vv}</div></div>`).join("")}  
+        </div>  
+        <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:4px;">  
+          ${Array.from({length:12},(_,mi)=>{  
+            const mk=`${year}-${String(mi+1).padStart(2,"0")}`;  
+            const mTs=trades.filter(t=>t.date.startsWith(mk));  
+            const mP=mTs.reduce((s,t)=>s+tPnL(t),0);  
+            return`<div onclick="calYear=${year};calMonth=${mi};showTab('dash')" style="border-radius:6px;padding:6px 4px;text-align:center;cursor:pointer;background:${mTs.length>0?(mP>=0?"rgba(0,192,122,.13)":"rgba(239,68,68,.13)"):"#111827"};border:1px solid ${mTs.length>0?(mP>=0?"rgba(0,192,122,.3)":"rgba(239,68,68,.3)"):"#1e2635"};">  
+              <div style="font-size:9px;color:#4b5563;">${MONTH_NAMES[mi].slice(0,3)}</div>  
+              ${mTs.length>0?`<div style="font-size:9px;color:${mP>=0?"#00c07a":"#ef4444"};font-weight:600;">${mP>=0?"+":"-"}$${Math.abs(mP).toFixed(0)}</div>`:`<div style="font-size:9px;color:#1e2635;">â</div>`}  
+            </div>`;  
+          }).join("")}  
+        </div>  
+      </div>`;  
+    }).join("")}  
+  </div>`:""}  
+  <div class="sc" style="margin-bottom:14px;">  
+    <div style="font-size:10px;color:#4b5563;margin-bottom:10px;text-transform:uppercase;">Win / Loss</div>  
+    <div style="display:flex;gap:2px;height:16px;border-radius:3px;overflow:hidden;">  
+      <div style="background:#00c07a;width:${r}%;min-width:${r>0?2:0}px;"></div>  
+      <div style="background:#ef4444;flex:1;"></div>  
+    </div>  
+    <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:12px;">  
+      <span style="color:#00c07a;">${w}W (${r}%)</span><span style="color:#ef4444;">${l}L</span>  
+    </div>  
+  </div>  
+  <div class="sc" style="margin-bottom:14px;">  
+    <div style="font-size:10px;color:#4b5563;margin-bottom:10px;text-transform:uppercase;">Monthly P&L</div>  
+    ${Object.keys(bm).length===0?`<div style="color:#374151;font-size:13px;">No data</div>`:Object.entries(bm).sort((a,b)=>b[0].localeCompare(a[0])).map(([k,v])=>{  
+      const mTs=trades.filter(t=>t.date.startsWith(k));  
+      const mWr=mTs.length?Math.round((mTs.filter(t=>tPnL(t)>0).length/mTs.length)*100):0;  
+      return`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid #111827;">  
+        <div><span style="font-size:13px;color:#9ca3af;font-weight:600;">${k}</span><span style="font-size:11px;color:#374151;margin-left:10px;">${mTs.length} trades Â· ${mWr}% WR</span></div>  
+        <span style="font-size:15px;font-weight:700;color:${v>=0?"#00c07a":"#ef4444"};">${f$(v)}</span>  
+      </div>`;}).join("")}  
+  </div>  
+  <div class="sc">  
+    <div style="font-size:10px;color:#4b5563;margin-bottom:10px;text-transform:uppercase;">Mistake Frequency</div>  
+    ${["Over-leveraged","Moved SL","Chased entry","Ignored plan","Exited early","Held too long","Revenge trade"].map(m=>{  
+      const c=trades.filter(t=>(t.mistakes||[]).includes(m)).length;  
+      return`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">  
+        <span style="font-size:12px;color:#6b7280;">${m}</span>  
+        <div style="display:flex;align-items:center;gap:8px;">  
+          <div style="height:4px;width:100px;background:#111827;border-radius:2px;overflow:hidden;">  
+            <div style="height:100%;background:#ef4444;width:${trades.length?Math.min(100,(c/trades.length)*100):0}%;"></div>  
+          </div>  
+          <span style="font-size:12px;color:#4b5563;min-width:16px;">${c}</span>  
+        </div>  
+      </div>`;}).join("")}  
+  </div>`;  
+}  
+  
+// ââ Tags âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ  
+function renderTagsTab(){  
+  const ts=tags.map(tag=>{  
+    const tg=trades.filter(t=>(t.tags||[]).includes(tag.name));  
+    const tw=tg.filter(t=>tPnL(t)>0).length;  
+    return{...tag,count:tg.length,wr:tg.length?Math.round((tw/tg.length)*100):0,pnl:tg.reduce((s,t)=>s+tPnL(t),0)};  
+  }).sort((a,b)=>b.count-a.count);  
+  
+  return`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">  
+    <span style="font-size:10px;color:#4b5563;text-transform:uppercase;">Setup Tags</span>  
+    <button class="bp" style="padding:8px 16px;font-size:12px;" onclick="openTagModal()">+ New Tag</button>  
+  </div>  
+  ${ts.map(tag=>`  
+  <div class="sc" style="margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;">  
+    <div style="display:flex;align-items:center;gap:10px;">  
+      <div style="width:10px;height:10px;border-radius:50%;background:${tag.color};"></div>  
+      <span style="font-size:14px;color:#e5e7eb;font-weight:700;">${tag.name}</span>  
+      <span style="font-size:11px;color:#4b5563;">${tag.count} trades</span>  
+    </div>  
+    <div style="display:flex;gap:20px;align-items:center;">  
+      <div style="text-align:center;"><div style="font-size:9px;color:#4b5563;margin-bottom:2px;">WIN RATE</div><div style="font-size:16px;font-weight:700;color:${tag.wr>=50?"#00c07a":"#ef4444"};">${tag.count?`${tag.wr}%`:"â"}</div></div>  
+      <div style="text-align:center;"><div style="font-size:9px;color:#4b5563;margin-bottom:2px;">P&L</div><div style="font-size:16px;font-weight:700;color:${tag.pnl>=0?"#00c07a":"#ef4444"};">${tag.count?f$(tag.pnl):"â"}</div></div>  
+      <button onclick="deleteTag(${tag.id})" style="background:none;border:none;color:#374151;cursor:pointer;font-size:15px;" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='#374151'">â</button>  
+    </div>  
+  </div>`).join("")}  
+  ${ts.length===0?`<div style="text-align:center;padding:60px 0;color:#1e2635;font-size:13px;">No tags yet</div>`:""}`;  
+}  
+  
+// ââ Settings âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ  
+function renderSettings(){  
+  return`  
+  <div class="sc" style="max-width:500px;margin-bottom:12px;">  
+    <div style="font-size:10px;color:#4b5563;margin-bottom:10px;text-transform:uppercase;">âï¸ Cloud Storage</div>  
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">  
+      <div style="width:8px;height:8px;border-radius:50%;background:#00c07a;"></div>  
+      <span style="font-size:12px;color:#00c07a;">${trades.length} ×¢×¡×§×××ª ×©×××¨××ª ××¢× ×</span>  
+    </div>  
+    <div style="font-size:12px;color:#4b5563;line-height:1.6;">×× ×ª×× ×× ×©×××¨×× ×-Supabase ×× ×××©×× ××× ×××©××¨ ×¢× ×××ª× ×©× ××©×ª××© ××¡××¡××.</div>  
+  </div>  
+  <div class="sc" style="max-width:500px;margin-bottom:12px;">  
+    <div style="font-size:10px;color:#4b5563;margin-bottom:10px;text-transform:uppercase;">ð¥ ××××× ×××§×××¥ ×××©×</div>  
+    <div style="font-size:12px;color:#6b7280;margin-bottom:12px;line-height:1.6;">×¤×ª× ×§×××¥ ×× ××××ª× ×××©×/××¤××¤× ×©×× ××©×ª××©×ª ×××¨×¡× ×××©× × ××××¥ ×××××.</div>  
+    <button class="bp" style="padding:9px 20px;font-size:12px;" onclick="importFromLocalStorage()">â ×××× ××××¤××¤× ×××</button>  
+    <div id="import-status" style="margin-top:8px;font-size:12px;height:18px;"></div>  
+  </div>  
+  <div class="sc" style="max-width:500px;margin-bottom:12px;">  
+    <div style="font-size:10px;color:#4b5563;margin-bottom:10px;text-transform:uppercase;">Export CSV</div>  
+    <button class="bp" style="padding:8px 18px;font-size:12px;" onclick="exportCSV()">â Export CSV</button>  
+  </div>  
+  <div class="sc" style="max-width:500px;">  
+    <div style="font-size:10px;color:#4b5563;margin-bottom:10px;text-transform:uppercase;">Danger Zone</div>  
+    <button onclick="if(confirm('Delete ALL trades permanently?')){trades=[];scheduleSave();renderContent();}" style="background:#3b0d14;border:1px solid #ef4444;border-radius:8px;color:#ef4444;padding:9px 18px;cursor:pointer;font-size:12px;font-family:'Azeret Mono',monospace;">Clear All Trades</button>  
+  </div>`;  
+}  
+  
+function importFromLocalStorage(){  
+  try{  
+    let imported=false;  
+    const t=localStorage.getItem("tj_trades_v2");  
+    const tg=localStorage.getItem("tj_tags_v2");  
+    const dn=localStorage.getItem("tj_notes_v2");  
+    if(t){trades=JSON.parse(t);imported=true;}  
+    if(tg){tags=JSON.parse(tg);imported=true;}  
+    if(dn){dayNotes=JSON.parse(dn);imported=true;}  
+    if(imported){  
+      scheduleSave();renderContent();  
+      const el=document.getElementById("import-status");  
+      if(el){el.style.color="#00c07a";el.textContent=`â ××××× ${trades.length} ×¢×¡×§×××ª!`;}  
+    } else {  
+      const el=document.getElementById("import-status");  
+      if(el){el.style.color="#f59e0b";el.textContent="â  ×× × ××¦×× × ×ª×× ××";}  
+    }  
+  }catch(e){  
+    const el=document.getElementById("import-status");  
+    if(el){el.style.color="#ef4444";el.textContent="â  ×©××××: "+e.message;}  
+  }  
+}  
+  
+function exportCSV(){  
+  const h=["Date","Time","Instrument","Direction","Entry","Contracts","SL","TP","P&L","RR","Tags","Events","Notes"];  
+  const rows=trades.map(t=>[t.date,t.time||"",t.instrument,t.direction,t.entryPrice,t.totalContracts,t.sl||"",t.tp||"",tPnL(t).toFixed(2),t.rr||"",(t.tags||[]).join(";"),(t.events||[]).join(";"),(t.notes||"").replace(/\n/g," ")]);  
+  const csv=[h,...rows].map(r=>r.map(v=>`"${v}"`).join(",")).join("\n");  
+  const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download=`trades_${td()}.csv`;a.click();  
+}  
+  
+function deleteTrade(id){trades=trades.filter(t=>t.id!==id);scheduleSave();renderContent();}  
+function deleteTag(id){tags=tags.filter(t=>t.id!==id);scheduleSave();renderContent();}  
+function closeModal(){document.getElementById("modal-area").innerHTML="";}  
+  
+// ââ Day Popup ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ  
+function openDayPopup(dateKey){  
+  const dayTrades=trades.filter(t=>t.date===dateKey);  
+  const dayPnl=dayTrades.reduce((s,t)=>s+tPnL(t),0);  
+  const d=new Date(dateKey+"T00:00:00");  
+  const dateLabel=d.toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric",year:"numeric"});  
+  const currentNote=dayNotes[dateKey]||"";  
+  
+  const tradeRows=dayTrades.length===0  
+    ?`<div style="text-align:center;padding:20px 0;color:#374151;font-size:13px;">No trades on this day</div>`  
+    :dayTrades.map(t=>{  
+      const pnl=tPnL(t);  
+      return`<div style="background:#111827;border-radius:12px;padding:16px;margin-bottom:12px;border:1px solid #1e2635;">  
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">  
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">  
+            <span style="font-size:11px;padding:2px 8px;border-radius:4px;background:${t.instrument==="ES"?"#1d3461":"#1a1040"};color:${t.instrument==="ES"?"#60a5fa":"#a78bfa"}">${t.instrument}</span>  
+            <span style="font-size:11px;padding:2px 8px;border-radius:4px;background:${t.direction==="Long"?"#052e16":"#3b0d14"};color:${t.direction==="Long"?"#00c07a":"#ef4444"}">${t.direction}</span>  
+            <span style="font-size:11px;color:#555">${t.time||""}</span>  
+          </div>  
+          <div style="display:flex;align-items:center;gap:10px;">  
+            <span style="font-size:18px;font-weight:700;color:${pnl>=0?"#00c07a":"#ef4444"}">${f$(pnl)}</span>  
+            <button onclick="closeModal();openEdit(${t.id})" style="background:none;border:1px solid #1e2635;border-radius:6px;color:#4b5563;cursor:pointer;font-size:11px;padding:4px 8px;font-family:'Azeret Mono',monospace;">âï¸ Edit</button>  
+            <button onclick="if(confirm('Delete?')){deleteTrade(${t.id});openDayPopup('${dateKey}')}" style="background:#3b0d14;border:1px solid #ef4444;border-radius:6px;color:#ef4444;cursor:pointer;font-size:11px;padding:4px 8px;font-family:'Azeret Mono',monospace;">Delete</button>  
+          </div>  
+        </div>  
+        ${t.what_went_well?`<div style="padding:8px 12px;background:#052e16;border-radius:6px;font-size:12px;color:#00c07a;margin-top:6px;">â ${t.what_went_well}</div>`:""}  
+        ${t.notes?`<div style="padding:8px 12px;background:#0d1117;border-radius:6px;font-size:12px;color:#6b7280;margin-top:6px;">ð ${t.notes}</div>`:""}  
+      </div>`;  
+    }).join("");  
+  
+  document.getElementById("modal-area").innerHTML=`  
+  <div class="modal-bg" onclick="if(event.target===this)closeModal()">  
+    <div class="modal-box" style="max-width:640px;">  
+      <div style="padding:22px 26px 0;display:flex;justify-content:space-between;align-items:center;">  
+        <div>  
+          <div style="font-family:'Syne',sans-serif;font-size:17px;font-weight:800;color:#f9fafb;">${dateLabel}</div>  
+          ${dayTrades.length>0?`<div style="font-size:13px;margin-top:4px;color:${dayPnl>=0?"#00c07a":"#ef4444"};font-weight:700;">${f$(dayPnl)} Â· ${dayTrades.length} trade${dayTrades.length>1?"s":""}</div>`:`<div style="font-size:12px;color:#374151;margin-top:4px;">No trades</div>`}  
+        </div>  
+        <button onclick="closeModal()" style="background:none;border:none;color:#374151;cursor:pointer;font-size:26px;line-height:1;padding:4px 8px;">Ã</button>  
+      </div>  
+      <div style="padding:16px 26px 0;">  
+        <div class="fl" style="margin-bottom:8px;">ð Day Note</div>  
+        <div style="display:flex;gap:8px;align-items:flex-start;">  
+          <textarea id="day-note-input" placeholder="××¢×¨×ª ××× â × ××ª×× ×©××§, ×¡××× ××× ××¡××¨â¦"  
+            style="flex:1;background:#111827;border:1px solid #1e2635;border-radius:8px;color:#e5e7eb;padding:10px 14px;font-size:13px;outline:none;font-family:'Azeret Mono',monospace;resize:vertical;min-height:60px;line-height:1.5;">${currentNote}</textarea>  
+  
+```  
+      <button onclick="saveDayNote('${dateKey}')" class="bp" style="padding:10px 16px;font-size:12px;white-space:nowrap;">×©×××¨</button>  
+    </div>  
+    <div id="note-saved" style="font-size:11px;color:#374151;margin-top:6px;height:16px;"></div>  
+  </div>  
+  <div style="padding:16px 26px 26px;">${tradeRows}</div>  
+</div>  
+```  
+  
+  </div>`;  
+}  
+  
+function saveDayNote(dateKey){  
+const el=document.getElementById(âday-note-inputâ);  
+if(!el)return;  
+const note=el.value.trim();  
+if(note)dayNotes[dateKey]=note;  
+else delete dayNotes[dateKey];  
+scheduleSave();  
+const ns=document.getElementById(ânote-savedâ);  
+if(ns){ns.style.color=â#00c07aâ;ns.textContent=ââ ××¢×¨× × ×©××¨×â;setTimeout(()=>{ns.textContent=ââ;},2000);}  
+renderContent();  
+}  
+  
+// ââ Trade Modal ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ  
+let modalData={};  
+let editingId=null;  
+const emptyForm=()=>({isHistorical:false,date:td(),time:nt(),instrument:âESâ,contractTypeId:âES_miniâ,direction:âLongâ,entryPrice:ââ,totalContracts:â1â,exits:[be()],sl:ââ,tp:ââ,rr:null,tags:[],events:[],emotion_before:ââ,emotion_during:ââ,followed_plan:null,mistakes:[],what_went_well:ââ,what_to_improve:ââ,notes:ââ});  
+  
+function openAdd(){editingId=null;modalData=emptyForm();showModal(1);}  
+function openBT(){editingId=null;modalData={â¦emptyForm(),isHistorical:true,date:ââ,time:ââ};showModal(1);}  
+function openEdit(id){  
+const t=trades.find(x=>x.id===id);if(!t)return;  
+editingId=id;  
+const exits=t.exits?.length>0?t.exits:[{id:Date.now(),exitPrice:t.exitPrice||ââ,contracts:t.contracts||ââ,pnl:t.pnl}];  
+modalData={â¦emptyForm(),â¦t,exits,tp:t.tp||ââ,events:t.events||[]};  
+showModal(1);  
+}  
+  
+function collectFormValues(){  
+[âdateâ,âtimeâ,âentryPriceâ,âtotalContractsâ,âslâ,âtpâ,âwhat_went_wellâ,âwhat_to_improveâ,ânotesâ].forEach(f=>{  
+const el=document.getElementById(âf_â+f);if(el)modalData[f]=el.value;  
+});  
+modalData.exits.forEach((ex,i)=>{  
+const ep=document.getElementById(âexit_price_â+i);  
+const ec=document.getElementById(âexit_con_â+i);  
+if(ep)modalData.exits[i].exitPrice=ep.value;  
+if(ec)modalData.exits[i].contracts=ec.value;  
+});  
+}  
+  
+function calcModalPnL(){  
+const spec=gs(modalData.instrument,modalData.contractTypeId);  
+modalData.exits=modalData.exits.map(l=>({â¦l,pnl:lp(modalData.entryPrice,l.exitPrice,l.contracts,spec,modalData.direction)}));  
+modalData.rr=calcRR(modalData.entryPrice,modalData.sl,modalData.tp,modalData.direction);  
+}  
+  
+function showModal(step){  
+calcModalPnL();  
+const tpnl=modalData.exits.reduce((s,l)=>s+(l.pnl||0),0);  
+const uc=modalData.exits.reduce((s,l)=>s+(parseFloat(l.contracts)||0),0);  
+const cok=uc===0||Math.abs(uc-(parseFloat(modalData.totalContracts)||0))<0.001;  
+let stepHtml=ââ;  
+  
+if(step===1){  
+const ctBtns=(CT[modalData.instrument]||[]).map(c=>`<button class="pill${modalData.contractTypeId===c.id?" on":""}" onclick="collectFormValues();modalData.contractTypeId='${c.id}';showModal(1);">${c.label}</button>`).join(ââ);  
+const exitRows=modalData.exits.map((ex,i)=>` <div style="display:grid;grid-template-columns:1fr 1fr 36px;gap:10px;align-items:end;margin-bottom:8px;"> <div>${i===0?'<span class="fl">Exit Price</span>':""}<input id="exit_price_${i}" class="inp" type="number" step="0.25" value="${ex.exitPrice}" placeholder="5010.00"/></div> <div>${i===0?'<span class="fl">Contracts</span>':""}<input id="exit_con_${i}" class="inp" type="number" min="1" value="${ex.contracts}" placeholder="1"/></div> <div style="padding-top:${i===0?22:0}px;">${modalData.exits.length>1?`<button onclick="collectFormValues();modalData.exits.splice(${i},1);showModal(1);" style="background:none;border:none;color:#374151;cursor:pointer;font-size:16px;padding:8px 4px;">â</button>`:""}</div> </div>`).join(ââ);  
+const evtBtns=EVENTS.map(ev=>`<button onclick="collectFormValues();const i=modalData.events.indexOf('${ev.id}');if(i>=0)modalData.events.splice(i,1);else modalData.events.push('${ev.id}');showModal(1);" title="${ev.desc}" style="padding:4px 8px;border-radius:4px;font-size:10px;font-weight:700;cursor:pointer;font-family:'Azeret Mono',monospace;background:${modalData.events.includes(ev.id)?ev.bg:"transparent"};color:${modalData.events.includes(ev.id)?ev.color:"#555"};border:1px solid ${modalData.events.includes(ev.id)?ev.color:"#1e2635"};">${ev.label}</button>`).join(ââ);  
+  
+```  
+stepHtml=`  
+<div style="font-size:10px;color:#4b5563;margin-bottom:14px;text-transform:uppercase;">Trade Details</div>  
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">  
+  <div><span class="fl">Date</span><input id="f_date" class="inp" type="date" value="${modalData.date}"/></div>  
+  <div><span class="fl">Time</span><input id="f_time" class="inp" type="time" value="${modalData.time}"/></div>  
+</div>  
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;align-items:center;">  
+  ${INST.map(i=>`<button class="pill${modalData.instrument===i?" on":""}" onclick="collectFormValues();modalData.instrument='${i}';modalData.contractTypeId='${(CT[i]||[])[0]?.id||""}';showModal(1);">${i}</button>`).join("")}  
+  <div style="width:1px;background:#1e2635;height:24px;"></div>  
+  ${ctBtns}  
+  <div style="width:1px;background:#1e2635;height:24px;"></div>  
+  ${DIRS.map(d=>`<button class="pill${modalData.direction===d?(d==="Long"?" g":" r"):""}" onclick="collectFormValues();modalData.direction='${d}';showModal(1);">${d}</button>`).join("")}  
+</div>  
+<div style="background:#111827;border-radius:8px;padding:8px 14px;font-size:11px;color:#4b5563;margin-bottom:14px;">${(gs(modalData.instrument,modalData.contractTypeId)).label} â $${(gs(modalData.instrument,modalData.contractTypeId)).tv}/tick</div>  
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">  
+  <div><span class="fl">Entry Price</span><input id="f_entryPrice" class="inp" type="number" step="0.25" value="${modalData.entryPrice}" placeholder="5000.00"/></div>  
+  <div><span class="fl">Total Contracts</span><input id="f_totalContracts" class="inp" type="number" min="1" value="${modalData.totalContracts}"/></div>  
+</div>  
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">  
+  <div><span class="fl">Stop Loss</span><input id="f_sl" class="inp" type="number" step="0.25" value="${modalData.sl}" placeholder="0.00"/></div>  
+  <div><span class="fl">Take Profit</span><input id="f_tp" class="inp" type="number" step="0.25" value="${modalData.tp}" placeholder="0.00"/></div>  
+</div>  
+<div style="margin-bottom:14px;">  
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">  
+    <span class="fl" style="margin:0;">Exits${modalData.exits.length>1?` <span style="color:#8b5cf6">(${modalData.exits.length} partial)</span>`:""}</span>  
+    <button onclick="collectFormValues();modalData.exits.push({id:Date.now(),exitPrice:'',contracts:'',pnl:null});showModal(1);" style="background:none;border:1px solid #1e2635;border-radius:6px;color:#6b7280;cursor:pointer;font-size:11px;padding:4px 12px;font-family:'Azeret Mono',monospace;">+ Split Exit</button>  
+  </div>  
+  ${exitRows}  
+  ${!cok&&modalData.exits.length>1?`<div style="font-size:11px;color:#f59e0b;margin-top:4px;">â  Exits (${uc}) â  Total (${modalData.totalContracts})</div>`:""}  
+</div>  
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">  
+  ${[["P&L",tpnl!==0?f$(tpnl):"â",tpnl===0?"#374151":tpnl>0?"#00c07a":"#ef4444"],["R:R",modalData.rr!==null?`1:${modalData.rr}`:"â","#374151"]].map(([l,v,c])=>`  
+  <div style="background:#111827;border:1px solid ${c}33;border-radius:10px;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;">  
+    <span style="font-size:11px;color:#4b5563;">${l}</span>  
+    <span style="font-size:18px;font-weight:700;color:${c};">${v}</span>  
+  </div>`).join("")}  
+</div>  
+<div style="margin-bottom:14px;">  
+  <span class="fl" style="margin-bottom:8px;">Economic Events</span>  
+  <div style="display:flex;flex-wrap:wrap;gap:8px;">${evtBtns}</div>  
+</div>  
+<span class="fl" style="margin-bottom:8px;">Setup Tags</span>  
+<div style="display:flex;flex-wrap:wrap;gap:8px;">  
+  ${tags.map(tag=>`<button onclick="collectFormValues();const i=modalData.tags.indexOf('${tag.name}');if(i>=0)modalData.tags.splice(i,1);else modalData.tags.push('${tag.name}');showModal(1);" style="padding:6px 12px;border-radius:6px;border:1px solid ${modalData.tags.includes(tag.name)?tag.color:"#1e2635"};background:${modalData.tags.includes(tag.name)?tag.color+"22":"transparent"};color:${modalData.tags.includes(tag.name)?tag.color:"#4b5563"};cursor:pointer;font-size:12px;font-family:'Azeret Mono',monospace;">${tag.name}</button>`).join("")}  
+</div>`;  
+```  
+  
+}  
+else if(step===2){  
+stepHtml=` <div style="font-size:10px;color:#4b5563;margin-bottom:14px;text-transform:uppercase;">Psychology Check</div> ${[{k:"emotion_before",l:"Emotion before entry"},{k:"emotion_during",l:"Emotion during trade"}].map(f=>`  
+<div style="margin-bottom:16px;"><span class="fl">${f.l}</span>  
+<div style="display:flex;flex-wrap:wrap;gap:8px;">${EMO.map(e=>`<button class="pill${modalData[f.k]===e?" on":""}" onclick="modalData['${f.k}']='${e}';showModal(2);">${e}</button>`).join(ââ)}</div></div>`).join("")} <div style="margin-bottom:16px;"><span class="fl">Followed the plan?</span> <div style="display:flex;gap:10px;"> <button class="pill${modalData.followed_plan===true?" g":""}" onclick="modalData.followed_plan=true;showModal(2);">â Yes</button> <button class="pill${modalData.followed_plan===false?" r":""}" onclick="modalData.followed_plan=false;showModal(2);">â No</button> </div></div> <span class="fl">Mistakes</span> <div style="display:flex;flex-wrap:wrap;gap:8px;">${MIS.map(m=>`<button class=âpill${modalData.mistakes.includes(m)?â râ:ââ}â onclick=âconst i=modalData.mistakes.indexOf(â${m}â);if(i>=0)modalData.mistakes.splice(i,1);else modalData.mistakes.push(â${m}â);showModal(2);â>${m}</button>`).join("")}</div>`;  
+}  
+else if(step===3){  
+stepHtml=` <div style="font-size:10px;color:#4b5563;margin-bottom:14px;text-transform:uppercase;">Written Reflection</div> ${[{k:"what_went_well",l:"â What went well?",p:"Execution, disciplineâ¦"},{k:"what_to_improve",l:"ð What to improve?",p:"Entry timing, sizingâ¦"},{k:"notes",l:"ð Notes",p:"Market contextâ¦"}].map(f=>`  
+<div style="margin-bottom:14px;"><span class="fl">${f.l}</span>  
+<textarea id="f_${f.k}" class="inp ta" placeholder="${f.p}">${modalData[f.k]||ââ}</textarea></div>`).join("")}`;  
+}  
+else if(step===4){  
+const tpnl2=modalData.exits.reduce((s,l)=>s+(l.pnl||0),0);  
+stepHtml=` <div style="font-size:10px;color:#4b5563;margin-bottom:14px;text-transform:uppercase;">Review & Save</div> <div style="background:#111827;border-radius:12px;padding:18px;margin-bottom:14px;"> <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;"> ${[["Date",`${modalData.date} ${modalData.time}`],["Instrument",modalData.instrument],["Direction",modalData.direction],["Entry",modalData.entryPrice||"â"],["Contracts",modalData.totalContracts],["P&L",tpnl2!==0?f$(tpnl2):"â"]].map(([l,v])=>`  
+<div><div style="font-size:10px;color:#4b5563;margin-bottom:3px;">${l}</div><div style="font-size:13px;color:#e5e7eb;font-weight:600;">${v}</div></div>`).join("")} </div> ${modalData.exits.filter(e=>e.exitPrice).map((l,i)=>`  
+<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:5px;">  
+<span style="color:#6b7280;">Exit ${i+1}: @${l.exitPrice} Ã ${l.contracts}c</span>  
+<span style=âcolor:${(l.pnl||0)>=0?â#00c07aâ:â#ef4444â};font-weight:600;â>${f$(l.pnl||0)}</span>  
+</div>`).join("")} </div>`;  
+}  
+  
+document.getElementById(âmodal-areaâ).innerHTML=`  
+  
+  <div class="modal-bg" onclick="if(event.target===this)closeModal()">  
+    <div class="modal-box">  
+      <div style="padding:22px 26px 0;display:flex;justify-content:space-between;align-items:flex-start;">  
+        <div>  
+          <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#f9fafb;">${editingId?"Edit Trade":modalData.isHistorical?"âª Backtest Entry":"Post-Trade Reflection"}</div>  
+          <div style="font-size:11px;color:#374151;margin-top:3px;">Step ${step} of 4</div>  
+        </div>  
+        <button onclick="closeModal()" style="background:none;border:none;color:#374151;cursor:pointer;font-size:26px;line-height:1;padding:4px 8px;">Ã</button>  
+      </div>  
+      <div style="height:2px;background:#1e2635;margin:14px 26px 20px;">  
+        <div style="height:100%;background:linear-gradient(90deg,#3b82f6,#8b5cf6);width:${(step/4)*100}%;border-radius:1px;"></div>  
+      </div>  
+      <div style="padding:0 26px 26px;">  
+        ${stepHtml}  
+        <div style="display:flex;justify-content:space-between;margin-top:22px;padding-top:16px;border-top:1px solid #111827;">  
+          ${step>1?`<button class="pill" onclick="collectFormValues();showModal(${step-1});">â Back</button>`:"<span></span>"}  
+          ${step<4?`<button class="bp" onclick="collectFormValues();calcModalPnL();showModal(${step+1});">Continue â</button>`:`<button class="bs" onclick="saveFromModal();">â Save Trade</button>`}  
+        </div>  
+      </div>  
+    </div>  
+  </div>`;  
+}  
+  
+function saveFromModal(){  
+collectFormValues();calcModalPnL();  
+const pnl=modalData.exits.reduce((s,l)=>s+(l.pnl||0),0);  
+const trade={â¦modalData,id:editingId||Date.now(),pnl};  
+if(editingId)trades=trades.map(t=>t.id===editingId?trade:t);  
+else trades=[trade,â¦trades].sort((a,b)=>b.date.localeCompare(a.date)||(b.time||ââ).localeCompare(a.time||ââ));  
+scheduleSave();  
+closeModal();  
+renderContent();  
+}  
+  
+// ââ Tag Modal ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ  
+let newTagColor=TCOLORS[0];  
+function openTagModal(){  
+newTagColor=TCOLORS[0];  
+document.getElementById(âmodal-areaâ).innerHTML=`  
+  
+  <div class="modal-bg" onclick="if(event.target===this)closeModal()">  
+    <div class="modal-box" style="max-width:420px;">  
+      <div style="padding:24px;">  
+        <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:800;color:#f9fafb;margin-bottom:20px;">Create Setup Tag</div>  
+        <span class="fl">Tag Name</span>  
+        <input id="new-tag-name" class="inp" style="margin-bottom:16px;" placeholder="e.g. Opening Driveâ¦"/>  
+        <span class="fl" style="margin-bottom:10px;">Color</span>  
+        <div style="display:flex;gap:10px;margin-bottom:22px;">  
+          ${TCOLORS.map((c,i)=>`<div id="tc${i}" onclick="newTagColor='${c}';document.querySelectorAll('[id^=tc]').forEach(x=>x.style.border='2px solid transparent');this.style.border='2px solid white';" style="width:28px;height:28px;border-radius:50%;background:${c};cursor:pointer;border:2px solid transparent;transition:border .15s;"></div>`).join("")}  
+        </div>  
+        <div style="display:flex;gap:10px;">  
+          <button class="pill" onclick="closeModal()">Cancel</button>  
+          <button class="bp" onclick="const n=document.getElementById('new-tag-name').value.trim();if(!n)return;tags.push({id:Date.now(),name:n,color:newTagColor});scheduleSave();closeModal();renderContent();">Create Tag</button>  
+        </div>  
+      </div>  
+    </div>  
+  </div>`;  
+}  
+  
+// ââ Start ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ  
+init();  
+</script>  
+  
+</body>  
+</html>  
