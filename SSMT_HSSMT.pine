@@ -393,15 +393,20 @@ anyTkCHi = nqTkCHi or esTkCHi or ymTkCHi
 
 divWBear = baseOK and anyTkHi  and not (nqTkHi  and esTkHi)
 divCBear = baseOK and anyTkCHi and not (nqTkCHi and esTkCHi)
-divWBull = baseOK and (nqTkLo  or esTkLo)  and not (nqTkLo  and esTkLo)
-divCBull = baseOK and (nqTkCLo or esTkCLo) and not (nqTkCLo and esTkCLo)
+divWBull = baseOK and (nqTkLo  or esTkLo)  and not (nqTkLo  and esTkLo  and ymTkLo)
+divCBull = baseOK and (nqTkCLo or esTkCLo) and not (nqTkCLo and esTkCLo and ymTkCLo)
 
-// SSMT נפסל אם שני החזקים כבר סגרו לאותו כיוון (הפך למהלך סגירה מלא)
+// SSMT נפסל אם הנכסים סגרו לאותו כיוון (הפך למהלך סגירה מלא)
+// דובי: מספיק ששני החזקים סגרו (YM חסר-חשיבות בגבוהים).
+// שורי: נדרשים כל השלושה (כולל YM) כדי לבטל.
 validWBear = divWBear and not (nqTkCHi and esTkCHi)
-validWBull = divWBull and not (nqTkCLo and esTkCLo)
+validWBull = divWBull and not (nqTkCLo and esTkCLo and ymTkCLo)
 
 bearOK = not requireTrueOpen or (not na(trueOpenPrice) and close > trueOpenPrice)
 bullOK = not requireTrueOpen or (not na(trueOpenPrice) and close < trueOpenPrice)
+
+// שבירות 4H ו-1H לא נוצרות ביום שישי (סוף השבוע המסחרי לפי QT)
+friBlock = (tfClass == 5 or tfClass == 4) and tdDow == dayofweek.friday
 
 // ═══════════════════════════════════════════════════════════════════
 // מחרוזת נכסים — בשורי YM מושמט
@@ -465,12 +470,16 @@ var float  bullYPos = na
 var int    bullSeq  = 0
 var float  bullWFrozNQ = na
 var float  bullWFrozES = na
+var float  bullWFrozYM = na
 var float  bullCFrozNQ = na
 var float  bullCFrozES = na
+var float  bullCFrozYM = na
 var bool   bullWTkNQ = false
 var bool   bullWTkES = false
+var bool   bullWTkYM = false
 var bool   bullCTkNQ = false
 var bool   bullCTkES = false
+var bool   bullCTkYM = false
 
 var int seqCounter = 0
 
@@ -498,24 +507,28 @@ if bearType != 0
         bearType := 0
         bearStr  := ""
 
-// שורי: מת כששני החזקים (NQ+ES) לקחו את אותו נמוך שהוקפא בלידה.
+// שורי: מת כשכל שלושת הנכסים לקחו את אותו נמוך שהוקפא בלידה (YM משלים).
 if bullType != 0
     if not na(bullWFrozNQ) and nqL < bullWFrozNQ
         bullWTkNQ := true
     if not na(bullWFrozES) and esL < bullWFrozES
         bullWTkES := true
+    if not na(bullWFrozYM) and ymL < bullWFrozYM
+        bullWTkYM := true
     if barstate.isconfirmed
         if not na(bullCFrozNQ) and nqC < bullCFrozNQ
             bullCTkNQ := true
         if not na(bullCFrozES) and esC < bullCFrozES
             bullCTkES := true
-    dieBull = bullType == 1 ? ((bullWTkNQ and bullWTkES) or (barstate.isconfirmed and bullCTkNQ and bullCTkES)) : (barstate.isconfirmed and bullCTkNQ and bullCTkES)
+        if not na(bullCFrozYM) and ymC < bullCFrozYM
+            bullCTkYM := true
+    dieBull = bullType == 1 ? ((bullWTkNQ and bullWTkES and bullWTkYM) or (barstate.isconfirmed and bullCTkNQ and bullCTkES and bullCTkYM)) : (barstate.isconfirmed and bullCTkNQ and bullCTkES and bullCTkYM)
     if dieBull
         bullType := 0
         bullStr  := ""
 
 // ── רישום שבירות חדשות בסגירת נר ──
-if barstate.isconfirmed and tfClass != 0
+if barstate.isconfirmed and tfClass != 0 and not friBlock
 
     newBearType = 0
     newBearStr  = ""
@@ -551,6 +564,9 @@ if barstate.isconfirmed and tfClass != 0
             bearWTkES := esTkHi
             bearCTkNQ := nqTkCHi
             bearCTkES := esTkCHi
+            // שבירה נגדית מוחקת לגמרי את השורית הקיימת
+            bullType := 0
+            bullStr  := ""
 
     newBullType = 0
     newBullStr  = ""
@@ -581,10 +597,17 @@ if barstate.isconfirmed and tfClass != 0
             bullWFrozES := esRL
             bullCFrozNQ := nqRLC
             bullCFrozES := esRLC
+            bullWFrozYM := ymRL
+            bullCFrozYM := ymRLC
             bullWTkNQ := nqTkLo
             bullWTkES := esTkLo
+            bullWTkYM := ymTkLo
             bullCTkNQ := nqTkCLo
             bullCTkES := esTkCLo
+            bullCTkYM := ymTkCLo
+            // שבירה נגדית מוחקת לגמרי את הדובית הקיימת
+            bearType := 0
+            bearStr  := ""
 
 // ═══════════════════════════════════════════════════════════════════
 // בחירת מה מוצג
