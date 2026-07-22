@@ -319,10 +319,9 @@ else
         ymCLCb := bar_index
 
 // ═══════════════════════════════════════════════════════════════════
-// דגלי "לקיחה" מצטברים לאורך מחזור הייחוס
-// ─ פתיל: מתעדכן תוך-נרי (ביטול SSMT מיידי)
-// ─ סגירה: מתעדכן רק בסגירת נר (ביטול HSSMT בסגירה בלבד)
-// כל דגל אומר: "האם הנכס לקח את הרמה בשלב כלשהו מאז תחילת המחזור"
+// דגלי "לקיחה" מצטברים לאורך מחזור הייחוס (לזיהוי שבירות חדשות)
+// ─ פתיל: מתעדכן תוך-נרי
+// ─ סגירה: מתעדכן רק בסגירת נר
 // ═══════════════════════════════════════════════════════════════════
 
 var bool nqTkHi  = false
@@ -352,7 +351,6 @@ if newRefCycle
     ymTkCHi := false
     ymTkCLo := false
 
-// לקיחת פתיל — מצטבר, תוך-נרי
 nqTkHi := nqTkHi or (not na(nqRH) and nqH > nqRH)
 nqTkLo := nqTkLo or (not na(nqRL) and nqL < nqRL)
 esTkHi := esTkHi or (not na(esRH) and esH > esRH)
@@ -360,7 +358,6 @@ esTkLo := esTkLo or (not na(esRL) and esL < esRL)
 ymTkHi := ymTkHi or (not na(ymRH) and ymH > ymRH)
 ymTkLo := ymTkLo or (not na(ymRL) and ymL < ymRL)
 
-// לקיחת סגירה — מצטבר, רק בסגירת נר (למניעת ריפיינט תוך-נרי)
 if barstate.isconfirmed
     nqTkCHi := nqTkCHi or (not na(nqRHC) and nqC > nqRHC)
     nqTkCLo := nqTkCLo or (not na(nqRLC) and nqC < nqRLC)
@@ -375,8 +372,6 @@ if barstate.isconfirmed
 
 dataReady = not na(nqRH) and not na(esRH) and not na(ymRH) and not na(nqRL) and not na(esRL) and not na(ymRL) and not na(nqRHC) and not na(esRHC) and not na(ymRHC) and not na(nqRLC) and not na(esRLC) and not na(ymRLC)
 
-// שבוע מת רלוונטי רק ל-4H (סייקל חודשי, שבוע↔שבוע). נחסם גם אם השבוע הנוכחי מת
-// וגם אם שבוע הייחוס (הקודם) היה מת — כי אז ההשוואה חוצת-הגבול לא תקפה.
 var bool refDeadWk = false
 if newRefCycle
     refDeadWk := isDeadWeek[1]
@@ -385,22 +380,25 @@ weekBlocked = tfClass == 5 and blockDeadWeek and (isDeadWeek or refDeadWk)
 cycleOK   = not weekBlocked
 baseOK    = dataReady and cycleOK
 
-cntWHi = (nqTkHi ? 1 : 0) + (esTkHi ? 1 : 0) + (ymTkHi ? 1 : 0)
-cntWLo = (nqTkLo ? 1 : 0) + (esTkLo ? 1 : 0) + (ymTkLo ? 1 : 0)
-cntCHi = (nqTkCHi ? 1 : 0) + (esTkCHi ? 1 : 0) + (ymTkCHi ? 1 : 0)
-cntCLo = (nqTkCLo ? 1 : 0) + (esTkCLo ? 1 : 0) + (ymTkCLo ? 1 : 0)
-
 // ═══════════════════════════════════════════════════════════════════
-// זיהוי סטיות
+// זיהוי סטיות — חוק YM אסימטרי
+// ─ דובי (גבוהים): הליבה היא NQ מול ES. YM חלש וצפוי לא לקחת גבוה,
+//   לכן: אם *שני* החזקים לקחו → הם מסכימים → אין סטייה. YM לבד = חזק.
+// ─ שורי (נמוכים): YM חלש ומוביל למטה, לקיחתו צפויה ומושמטת.
+//   נדרש ש-NQ *או* ES ייקח, ומתבטל כששניהם לקחו.
 // ═══════════════════════════════════════════════════════════════════
 
-divWBear = baseOK and cntWHi > 0 and cntWHi < 3
-divCBear = baseOK and cntCHi > 0 and cntCHi < 3
-divWBull = baseOK and cntWLo > 0 and cntWLo < 3 and (esTkLo or nqTkLo)
-divCBull = baseOK and cntCLo > 0 and cntCLo < 3 and (esTkCLo or nqTkCLo)
+anyTkHi  = nqTkHi  or esTkHi  or ymTkHi
+anyTkCHi = nqTkCHi or esTkCHi or ymTkCHi
 
-validWBear = divWBear and cntCHi != 3
-validWBull = divWBull and cntCLo != 3
+divWBear = baseOK and anyTkHi  and not (nqTkHi  and esTkHi)
+divCBear = baseOK and anyTkCHi and not (nqTkCHi and esTkCHi)
+divWBull = baseOK and (nqTkLo  or esTkLo)  and not (nqTkLo  and esTkLo)
+divCBull = baseOK and (nqTkCLo or esTkCLo) and not (nqTkCLo and esTkCLo)
+
+// SSMT נפסל אם שני החזקים כבר סגרו לאותו כיוון (הפך למהלך סגירה מלא)
+validWBear = divWBear and not (nqTkCHi and esTkCHi)
+validWBull = divWBull and not (nqTkCLo and esTkCLo)
 
 bearOK = not requireTrueOpen or (not na(trueOpenPrice) and close > trueOpenPrice)
 bullOK = not requireTrueOpen or (not na(trueOpenPrice) and close < trueOpenPrice)
@@ -448,6 +446,15 @@ var int    bearRefB = 0
 var int    bearSigB = 0
 var float  bearYPos = na
 var int    bearSeq  = 0
+// רמות ייחוס קפואות ומעקב אחרי הנכס המפגר (NQ/ES) לאורך כל חיי השבירה
+var float  bearWFrozNQ = na
+var float  bearWFrozES = na
+var float  bearCFrozNQ = na
+var float  bearCFrozES = na
+var bool   bearWTkNQ = false
+var bool   bearWTkES = false
+var bool   bearCTkNQ = false
+var bool   bearCTkES = false
 
 var int    bullType = 0
 var string bullStr  = ""
@@ -456,42 +463,54 @@ var int    bullRefB = 0
 var int    bullSigB = 0
 var float  bullYPos = na
 var int    bullSeq  = 0
+var float  bullWFrozNQ = na
+var float  bullWFrozES = na
+var float  bullCFrozNQ = na
+var float  bullCFrozES = na
+var bool   bullWTkNQ = false
+var bool   bullWTkES = false
+var bool   bullCTkNQ = false
+var bool   bullCTkES = false
 
 var int seqCounter = 0
 
-// ── פקיעת מחזור־על ──
+// ── פקיעת מחזור־על — מוחקת הכול ──
 if newLifeCycle
     bearType := 0
     bullType := 0
     bearStr  := ""
     bullStr  := ""
 
-// ── ביטול דובי ──
-if bearType == 1
-    // SSMT: ביטול מיידי (תוך-נרי) כשכל שלושת הנכסים לקחו את הפתיל
-    if not (cntWHi > 0 and cntWHi < 3)
-        bearType := 0
-        bearStr  := ""
-    // SSMT: ביטול בסגירת נר כשכל שלושת הנכסים סגרו מעל רמת הסגירה
-    else if barstate.isconfirmed and cntCHi == 3
-        bearType := 0
-        bearStr  := ""
-if bearType == 2 and barstate.isconfirmed
-    // HSSMT: ביטול רק בסגירת נר
-    if not (cntCHi > 0 and cntCHi < 3)
+// ── עדכון מעקב מול הרמות הקפואות + ביטול לפי השלמת הנכס המפגר ──
+// דובי: מת כששני החזקים (NQ+ES) לקחו את אותה רמה שהוקפאה בלידה.
+if bearType != 0
+    if not na(bearWFrozNQ) and nqH > bearWFrozNQ
+        bearWTkNQ := true
+    if not na(bearWFrozES) and esH > bearWFrozES
+        bearWTkES := true
+    if barstate.isconfirmed
+        if not na(bearCFrozNQ) and nqC > bearCFrozNQ
+            bearCTkNQ := true
+        if not na(bearCFrozES) and esC > bearCFrozES
+            bearCTkES := true
+    dieBear = bearType == 1 ? ((bearWTkNQ and bearWTkES) or (barstate.isconfirmed and bearCTkNQ and bearCTkES)) : (barstate.isconfirmed and bearCTkNQ and bearCTkES)
+    if dieBear
         bearType := 0
         bearStr  := ""
 
-// ── ביטול שורי ──
-if bullType == 1
-    if not (cntWLo > 0 and cntWLo < 3 and (esTkLo or nqTkLo))
-        bullType := 0
-        bullStr  := ""
-    else if barstate.isconfirmed and cntCLo == 3
-        bullType := 0
-        bullStr  := ""
-if bullType == 2 and barstate.isconfirmed
-    if not (cntCLo > 0 and cntCLo < 3 and (esTkCLo or nqTkCLo))
+// שורי: מת כששני החזקים (NQ+ES) לקחו את אותו נמוך שהוקפא בלידה.
+if bullType != 0
+    if not na(bullWFrozNQ) and nqL < bullWFrozNQ
+        bullWTkNQ := true
+    if not na(bullWFrozES) and esL < bullWFrozES
+        bullWTkES := true
+    if barstate.isconfirmed
+        if not na(bullCFrozNQ) and nqC < bullCFrozNQ
+            bullCTkNQ := true
+        if not na(bullCFrozES) and esC < bullCFrozES
+            bullCTkES := true
+    dieBull = bullType == 1 ? ((bullWTkNQ and bullWTkES) or (barstate.isconfirmed and bullCTkNQ and bullCTkES)) : (barstate.isconfirmed and bullCTkNQ and bullCTkES)
+    if dieBull
         bullType := 0
         bullStr  := ""
 
@@ -523,6 +542,15 @@ if barstate.isconfirmed and tfClass != 0
             bearSigB := bar_index
             bearYPos := high + atr * offsetMlt
             bearSeq  := seqCounter
+            // הקפאת רמות ואתחול מעקב הנכס המפגר
+            bearWFrozNQ := nqRH
+            bearWFrozES := esRH
+            bearCFrozNQ := nqRHC
+            bearCFrozES := esRHC
+            bearWTkNQ := nqTkHi
+            bearWTkES := esTkHi
+            bearCTkNQ := nqTkCHi
+            bearCTkES := esTkCHi
 
     newBullType = 0
     newBullStr  = ""
@@ -549,6 +577,14 @@ if barstate.isconfirmed and tfClass != 0
             bullSigB := bar_index
             bullYPos := low - atr * offsetMlt
             bullSeq  := seqCounter
+            bullWFrozNQ := nqRL
+            bullWFrozES := esRL
+            bullCFrozNQ := nqRLC
+            bullCFrozES := esRLC
+            bullWTkNQ := nqTkLo
+            bullWTkES := esTkLo
+            bullCTkNQ := nqTkCLo
+            bullCTkES := esTkCLo
 
 // ═══════════════════════════════════════════════════════════════════
 // בחירת מה מוצג
@@ -613,14 +649,14 @@ if showDebug and barstate.islast
     table.cell(dbg, 1, 0, str.tostring(tfClass), bgcolor = color.white)
     table.cell(dbg, 0, 1, "dataReady", bgcolor = color.gray, text_color = color.white)
     table.cell(dbg, 1, 1, str.tostring(dataReady), bgcolor = color.white)
-    table.cell(dbg, 0, 2, "cntWHi/WLo", bgcolor = color.gray, text_color = color.white)
-    table.cell(dbg, 1, 2, str.tostring(cntWHi) + " / " + str.tostring(cntWLo), bgcolor = color.white)
-    table.cell(dbg, 0, 3, "cntCHi/CLo", bgcolor = color.gray, text_color = color.white)
-    table.cell(dbg, 1, 3, str.tostring(cntCHi) + " / " + str.tostring(cntCLo), bgcolor = color.white)
-    table.cell(dbg, 0, 4, "bear/bull", bgcolor = color.gray, text_color = color.white)
-    table.cell(dbg, 1, 4, str.tostring(bearType) + " / " + str.tostring(bullType), bgcolor = color.white)
-    table.cell(dbg, 0, 5, "showDir", bgcolor = color.gray, text_color = color.white)
-    table.cell(dbg, 1, 5, str.tostring(showDir), bgcolor = color.white)
+    table.cell(dbg, 0, 2, "bear/bull", bgcolor = color.gray, text_color = color.white)
+    table.cell(dbg, 1, 2, str.tostring(bearType) + " / " + str.tostring(bullType), bgcolor = color.white)
+    table.cell(dbg, 0, 3, "showDir", bgcolor = color.gray, text_color = color.white)
+    table.cell(dbg, 1, 3, str.tostring(showDir), bgcolor = color.white)
+    table.cell(dbg, 0, 4, "bearStr", bgcolor = color.gray, text_color = color.white)
+    table.cell(dbg, 1, 4, bearStr, bgcolor = color.white)
+    table.cell(dbg, 0, 5, "bullStr", bgcolor = color.gray, text_color = color.white)
+    table.cell(dbg, 1, 5, bullStr, bgcolor = color.white)
     table.cell(dbg, 0, 6, "NQ Hi/Lo", bgcolor = color.gray, text_color = color.white)
     table.cell(dbg, 1, 6, str.tostring(nqTkHi) + "/" + str.tostring(nqTkLo), bgcolor = color.white)
     table.cell(dbg, 0, 7, "ES Hi/Lo", bgcolor = color.gray, text_color = color.white)
