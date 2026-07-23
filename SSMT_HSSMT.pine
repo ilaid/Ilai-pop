@@ -121,6 +121,10 @@ else if tfClass == 1
 newRefCycle  = ta.change(refCycleId)  != 0
 newLifeCycle = ta.change(lifeCycleId) != 0
 
+// בטיימפריימים תוך-יומיים (15M/5M/1M) רמת הייחוס מתאפסת בגבול המיכל,
+// כך שהיחידה הראשונה בכל מיכל לא מסתכלת אחורה למיכל הקודם.
+resetRef = newLifeCycle and (tfClass == 1 or tfClass == 2 or tfClass == 3)
+
 // ═══════════════════════════════════════════════════════════════════
 // True Open
 // ═══════════════════════════════════════════════════════════════════
@@ -190,14 +194,24 @@ var int   nqRHCb = 0
 var int   nqRLCb = 0
 
 if newRefCycle
-    nqRH := nqCH
-    nqRL := nqCL
-    nqRHC := nqCHC
-    nqRLC := nqCLC
-    nqRHb := nqCHb
-    nqRLb := nqCLb
-    nqRHCb := nqCHCb
-    nqRLCb := nqCLCb
+    if resetRef
+        nqRH := na
+        nqRL := na
+        nqRHC := na
+        nqRLC := na
+        nqRHb := 0
+        nqRLb := 0
+        nqRHCb := 0
+        nqRLCb := 0
+    else
+        nqRH := nqCH
+        nqRL := nqCL
+        nqRHC := nqCHC
+        nqRLC := nqCLC
+        nqRHb := nqCHb
+        nqRLb := nqCLb
+        nqRHCb := nqCHCb
+        nqRLCb := nqCLCb
     nqCH := nqH
     nqCL := nqL
     nqCHC := nqC
@@ -239,14 +253,24 @@ var int   esRHCb = 0
 var int   esRLCb = 0
 
 if newRefCycle
-    esRH := esCH
-    esRL := esCL
-    esRHC := esCHC
-    esRLC := esCLC
-    esRHb := esCHb
-    esRLb := esCLb
-    esRHCb := esCHCb
-    esRLCb := esCLCb
+    if resetRef
+        esRH := na
+        esRL := na
+        esRHC := na
+        esRLC := na
+        esRHb := 0
+        esRLb := 0
+        esRHCb := 0
+        esRLCb := 0
+    else
+        esRH := esCH
+        esRL := esCL
+        esRHC := esCHC
+        esRLC := esCLC
+        esRHb := esCHb
+        esRLb := esCLb
+        esRHCb := esCHCb
+        esRLCb := esCLCb
     esCH := esH
     esCL := esL
     esCHC := esC
@@ -288,14 +312,24 @@ var int   ymRHCb = 0
 var int   ymRLCb = 0
 
 if newRefCycle
-    ymRH := ymCH
-    ymRL := ymCL
-    ymRHC := ymCHC
-    ymRLC := ymCLC
-    ymRHb := ymCHb
-    ymRLb := ymCLb
-    ymRHCb := ymCHCb
-    ymRLCb := ymCLCb
+    if resetRef
+        ymRH := na
+        ymRL := na
+        ymRHC := na
+        ymRLC := na
+        ymRHb := 0
+        ymRLb := 0
+        ymRHCb := 0
+        ymRLCb := 0
+    else
+        ymRH := ymCH
+        ymRL := ymCL
+        ymRHC := ymCHC
+        ymRLC := ymCLC
+        ymRHb := ymCHb
+        ymRLb := ymCLb
+        ymRHCb := ymCHCb
+        ymRLCb := ymCLCb
     ymCH := ymH
     ymCL := ymL
     ymCHC := ymC
