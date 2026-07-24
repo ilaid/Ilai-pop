@@ -700,26 +700,58 @@ if not na(aLine) and showDir != 0
 // טבלת בדיקה (אבחון — כבויה כברירת מחדל)
 // ═══════════════════════════════════════════════════════════════════
 
-var table dbg = table.new(position.top_right, 2, 9, border_width = 1)
+var table dbg = table.new(position.top_right, 4, 10, border_width = 1)
 if showDebug and barstate.islast
-    table.cell(dbg, 0, 0, "tfClass", bgcolor = color.gray, text_color = color.white)
-    table.cell(dbg, 1, 0, str.tostring(tfClass), bgcolor = color.white)
-    table.cell(dbg, 0, 1, "dataReady", bgcolor = color.gray, text_color = color.white)
-    table.cell(dbg, 1, 1, str.tostring(dataReady), bgcolor = color.white)
-    table.cell(dbg, 0, 2, "bear/bull", bgcolor = color.gray, text_color = color.white)
-    table.cell(dbg, 1, 2, str.tostring(bearType) + " / " + str.tostring(bullType), bgcolor = color.white)
-    table.cell(dbg, 0, 3, "showDir", bgcolor = color.gray, text_color = color.white)
-    table.cell(dbg, 1, 3, str.tostring(showDir), bgcolor = color.white)
-    table.cell(dbg, 0, 4, "bearStr", bgcolor = color.gray, text_color = color.white)
-    table.cell(dbg, 1, 4, bearStr, bgcolor = color.white)
-    table.cell(dbg, 0, 5, "bullStr", bgcolor = color.gray, text_color = color.white)
-    table.cell(dbg, 1, 5, bullStr, bgcolor = color.white)
-    table.cell(dbg, 0, 6, "NQ Hi/Lo", bgcolor = color.gray, text_color = color.white)
-    table.cell(dbg, 1, 6, str.tostring(nqTkHi) + "/" + str.tostring(nqTkLo), bgcolor = color.white)
-    table.cell(dbg, 0, 7, "ES Hi/Lo", bgcolor = color.gray, text_color = color.white)
-    table.cell(dbg, 1, 7, str.tostring(esTkHi) + "/" + str.tostring(esTkLo), bgcolor = color.white)
-    table.cell(dbg, 0, 8, "YM Hi/Lo", bgcolor = color.gray, text_color = color.white)
-    table.cell(dbg, 1, 8, str.tostring(ymTkHi) + "/" + str.tostring(ymTkLo), bgcolor = color.white)
+    // כותרת
+    table.cell(dbg, 0, 0, "tf " + str.tostring(tfClass), bgcolor = color.gray, text_color = color.white)
+    table.cell(dbg, 1, 0, "NQ", bgcolor = color.gray, text_color = color.white)
+    table.cell(dbg, 2, 0, "ES", bgcolor = color.gray, text_color = color.white)
+    table.cell(dbg, 3, 0, "YM", bgcolor = color.gray, text_color = color.white)
+    // RefHi — רמת ייחוס פתיל גבוה
+    table.cell(dbg, 0, 1, "RefHi", bgcolor = color.gray, text_color = color.white)
+    table.cell(dbg, 1, 1, str.tostring(nqRH, format.mintick), bgcolor = color.white)
+    table.cell(dbg, 2, 1, str.tostring(esRH, format.mintick), bgcolor = color.white)
+    table.cell(dbg, 3, 1, str.tostring(ymRH, format.mintick), bgcolor = color.white)
+    // RefHiC — רמת ייחוס סגירה גבוהה (ל-HSSMT)
+    table.cell(dbg, 0, 2, "RefHiC", bgcolor = color.gray, text_color = color.white)
+    table.cell(dbg, 1, 2, str.tostring(nqRHC, format.mintick), bgcolor = color.white)
+    table.cell(dbg, 2, 2, str.tostring(esRHC, format.mintick), bgcolor = color.white)
+    table.cell(dbg, 3, 2, str.tostring(ymRHC, format.mintick), bgcolor = color.white)
+    // CurHi — הגבוה שנצבר במחזור הנוכחי
+    table.cell(dbg, 0, 3, "CurHi", bgcolor = color.gray, text_color = color.white)
+    table.cell(dbg, 1, 3, str.tostring(nqCH, format.mintick), bgcolor = color.white)
+    table.cell(dbg, 2, 3, str.tostring(esCH, format.mintick), bgcolor = color.white)
+    table.cell(dbg, 3, 3, str.tostring(ymCH, format.mintick), bgcolor = color.white)
+    // TkHi w — לקיחת פתיל
+    table.cell(dbg, 0, 4, "TkHi w", bgcolor = color.gray, text_color = color.white)
+    table.cell(dbg, 1, 4, str.tostring(nqTkHi), bgcolor = color.white)
+    table.cell(dbg, 2, 4, str.tostring(esTkHi), bgcolor = color.white)
+    table.cell(dbg, 3, 4, str.tostring(ymTkHi), bgcolor = color.white)
+    // TkHi c — לקיחת סגירה (רלוונטי ל-HSSMT)
+    table.cell(dbg, 0, 5, "TkHi c", bgcolor = color.gray, text_color = color.white)
+    table.cell(dbg, 1, 5, str.tostring(nqTkCHi), bgcolor = color.white)
+    table.cell(dbg, 2, 5, str.tostring(esTkCHi), bgcolor = color.white)
+    table.cell(dbg, 3, 5, str.tostring(ymTkCHi), bgcolor = color.white)
+    // RefLo — רמת ייחוס פתיל נמוך
+    table.cell(dbg, 0, 6, "RefLo", bgcolor = color.gray, text_color = color.white)
+    table.cell(dbg, 1, 6, str.tostring(nqRL, format.mintick), bgcolor = color.white)
+    table.cell(dbg, 2, 6, str.tostring(esRL, format.mintick), bgcolor = color.white)
+    table.cell(dbg, 3, 6, str.tostring(ymRL, format.mintick), bgcolor = color.white)
+    // TkLo w
+    table.cell(dbg, 0, 7, "TkLo w", bgcolor = color.gray, text_color = color.white)
+    table.cell(dbg, 1, 7, str.tostring(nqTkLo), bgcolor = color.white)
+    table.cell(dbg, 2, 7, str.tostring(esTkLo), bgcolor = color.white)
+    table.cell(dbg, 3, 7, str.tostring(ymTkLo), bgcolor = color.white)
+    // TkLo c
+    table.cell(dbg, 0, 8, "TkLo c", bgcolor = color.gray, text_color = color.white)
+    table.cell(dbg, 1, 8, str.tostring(nqTkCLo), bgcolor = color.white)
+    table.cell(dbg, 2, 8, str.tostring(esTkCLo), bgcolor = color.white)
+    table.cell(dbg, 3, 8, str.tostring(ymTkCLo), bgcolor = color.white)
+    // מצב
+    table.cell(dbg, 0, 9, "state", bgcolor = color.gray, text_color = color.white)
+    table.cell(dbg, 1, 9, "rdy=" + str.tostring(dataReady), bgcolor = color.white)
+    table.cell(dbg, 2, 9, "b=" + str.tostring(bearType), bgcolor = color.white)
+    table.cell(dbg, 3, 9, "u=" + str.tostring(bullType), bgcolor = color.white)
 
 // ═══════════════════════════════════════════════════════════════════
 // אזהרת TF לא נתמך
