@@ -121,6 +121,10 @@ else if tfClass == 1
 newRefCycle  = ta.change(refCycleId)  != 0
 newLifeCycle = ta.change(lifeCycleId) != 0
 
+// ב-1H וב-4H תת-המחזור הראשון של המיכל מסתכל אחורה לתת-המחזור האחרון של המיכל
+// הקודם (שני↔שישי ב-1H; שבוע-ראשון↔שבוע-אחרון ב-4H). באינטרה-דיי המיכל מתאפס לגמרי.
+keepLast = tfClass == 4 or tfClass == 5
+
 // ═══════════════════════════════════════════════════════════════════
 // True Open
 // ═══════════════════════════════════════════════════════════════════
@@ -239,7 +243,7 @@ if newRefCycle
         array.clear(nqLoBA)
         array.clear(nqHiCBA)
         array.clear(nqLoCBA)
-    else
+    if ((not newLifeCycle) or keepLast) and not na(nqCH)
         array.push(nqHiA,  nqCH)
         array.push(nqLoA,  nqCL)
         array.push(nqHiCA, nqCHC)
@@ -281,7 +285,7 @@ if newRefCycle
         array.clear(esLoBA)
         array.clear(esHiCBA)
         array.clear(esLoCBA)
-    else
+    if ((not newLifeCycle) or keepLast) and not na(esCH)
         array.push(esHiA,  esCH)
         array.push(esLoA,  esCL)
         array.push(esHiCA, esCHC)
@@ -323,7 +327,7 @@ if newRefCycle
         array.clear(ymLoBA)
         array.clear(ymHiCBA)
         array.clear(ymLoCBA)
-    else
+    if ((not newLifeCycle) or keepLast) and not na(ymCH)
         array.push(ymHiA,  ymCH)
         array.push(ymLoA,  ymCL)
         array.push(ymHiCA, ymCHC)
