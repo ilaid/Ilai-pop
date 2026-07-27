@@ -672,10 +672,3 @@ if showDebug and barstate.islast
     table.cell(dbg, 1, 7, str.tostring(esCH, format.mintick) + "/" + str.tostring(esCL, format.mintick), bgcolor = color.white)
     table.cell(dbg, 0, 8, "YM curHi/Lo", bgcolor = color.gray, text_color = color.white)
     table.cell(dbg, 1, 8, str.tostring(ymCH, format.mintick) + "/" + str.tostring(ymCL, format.mintick), bgcolor = color.white)
-
-// ═══════════════════════════════════════════════════════════════════
-// אזהרת TF לא נתמך
-// ═══════════════════════════════════════════════════════════════════
-
-if barstate.islast and tfClass == 0
-    label.new(bar_index, high, "TF לא נתמך — השתמש ב: 1M / 5M / 15M / 1H / 4H", style = label.style_label_down, color = color.new(color.red, 20), textcolor = color.white, size = size.small)
