@@ -390,7 +390,7 @@ f_findBear(nqHiA, esHiA, ymHiA, nqHiCA, esHiCA, ymHiCA, isNQ, isES, nqCH, esCH, 
     bT = 0
     bI = -1
     bS = ""
-    bRef = na
+    float bRef = na
     n = array.size(nqHiA)
     if n > 0
         for i = 0 to n - 1
@@ -420,7 +420,7 @@ f_findBull(nqLoA, esLoA, ymLoA, nqLoCA, esLoCA, ymLoCA, isNQ, isES, nqCL, esCL, 
     bT = 0
     bI = -1
     bS = ""
-    bRef = na
+    float bRef = na
     n = array.size(nqLoA)
     if n > 0
         for i = 0 to n - 1
