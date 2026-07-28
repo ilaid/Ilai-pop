@@ -18,7 +18,7 @@ grpVis = "תצוגה"
 colBull    = input.color(#26a69a, "צבע שורי", group = grpVis)
 colBear    = input.color(#ef5350, "צבע דובי", group = grpVis)
 labelSize  = input.string("small", "גודל תווית", options = ["tiny", "small", "normal"], group = grpVis)
-offsetMlt  = input.float(0.6, "מרחק התווית מהנר (ATR)", minval = 0.1, maxval = 3.0, step = 0.1, group = grpVis)
+offsetMlt  = input.float(1.5, "מרחק התווית מהנר (ATR)", minval = 0.1, maxval = 6.0, step = 0.1, group = grpVis)
 showLine   = input.bool(true, "הצג קו שבירה", group = grpVis)
 lineWidth  = input.int(2, "עובי קו", minval = 1, maxval = 4, group = grpVis)
 showDebug  = input.bool(false, "הצג טבלת בדיקה", group = grpVis)
@@ -585,8 +585,6 @@ if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK and nLevel
             bearFrozES := nbT == 2 ? array.get(esHiCA, nbI) : array.get(esHiA, nbI)
             bearTkNQ := nbnq
             bearTkES := nbes
-            bullType := 0
-            bullStr  := ""
 
     [nuT, nuI, nuS, nunq, nues, nuym] = f_findBull(nqLoA, esLoA, ymLoA, nqLoCA, esLoCA, ymLoCA, isNQc, isESc, nqCL, esCL, ymCL, nqCLC, esCLC, ymCLC)
     if nuT != 0 and bullOK
@@ -605,8 +603,6 @@ if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK and nLevel
             bullTkNQ := nunq
             bullTkES := nues
             bullTkYM := nuym
-            bearType := 0
-            bearStr  := ""
 
 // ═══════════════════════════════════════════════════════════════════
 // בחירת מה מוצג
