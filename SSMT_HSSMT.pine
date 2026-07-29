@@ -121,8 +121,8 @@ else if tfClass == 1
 newRefCycle  = ta.change(refCycleId)  != 0
 newLifeCycle = ta.change(lifeCycleId) != 0
 
-// ב-1H וב-4H תת-המחזור הראשון של המיכל מסתכל אחורה לתת-המחזור האחרון של המיכל
-// הקודם (שני↔שישי ב-1H; שבוע-ראשון↔שבוע-אחרון ב-4H). באינטרה-דיי המיכל מתאפס לגמרי.
+// ב-1H וב-4H תת-המחזור הראשון משווה לתת-המחזור האחרון של המיכל הקודם (שני↔שישי),
+// אבל אותו "זרע" נמחק אחרי היחידה הראשונה — שישי משווה רק לשני, לא לשאר השבוע.
 keepLast = tfClass == 4 or tfClass == 5
 
 // ═══════════════════════════════════════════════════════════════════
@@ -229,6 +229,11 @@ var ymLoBA  = array.new_int()
 var ymHiCBA = array.new_int()
 var ymLoCBA = array.new_int()
 
+// דגלי ה"זרע" — מחושבים כאן, כשהמצברים עדיין מחזיקים את ערך התת-מחזור הקודם.
+var bool seedActive = false
+seedPushNow = newRefCycle and newLifeCycle and keepLast and not na(nqCH)
+dropSeedNow = newRefCycle and (not newLifeCycle) and seedActive
+
 // ── NQ צבירה ──
 if newRefCycle
     if newLifeCycle
@@ -249,6 +254,15 @@ if newRefCycle
         array.push(nqLoBA,  nqCLb)
         array.push(nqHiCBA, nqCHCb)
         array.push(nqLoCBA, nqCLCb)
+    if dropSeedNow and array.size(nqHiA) > 0
+        array.remove(nqHiA, 0)
+        array.remove(nqLoA, 0)
+        array.remove(nqHiCA, 0)
+        array.remove(nqLoCA, 0)
+        array.remove(nqHiBA, 0)
+        array.remove(nqLoBA, 0)
+        array.remove(nqHiCBA, 0)
+        array.remove(nqLoCBA, 0)
     nqCH := nqH
     nqCL := nqL
     nqCHC := nqC
@@ -291,6 +305,15 @@ if newRefCycle
         array.push(esLoBA,  esCLb)
         array.push(esHiCBA, esCHCb)
         array.push(esLoCBA, esCLCb)
+    if dropSeedNow and array.size(esHiA) > 0
+        array.remove(esHiA, 0)
+        array.remove(esLoA, 0)
+        array.remove(esHiCA, 0)
+        array.remove(esLoCA, 0)
+        array.remove(esHiBA, 0)
+        array.remove(esLoBA, 0)
+        array.remove(esHiCBA, 0)
+        array.remove(esLoCBA, 0)
     esCH := esH
     esCL := esL
     esCHC := esC
@@ -333,6 +356,15 @@ if newRefCycle
         array.push(ymLoBA,  ymCLb)
         array.push(ymHiCBA, ymCHCb)
         array.push(ymLoCBA, ymCLCb)
+    if dropSeedNow and array.size(ymHiA) > 0
+        array.remove(ymHiA, 0)
+        array.remove(ymLoA, 0)
+        array.remove(ymHiCA, 0)
+        array.remove(ymLoCA, 0)
+        array.remove(ymHiBA, 0)
+        array.remove(ymLoBA, 0)
+        array.remove(ymHiCBA, 0)
+        array.remove(ymLoCBA, 0)
     ymCH := ymH
     ymCL := ymL
     ymCHC := ymC
@@ -354,6 +386,12 @@ else
     if na(ymCLC) or ymC < ymCLC
         ymCLC := ymC
         ymCLCb := bar_index
+
+// עדכון דגל ה"זרע" (המבט אחורה) — פעיל רק ליחידה הראשונה של המיכל
+if newRefCycle and newLifeCycle
+    seedActive := seedPushNow
+else if newRefCycle
+    seedActive := false
 
 // ═══════════════════════════════════════════════════════════════════
 // חסימות
@@ -378,18 +416,17 @@ f_str(bNQ, bES, bYM, isBull) =>
     str.trim(s)
 
 // ═══════════════════════════════════════════════════════════════════
-// זיהוי — השבירה הכי עדכנית, בלתי-תלוי בנכס הגרף.
-// לקיחה מצטברת. HSSMT = סגר מעבר; SSMT = פתיל מעבר.
-// ה"כל לקחו" (ביטול סטייה) נמדד ב*פתיל* — סחיפה מספיקה.
-// מוחזר גם סטטוס הפתיל של NQ/ES/YM לצורך מעקב ביטול.
+// זיהוי — השבירה הכי עדכנית, בלתי-תלוי בנכס הגרף. לקיחה מצטברת.
+// HSSMT = סגר מעבר (ביטול כשכולם סגרו). SSMT = פתיל מעבר (ביטול כשכולם סחפו).
+// מוחזר סטטוס-הלקיחה לפי סוג (סגירה ל-HSSMT / פתיל ל-SSMT) למעקב ביטול.
 // ═══════════════════════════════════════════════════════════════════
 
 f_findBear(nqHiA, esHiA, ymHiA, nqHiCA, esHiCA, ymHiCA, nqCH, esCH, ymCH, nqCHC, esCHC, ymCHC) =>
     bT = 0
     bI = -1
     bS = ""
-    wnq = false
-    wes = false
+    bnq = false
+    bes = false
     n = array.size(nqHiA)
     if n > 0
         float nqMH  = nqCH
@@ -406,34 +443,33 @@ f_findBear(nqHiA, esHiA, ymHiA, nqHiCA, esHiCA, ymHiCA, nqCH, esCH, ymCH, nqCHC,
                 nc = nqMHc > array.get(nqHiCA, i)
                 ec = esMHc > array.get(esHiCA, i)
                 yc = ymMHc > array.get(ymHiCA, i)
-                bothW = nw and ew
-                if (nc or ec or yc) and not bothW
+                if (nc or ec or yc) and not (nc and ec)
                     bT := 2
                     bI := i
                     bS := f_str(nc, ec, yc, false)
-                    wnq := nw
-                    wes := ew
-                else if (nw or ew or yw) and not bothW
+                    bnq := nc
+                    bes := ec
+                else if (nw or ew or yw) and not (nw and ew)
                     bT := 1
                     bI := i
                     bS := f_str(nw, ew, yw, false)
-                    wnq := nw
-                    wes := ew
+                    bnq := nw
+                    bes := ew
             nqMH  := math.max(nqMH,  array.get(nqHiA, i))
             esMH  := math.max(esMH,  array.get(esHiA, i))
             ymMH  := math.max(ymMH,  array.get(ymHiA, i))
             nqMHc := math.max(nqMHc, array.get(nqHiCA, i))
             esMHc := math.max(esMHc, array.get(esHiCA, i))
             ymMHc := math.max(ymMHc, array.get(ymHiCA, i))
-    [bT, bI, bS, wnq, wes]
+    [bT, bI, bS, bnq, bes]
 
 f_findBull(nqLoA, esLoA, ymLoA, nqLoCA, esLoCA, ymLoCA, nqCL, esCL, ymCL, nqCLC, esCLC, ymCLC) =>
     bT = 0
     bI = -1
     bS = ""
-    wnq = false
-    wes = false
-    wym = false
+    bnq = false
+    bes = false
+    bym = false
     n = array.size(nqLoA)
     if n > 0
         float nqML  = nqCL
@@ -450,28 +486,27 @@ f_findBull(nqLoA, esLoA, ymLoA, nqLoCA, esLoCA, ymLoCA, nqCL, esCL, ymCL, nqCLC,
                 nc = nqMLc < array.get(nqLoCA, i)
                 ec = esMLc < array.get(esLoCA, i)
                 yc = ymMLc < array.get(ymLoCA, i)
-                allW = nw and ew and yw
-                if (nc or ec) and not allW
+                if (nc or ec) and not (nc and ec and yc)
                     bT := 2
                     bI := i
                     bS := f_str(nc, ec, yc, true)
-                    wnq := nw
-                    wes := ew
-                    wym := yw
-                else if (nw or ew) and not allW
+                    bnq := nc
+                    bes := ec
+                    bym := yc
+                else if (nw or ew) and not (nw and ew and yw)
                     bT := 1
                     bI := i
                     bS := f_str(nw, ew, yw, true)
-                    wnq := nw
-                    wes := ew
-                    wym := yw
+                    bnq := nw
+                    bes := ew
+                    bym := yw
             nqML  := math.min(nqML,  array.get(nqLoA, i))
             esML  := math.min(esML,  array.get(esLoA, i))
             ymML  := math.min(ymML,  array.get(ymLoA, i))
             nqMLc := math.min(nqMLc, array.get(nqLoCA, i))
             esMLc := math.min(esMLc, array.get(esLoCA, i))
             ymMLc := math.min(ymMLc, array.get(ymLoCA, i))
-    [bT, bI, bS, wnq, wes, wym]
+    [bT, bI, bS, bnq, bes, bym]
 
 // ═══════════════════════════════════════════════════════════════════
 // נכס הגרף
@@ -516,73 +551,87 @@ var bool   bullTkYM = false
 
 var int seqCounter = 0
 
-// ── פקיעת מחזור־על — מוחקת הכול ──
+// ── פקיעת מחזור־על — מוחקת הכול (כולל השמות, מותר שוב לזהות) ──
 if newLifeCycle
     bearType := 0
     bullType := 0
     bearStr  := ""
     bullStr  := ""
 
-// ── ביטול דובי: מת כששני החזקים (NQ+ES) סחפו את הגבוה (פתיל) שהוקפא ──
+// ── ביטול דובי: מת כששני החזקים (NQ+ES) לקחו את הרמה שהוקפאה.
+//    HSSMT = סגירה, SSMT = פתיל. השם נשמר כדי שלא תחזור (בלי החייאה). ──
 if bearType != 0
-    if not na(bearFrozNQ) and nqH > bearFrozNQ
-        bearTkNQ := true
-    if not na(bearFrozES) and esH > bearFrozES
-        bearTkES := true
+    if bearType == 1
+        if not na(bearFrozNQ) and nqH > bearFrozNQ
+            bearTkNQ := true
+        if not na(bearFrozES) and esH > bearFrozES
+            bearTkES := true
+    else if barstate.isconfirmed
+        if not na(bearFrozNQ) and nqC > bearFrozNQ
+            bearTkNQ := true
+        if not na(bearFrozES) and esC > bearFrozES
+            bearTkES := true
     if bearTkNQ and bearTkES
         bearType := 0
-        bearStr  := ""
 
-// ── ביטול שורי: מת כשכל שלושת הנכסים סחפו את הנמוך (פתיל) שהוקפא ──
+// ── ביטול שורי: מת כשכל שלושת הנכסים לקחו את הרמה שהוקפאה. ──
 if bullType != 0
-    if not na(bullFrozNQ) and nqL < bullFrozNQ
-        bullTkNQ := true
-    if not na(bullFrozES) and esL < bullFrozES
-        bullTkES := true
-    if not na(bullFrozYM) and ymL < bullFrozYM
-        bullTkYM := true
+    if bullType == 1
+        if not na(bullFrozNQ) and nqL < bullFrozNQ
+            bullTkNQ := true
+        if not na(bullFrozES) and esL < bullFrozES
+            bullTkES := true
+        if not na(bullFrozYM) and ymL < bullFrozYM
+            bullTkYM := true
+    else if barstate.isconfirmed
+        if not na(bullFrozNQ) and nqC < bullFrozNQ
+            bullTkNQ := true
+        if not na(bullFrozES) and esC < bullFrozES
+            bullTkES := true
+        if not na(bullFrozYM) and ymC < bullFrozYM
+            bullTkYM := true
     if bullTkNQ and bullTkES and bullTkYM
         bullType := 0
-        bullStr  := ""
 
 // ── רישום שבירות חדשות בסגירת נר ──
+// שמירה: יוצרים רק אם השם שונה מהאחרון (כדי למנוע החייאה של שבירה שכבר "נשברה").
 if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK and nLevels > 0
 
-    [nbT, nbI, nbS, nbwn, nbwe] = f_findBear(nqHiA, esHiA, ymHiA, nqHiCA, esHiCA, ymHiCA, nqCH, esCH, ymCH, nqCHC, esCHC, ymCHC)
-    if nbT != 0 and bearOK
-        if nbT != bearType or nbS != bearStr
-            seqCounter += 1
-            bearType := nbT
-            bearStr  := nbS
-            bearLvl  := nbT == 2 ? (isNQc ? array.get(nqHiCA, nbI) : isESc ? array.get(esHiCA, nbI) : array.get(ymHiCA, nbI)) : (isNQc ? array.get(nqHiA, nbI) : isESc ? array.get(esHiA, nbI) : array.get(ymHiA, nbI))
-            bearRefB := nbT == 2 ? (isNQc ? array.get(nqHiCBA, nbI) : isESc ? array.get(esHiCBA, nbI) : array.get(ymHiCBA, nbI)) : (isNQc ? array.get(nqHiBA, nbI) : isESc ? array.get(esHiBA, nbI) : array.get(ymHiBA, nbI))
-            bearSigB := bar_index
-            bearYPos := high + atr * offsetMlt
-            bearSeq  := seqCounter
-            // מעקב ביטול תמיד לפי פתיל (הרמה הקפואה = פתיל הגבוה)
-            bearFrozNQ := array.get(nqHiA, nbI)
-            bearFrozES := array.get(esHiA, nbI)
-            bearTkNQ := nbwn
-            bearTkES := nbwe
+    [nbT, nbI, nbS, nbnq, nbes] = f_findBear(nqHiA, esHiA, ymHiA, nqHiCA, esHiCA, ymHiCA, nqCH, esCH, ymCH, nqCHC, esCHC, ymCHC)
+    if nbT != 0 and bearOK and nbS != bearStr
+        seqCounter += 1
+        bearType := nbT
+        bearStr  := nbS
+        bearLvl  := nbT == 2 ? (isNQc ? array.get(nqHiCA, nbI) : isESc ? array.get(esHiCA, nbI) : array.get(ymHiCA, nbI)) : (isNQc ? array.get(nqHiA, nbI) : isESc ? array.get(esHiA, nbI) : array.get(ymHiA, nbI))
+        bearRefB := nbT == 2 ? (isNQc ? array.get(nqHiCBA, nbI) : isESc ? array.get(esHiCBA, nbI) : array.get(ymHiCBA, nbI)) : (isNQc ? array.get(nqHiBA, nbI) : isESc ? array.get(esHiBA, nbI) : array.get(ymHiBA, nbI))
+        bearSigB := bar_index
+        bearYPos := high + atr * offsetMlt
+        bearSeq  := seqCounter
+        bearFrozNQ := nbT == 2 ? array.get(nqHiCA, nbI) : array.get(nqHiA, nbI)
+        bearFrozES := nbT == 2 ? array.get(esHiCA, nbI) : array.get(esHiA, nbI)
+        bearTkNQ := nbnq
+        bearTkES := nbes
+        // שבירה נגדית "שוברת" את השורית (נשמר bullStr כדי שלא תחזור)
+        bullType := 0
 
-    [nuT, nuI, nuS, nuwn, nuwe, nuwy] = f_findBull(nqLoA, esLoA, ymLoA, nqLoCA, esLoCA, ymLoCA, nqCL, esCL, ymCL, nqCLC, esCLC, ymCLC)
-    if nuT != 0 and bullOK
-        if nuT != bullType or nuS != bullStr
-            seqCounter += 1
-            bullType := nuT
-            bullStr  := nuS
-            bullLvl  := nuT == 2 ? (isNQc ? array.get(nqLoCA, nuI) : isESc ? array.get(esLoCA, nuI) : array.get(ymLoCA, nuI)) : (isNQc ? array.get(nqLoA, nuI) : isESc ? array.get(esLoA, nuI) : array.get(ymLoA, nuI))
-            bullRefB := nuT == 2 ? (isNQc ? array.get(nqLoCBA, nuI) : isESc ? array.get(esLoCBA, nuI) : array.get(ymLoCBA, nuI)) : (isNQc ? array.get(nqLoBA, nuI) : isESc ? array.get(esLoBA, nuI) : array.get(ymLoBA, nuI))
-            bullSigB := bar_index
-            bullYPos := low - atr * offsetMlt
-            bullSeq  := seqCounter
-            // מעקב ביטול תמיד לפי פתיל (הרמה הקפואה = פתיל הנמוך)
-            bullFrozNQ := array.get(nqLoA, nuI)
-            bullFrozES := array.get(esLoA, nuI)
-            bullFrozYM := array.get(ymLoA, nuI)
-            bullTkNQ := nuwn
-            bullTkES := nuwe
-            bullTkYM := nuwy
+    [nuT, nuI, nuS, nunq, nues, nuym] = f_findBull(nqLoA, esLoA, ymLoA, nqLoCA, esLoCA, ymLoCA, nqCL, esCL, ymCL, nqCLC, esCLC, ymCLC)
+    if nuT != 0 and bullOK and nuS != bullStr
+        seqCounter += 1
+        bullType := nuT
+        bullStr  := nuS
+        bullLvl  := nuT == 2 ? (isNQc ? array.get(nqLoCA, nuI) : isESc ? array.get(esLoCA, nuI) : array.get(ymLoCA, nuI)) : (isNQc ? array.get(nqLoA, nuI) : isESc ? array.get(esLoA, nuI) : array.get(ymLoA, nuI))
+        bullRefB := nuT == 2 ? (isNQc ? array.get(nqLoCBA, nuI) : isESc ? array.get(esLoCBA, nuI) : array.get(ymLoCBA, nuI)) : (isNQc ? array.get(nqLoBA, nuI) : isESc ? array.get(esLoBA, nuI) : array.get(ymLoBA, nuI))
+        bullSigB := bar_index
+        bullYPos := low - atr * offsetMlt
+        bullSeq  := seqCounter
+        bullFrozNQ := nuT == 2 ? array.get(nqLoCA, nuI) : array.get(nqLoA, nuI)
+        bullFrozES := nuT == 2 ? array.get(esLoCA, nuI) : array.get(esLoA, nuI)
+        bullFrozYM := nuT == 2 ? array.get(ymLoCA, nuI) : array.get(ymLoA, nuI)
+        bullTkNQ := nunq
+        bullTkES := nues
+        bullTkYM := nuym
+        // שבירה נגדית "שוברת" את הדובית (נשמר bearStr כדי שלא תחזור)
+        bearType := 0
 
 // ═══════════════════════════════════════════════════════════════════
 // בחירת מה מוצג
