@@ -382,11 +382,10 @@ f_str(bNQ, bES, bYM, isBull) =>
 // "לקיחה" מצטברת: הקיצון של כל הנרות מאז שהרמה נוצרה (לא רק תת-המחזור הנוכחי).
 // ═══════════════════════════════════════════════════════════════════
 
-f_findBear(nqHiA, esHiA, ymHiA, nqHiCA, esHiCA, ymHiCA, isNQ, isES, nqCH, esCH, ymCH, nqCHC, esCHC, ymCHC) =>
+f_findBear(nqHiA, esHiA, ymHiA, nqHiCA, esHiCA, ymHiCA, nqCH, esCH, ymCH, nqCHC, esCHC, ymCHC) =>
     bT = 0
     bI = -1
     bS = ""
-    float bRef = na
     bnq = false
     bes = false
     n = array.size(nqHiA)
@@ -398,28 +397,23 @@ f_findBear(nqHiA, esHiA, ymHiA, nqHiCA, esHiCA, ymHiCA, isNQ, isES, nqCH, esCH, 
         float esMHc = esCHC
         float ymMHc = ymCHC
         for i = n - 1 to 0
-            nw = nqMH > array.get(nqHiA, i)
-            ew = esMH > array.get(esHiA, i)
-            yw = ymMH > array.get(ymHiA, i)
-            nc = nqMHc > array.get(nqHiCA, i)
-            ec = esMHc > array.get(esHiCA, i)
-            yc = ymMHc > array.get(ymHiCA, i)
-            if (nc or ec or yc) and not (nc and ec)
-                clvl = isNQ ? array.get(nqHiCA, i) : isES ? array.get(esHiCA, i) : array.get(ymHiCA, i)
-                if bT < 2 or (bT == 2 and clvl > bRef)
+            if bT == 0
+                nc = nqMHc > array.get(nqHiCA, i)
+                ec = esMHc > array.get(esHiCA, i)
+                yc = ymMHc > array.get(ymHiCA, i)
+                nw = nqMH > array.get(nqHiA, i)
+                ew = esMH > array.get(esHiA, i)
+                yw = ymMH > array.get(ymHiA, i)
+                if (nc or ec or yc) and not (nc and ec)
                     bT := 2
                     bI := i
                     bS := f_str(nc, ec, yc, false)
-                    bRef := clvl
                     bnq := nc
                     bes := ec
-            if bT < 2 and (nw or ew or yw) and not (nw and ew)
-                clvl = isNQ ? array.get(nqHiA, i) : isES ? array.get(esHiA, i) : array.get(ymHiA, i)
-                if bT < 1 or (bT == 1 and clvl > bRef)
+                else if (nw or ew or yw) and not (nw and ew)
                     bT := 1
                     bI := i
                     bS := f_str(nw, ew, yw, false)
-                    bRef := clvl
                     bnq := nw
                     bes := ew
             nqMH  := math.max(nqMH,  array.get(nqHiA, i))
@@ -430,11 +424,10 @@ f_findBear(nqHiA, esHiA, ymHiA, nqHiCA, esHiCA, ymHiCA, isNQ, isES, nqCH, esCH, 
             ymMHc := math.max(ymMHc, array.get(ymHiCA, i))
     [bT, bI, bS, bnq, bes]
 
-f_findBull(nqLoA, esLoA, ymLoA, nqLoCA, esLoCA, ymLoCA, isNQ, isES, nqCL, esCL, ymCL, nqCLC, esCLC, ymCLC) =>
+f_findBull(nqLoA, esLoA, ymLoA, nqLoCA, esLoCA, ymLoCA, nqCL, esCL, ymCL, nqCLC, esCLC, ymCLC) =>
     bT = 0
     bI = -1
     bS = ""
-    float bRef = na
     bnq = false
     bes = false
     bym = false
@@ -447,29 +440,24 @@ f_findBull(nqLoA, esLoA, ymLoA, nqLoCA, esLoCA, ymLoCA, isNQ, isES, nqCL, esCL, 
         float esMLc = esCLC
         float ymMLc = ymCLC
         for i = n - 1 to 0
-            nw = nqML < array.get(nqLoA, i)
-            ew = esML < array.get(esLoA, i)
-            yw = ymML < array.get(ymLoA, i)
-            nc = nqMLc < array.get(nqLoCA, i)
-            ec = esMLc < array.get(esLoCA, i)
-            yc = ymMLc < array.get(ymLoCA, i)
-            if (nc or ec) and not (nc and ec and yc)
-                clvl = isNQ ? array.get(nqLoCA, i) : isES ? array.get(esLoCA, i) : array.get(ymLoCA, i)
-                if bT < 2 or (bT == 2 and clvl < bRef)
+            if bT == 0
+                nc = nqMLc < array.get(nqLoCA, i)
+                ec = esMLc < array.get(esLoCA, i)
+                yc = ymMLc < array.get(ymLoCA, i)
+                nw = nqML < array.get(nqLoA, i)
+                ew = esML < array.get(esLoA, i)
+                yw = ymML < array.get(ymLoA, i)
+                if (nc or ec) and not (nc and ec and yc)
                     bT := 2
                     bI := i
                     bS := f_str(nc, ec, yc, true)
-                    bRef := clvl
                     bnq := nc
                     bes := ec
                     bym := yc
-            if bT < 2 and (nw or ew) and not (nw and ew and yw)
-                clvl = isNQ ? array.get(nqLoA, i) : isES ? array.get(esLoA, i) : array.get(ymLoA, i)
-                if bT < 1 or (bT == 1 and clvl < bRef)
+                else if (nw or ew) and not (nw and ew and yw)
                     bT := 1
                     bI := i
                     bS := f_str(nw, ew, yw, true)
-                    bRef := clvl
                     bnq := nw
                     bes := ew
                     bym := yw
@@ -570,7 +558,7 @@ if bullType != 0
 // ── רישום שבירות חדשות בסגירת נר ──
 if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK and nLevels > 0
 
-    [nbT, nbI, nbS, nbnq, nbes] = f_findBear(nqHiA, esHiA, ymHiA, nqHiCA, esHiCA, ymHiCA, isNQc, isESc, nqCH, esCH, ymCH, nqCHC, esCHC, ymCHC)
+    [nbT, nbI, nbS, nbnq, nbes] = f_findBear(nqHiA, esHiA, ymHiA, nqHiCA, esHiCA, ymHiCA, nqCH, esCH, ymCH, nqCHC, esCHC, ymCHC)
     if nbT != 0 and bearOK
         if nbT != bearType or nbS != bearStr
             seqCounter += 1
@@ -586,7 +574,7 @@ if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK and nLevel
             bearTkNQ := nbnq
             bearTkES := nbes
 
-    [nuT, nuI, nuS, nunq, nues, nuym] = f_findBull(nqLoA, esLoA, ymLoA, nqLoCA, esLoCA, ymLoCA, isNQc, isESc, nqCL, esCL, ymCL, nqCLC, esCLC, ymCLC)
+    [nuT, nuI, nuS, nunq, nues, nuym] = f_findBull(nqLoA, esLoA, ymLoA, nqLoCA, esLoCA, ymLoCA, nqCL, esCL, ymCL, nqCLC, esCLC, ymCLC)
     if nuT != 0 and bullOK
         if nuT != bullType or nuS != bullStr
             seqCounter += 1
