@@ -690,23 +690,70 @@ if not na(aLine) and showDir != 0
 // טבלת בדיקה (אבחון — כבויה כברירת מחדל)
 // ═══════════════════════════════════════════════════════════════════
 
-var table dbg = table.new(position.top_right, 2, 9, border_width = 1)
+f_yn(b) => b ? "V" : "X"
+f_num(x) => na(x) ? "-" : str.tostring(x, format.mintick)
+
+var table dbg = table.new(position.top_right, 4, 12, border_width = 1)
 if showDebug and barstate.islast
-    table.cell(dbg, 0, 0, "tfClass", bgcolor = color.gray, text_color = color.white)
-    table.cell(dbg, 1, 0, str.tostring(tfClass), bgcolor = color.white)
-    table.cell(dbg, 0, 1, "רמות במיכל", bgcolor = color.gray, text_color = color.white)
-    table.cell(dbg, 1, 1, str.tostring(nLevels), bgcolor = color.white)
-    table.cell(dbg, 0, 2, "bear/bull", bgcolor = color.gray, text_color = color.white)
-    table.cell(dbg, 1, 2, str.tostring(bearType) + " / " + str.tostring(bullType), bgcolor = color.white)
-    table.cell(dbg, 0, 3, "showDir", bgcolor = color.gray, text_color = color.white)
-    table.cell(dbg, 1, 3, str.tostring(showDir), bgcolor = color.white)
-    table.cell(dbg, 0, 4, "bearStr", bgcolor = color.gray, text_color = color.white)
-    table.cell(dbg, 1, 4, bearStr, bgcolor = color.white)
-    table.cell(dbg, 0, 5, "bullStr", bgcolor = color.gray, text_color = color.white)
-    table.cell(dbg, 1, 5, bullStr, bgcolor = color.white)
-    table.cell(dbg, 0, 6, "NQ curHi/Lo", bgcolor = color.gray, text_color = color.white)
-    table.cell(dbg, 1, 6, str.tostring(nqCH, format.mintick) + "/" + str.tostring(nqCL, format.mintick), bgcolor = color.white)
-    table.cell(dbg, 0, 7, "ES curHi/Lo", bgcolor = color.gray, text_color = color.white)
-    table.cell(dbg, 1, 7, str.tostring(esCH, format.mintick) + "/" + str.tostring(esCL, format.mintick), bgcolor = color.white)
-    table.cell(dbg, 0, 8, "YM curHi/Lo", bgcolor = color.gray, text_color = color.white)
-    table.cell(dbg, 1, 8, str.tostring(ymCH, format.mintick) + "/" + str.tostring(ymCL, format.mintick), bgcolor = color.white)
+    // רמות ייחוס הכי נמוכות/גבוהות במיכל (סגירה) — "הכי נמוך/גבוה בחודש"
+    float nqMinLoC = nLevels > 0 ? array.min(nqLoCA) : na
+    float esMinLoC = nLevels > 0 ? array.min(esLoCA) : na
+    float ymMinLoC = nLevels > 0 ? array.min(ymLoCA) : na
+    float nqMaxHiC = nLevels > 0 ? array.max(nqHiCA) : na
+    float esMaxHiC = nLevels > 0 ? array.max(esHiCA) : na
+    float ymMaxHiC = nLevels > 0 ? array.max(ymHiCA) : na
+    hc = color.gray
+    wc = color.white
+    // כותרת
+    table.cell(dbg, 0, 0, "", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 0, "NQ", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 2, 0, "ES", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 3, 0, "YM", bgcolor = hc, text_color = wc)
+    // מצב כללי
+    table.cell(dbg, 0, 1, "tf/lvl/dir", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 1, str.tostring(tfClass), bgcolor = wc)
+    table.cell(dbg, 2, 1, str.tostring(nLevels), bgcolor = wc)
+    table.cell(dbg, 3, 1, str.tostring(showDir), bgcolor = wc)
+    table.cell(dbg, 0, 2, "typ b/u", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 2, str.tostring(bearType) + "/" + str.tostring(bullType), bgcolor = wc)
+    table.cell(dbg, 2, 2, "bear:", bgcolor = wc)
+    table.cell(dbg, 3, 2, bearStr, bgcolor = wc)
+    table.cell(dbg, 0, 3, "str bull", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 3, bullStr, bgcolor = wc)
+    table.cell(dbg, 2, 3, "", bgcolor = wc)
+    table.cell(dbg, 3, 3, "", bgcolor = wc)
+    // שורי — רמה שהוקפאה + לקיחה
+    table.cell(dbg, 0, 4, "bullFroz", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 4, f_num(bullFrozNQ), bgcolor = wc)
+    table.cell(dbg, 2, 4, f_num(bullFrozES), bgcolor = wc)
+    table.cell(dbg, 3, 4, f_num(bullFrozYM), bgcolor = wc)
+    table.cell(dbg, 0, 5, "bullTk", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 5, f_yn(bullTkNQ), bgcolor = wc)
+    table.cell(dbg, 2, 5, f_yn(bullTkES), bgcolor = wc)
+    table.cell(dbg, 3, 5, f_yn(bullTkYM), bgcolor = wc)
+    // דובי — רמה שהוקפאה + לקיחה (YM לא רלוונטי לביטול)
+    table.cell(dbg, 0, 6, "bearFroz", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 6, f_num(bearFrozNQ), bgcolor = wc)
+    table.cell(dbg, 2, 6, f_num(bearFrozES), bgcolor = wc)
+    table.cell(dbg, 3, 6, "-", bgcolor = wc)
+    table.cell(dbg, 0, 7, "bearTk", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 7, f_yn(bearTkNQ), bgcolor = wc)
+    table.cell(dbg, 2, 7, f_yn(bearTkES), bgcolor = wc)
+    table.cell(dbg, 3, 7, "-", bgcolor = wc)
+    // סגירה נוכחית (מצטבר) מול "הכי נמוך/גבוה במיכל"
+    table.cell(dbg, 0, 8, "curLoC", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 8, f_num(nqCLC), bgcolor = wc)
+    table.cell(dbg, 2, 8, f_num(esCLC), bgcolor = wc)
+    table.cell(dbg, 3, 8, f_num(ymCLC), bgcolor = wc)
+    table.cell(dbg, 0, 9, "minLoC", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 9, f_num(nqMinLoC), bgcolor = wc)
+    table.cell(dbg, 2, 9, f_num(esMinLoC), bgcolor = wc)
+    table.cell(dbg, 3, 9, f_num(ymMinLoC), bgcolor = wc)
+    table.cell(dbg, 0, 10, "curHiC", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 10, f_num(nqCHC), bgcolor = wc)
+    table.cell(dbg, 2, 10, f_num(esCHC), bgcolor = wc)
+    table.cell(dbg, 3, 10, f_num(ymCHC), bgcolor = wc)
+    table.cell(dbg, 0, 11, "maxHiC", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 11, f_num(nqMaxHiC), bgcolor = wc)
+    table.cell(dbg, 2, 11, f_num(esMaxHiC), bgcolor = wc)
+    table.cell(dbg, 3, 11, f_num(ymMaxHiC), bgcolor = wc)
