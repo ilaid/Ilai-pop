@@ -89,7 +89,9 @@ qtWeekNum  = isDeadWeek ? 0 : math.floor((monDom - 1) / 7) + 1
 
 tradeDayId = tdYear * 10000 + tdMon * 100 + tdDom
 weekId     = monYear * 10000 + monMonth * 100 + monDom
-monthId    = tdYear * 100 + tdMon
+// חודש-מחזור ל-4H נקבע לפי חודש יום-שני של השבוע — כך הגבול נופל תמיד בתחילת שבוע
+// (ולא באמצע שבוע מת), המיכל מתאפס נכון, ושבוע 1 = השבוע הראשון שכולו בחודש.
+monthId    = monYear * 100 + monMonth
 sessionId  = tradeDayId * 10 + sessionIdx
 microId    = sessionId * 10 + microIdx
 quarterId  = microId * 10 + quarterIdx
@@ -121,9 +123,10 @@ else if tfClass == 1
 newRefCycle  = ta.change(refCycleId)  != 0
 newLifeCycle = ta.change(lifeCycleId) != 0
 
-// ב-1H וב-4H תת-המחזור הראשון משווה לתת-המחזור האחרון של המיכל הקודם (שני↔שישי),
-// אבל אותו "זרע" נמחק אחרי היחידה הראשונה — שישי משווה רק לשני, לא לשאר השבוע.
-keepLast = tfClass == 4 or tfClass == 5
+// ב-1H תת-המחזור הראשון (יום שני) משווה לתת-המחזור האחרון של השבוע הקודם (שישי),
+// אבל אותו "זרע" נמחק אחרי היום הראשון — שישי משווה רק לשני, לא לשאר השבוע.
+// ב-4H המחזור החודשי עומד בפני עצמו: השבועות משווים רק בתוך אותו חודש (בלי חודש קודם).
+keepLast = tfClass == 4
 
 // ═══════════════════════════════════════════════════════════════════
 // True Open
