@@ -256,11 +256,14 @@ if array.size(gaps) > 0
 // זיהוי גאפ קולקטיבי — FVG באותו כיוון, באותו נר, בשני הנכסים
 //
 // נרות: 1 = [2] · 2 = [1] · 3 = [0]
-// גבול נמדד בפתיל, ומורחב לגוף בכל צד שיש בו רווח בין הגופים:
-//   שורי  — תחתון: high[2] → close[2] אם open[1] > close[2]
-//            עליון:  low[0]  → open[0]  אם open[0] > close[1]
-//   דובי  — עליון:  low[2]   → close[2] אם open[1] < close[2]
-//            תחתון: high[0]  → open[0]  אם open[0] < close[1]
+//
+// הגבול נמדד בפתיל. הוא מורחב לגוף רק כשיש באותו צד רווח אמיתי שלא נסחר —
+// כלומר הנר הבא נפתח מעבר לפתיל של הנר הקודם, ולא רק מעבר לסגירה שלו.
+// (סגירה ופתיחה שנבדלות בטיק אחד בתוך הפתיל אינן רווח ולא מרחיבות כלום.)
+//   שורי  — תחתון: high[2] → close[2] אם open[1] > high[2]
+//            עליון:  low[0]  → open[0]  אם low[0]  > close[1]
+//   דובי  — עליון:  low[2]   → close[2] אם open[1] < low[2]
+//            תחתון: high[0]  → open[0]  אם high[0] < close[1]
 // ═══════════════════════════════════════════════════════════════════
 
 minNQSize = minGapPct / 100 * nqC
@@ -281,15 +284,15 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
         float et = na
 
         if newDir == 1
-            nb := (extendBodies and nqO[1] > nqC[2]) ? nqC[2] : nqH[2]
-            nt := (extendBodies and nqO    > nqC[1]) ? nqO    : nqL
-            eb := (extendBodies and esO[1] > esC[2]) ? esC[2] : esH[2]
-            et := (extendBodies and esO    > esC[1]) ? esO    : esL
+            nb := (extendBodies and nqO[1] > nqH[2]) ? nqC[2] : nqH[2]
+            nt := (extendBodies and nqL    > nqC[1]) ? nqO    : nqL
+            eb := (extendBodies and esO[1] > esH[2]) ? esC[2] : esH[2]
+            et := (extendBodies and esL    > esC[1]) ? esO    : esL
         else
-            nt := (extendBodies and nqO[1] < nqC[2]) ? nqC[2] : nqL[2]
-            nb := (extendBodies and nqO    < nqC[1]) ? nqO    : nqH
-            et := (extendBodies and esO[1] < esC[2]) ? esC[2] : esL[2]
-            eb := (extendBodies and esO    < esC[1]) ? esO    : esH
+            nt := (extendBodies and nqO[1] < nqL[2]) ? nqC[2] : nqL[2]
+            nb := (extendBodies and nqH    < nqC[1]) ? nqO    : nqH
+            et := (extendBodies and esO[1] < esL[2]) ? esC[2] : esL[2]
+            eb := (extendBodies and esH    < esC[1]) ? esO    : esH
 
         if nt - nb > minNQSize and et - eb > minESSize
             gapCounter += 1
