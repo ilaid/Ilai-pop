@@ -168,10 +168,15 @@ type Gap
     float esExt
     bool  dead     // הפך ל-IFVG — הרעיון מתבטל
     bool  armed    // תת-המחזור שבו נולד הגאפ הסתיים — רק עכשיו הוא יכול לייצר שבירה
+    // ── השבירה של הגאפ הזה. כל גאפ מחזיק את שלו, הן לא מתחרות על מקום אחד ──
+    int    fDeg    // 0 = עוד לא נרשמה שבירה. יכול רק לעלות.
+    string fLead   // מי הוביל ברגע הרישום
+    int    fSigB   // הנר שבו נרשמה
+    int    fSeq    // מונה רץ — הגבוה ביותר הוא זה שמצויר
+    float  fYPos   // גובה התווית
 
-// הגאפ עצמו נשאר גאפ תקף כל עוד הוא לא הפך ל-IFVG. שבירה שמתה עליו (למשל
-// כשפתיל של הנכס המפגר סתם את הפער) הורגת את השבירה בלבד — לא את הגאפ.
-// אם מאוחר יותר המוביל מעמיק שוב ונוצרת דרגה גבוהה יותר, הגאפ מייצר שבירה חדשה.
+// הגאפ נשאר גאפ תקף כל עוד הוא לא הפך ל-IFVG, והשבירה שנרשמה עליו נשארת איתו.
+// פתיל של הנכס המפגר שמשלים את הפער אינו מבטל אף אחד מהשניים.
 var array<Gap> gaps = array.new<Gap>()
 var int gapCounter  = 0
 
@@ -297,7 +302,7 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
 
         if nt - nb > minNQSize and et - eb > minESSize
             gapCounter += 1
-            Gap gn = Gap.new(gapCounter, newDir, nb, nt, eb, et, refCycleId, bar_index, newDir == 1 ? nt : nb, newDir == 1 ? et : eb, false, false)
+            Gap gn = Gap.new(gapCounter, newDir, nb, nt, eb, et, refCycleId, bar_index, newDir == 1 ? nt : nb, newDir == 1 ? et : eb, false, false, 0, "", 0, 0, na)
             array.push(gaps, gn)
             if array.size(gaps) > maxGaps
                 array.shift(gaps)
@@ -310,128 +315,78 @@ cycleOK  = not (tfClass == 5 and blockDeadWeek and isDeadWeek)
 friBlock = (tfClass == 5 or tfClass == 4) and tdDow == dayofweek.friday
 
 // ═══════════════════════════════════════════════════════════════════
-// מצב השבירה
+// רישום שבירות — לכל גאפ השבירה שלו
+//
+// שבירה היא אירוע שקרה על גאפ מסוים. היא נרשמת על הגאפ עצמו ונשארת שם.
+// הדרגה יכולה רק לעלות. פתיל של הנכס המפגר שמשלים את הפער אינו מבטל כלום.
+// שבירות של גאפים שונים אינן מתחרות זו בזו — כל אחת נרשמת בנפרד, ומה
+// שמצויר על הגרף זו פשוט העדכנית ביותר.
 // ═══════════════════════════════════════════════════════════════════
 
 atr = ta.atr(14)
 
-var int    frDir   = 0     // 0 = אין שבירה
-var int    frDeg   = 0
-var string frLead  = ""
-var int    frGapId = -1
-var int    frSigB  = 0
-var int    frSeq   = 0
-var float  frYPos  = na
-var int    seqCounter = 0
+var int seqCounter = 0
 
-// אינדקס הגאפ הפעיל במערך (האינדקסים זזים כשגאפים נמחקים — נמצא מחדש בכל נר)
-f_findGapIdx(int id) =>
-    int found = -1
-    if array.size(gaps) > 0
-        for i = array.size(gaps) - 1 to 0
-            if found == -1 and array.get(gaps, i).id == id
-                found := i
-    found
-
-// סורק את הגאפים מהחדש לישן ומחזיר את השבירה הראשונה שנמצאה.
-// dirFilter: 0 = כל כיוון · אחרת רק הכיוון הזה.
-f_scan(int dirFilter, int skipId) =>
-    int    rId  = -1
-    int    rDir = 0
-    int    rDeg = 0
-    string rLd  = ""
-    if array.size(gaps) > 0
-        for i = array.size(gaps) - 1 to 0
-            if rDeg == 0
-                Gap gs = array.get(gaps, i)
-                bool skip = gs.dead or not gs.armed or gs.id == skipId or (dirFilter != 0 and gs.dir != dirFilter)
-                if not skip
-                    float dN = gs.depth(true)
-                    float dE = gs.depth(false)
-                    int   deg = f_degree(math.max(dN, dE), math.min(dN, dE))
-                    if deg > 0
-                        rId  := gs.id
-                        rDir := gs.dir
-                        rDeg := deg
-                        rLd  := dN > dE ? "NQ" : "ES"
-    [rId, rDir, rDeg, rLd]
-
-// ── פקיעת מיכל — מוחקת את השבירה ──
-if newLifeCycle
-    frDir   := 0
-    frDeg   := 0
-    frGapId := -1
-
-// ── עדכון השבירה הפעילה ──
-//
-// שבירה היא אירוע שקרה. אחרי שנרשמה היא נשארת על המסך כל עוד הגאפ לא הפך
-// ל-IFVG — פתיל של הנכס המפגר שמשלים את הפער אינו מבטל אותה. הדרגה יכולה
-// רק לעלות (עדכון תווית), אף פעם לא לרדת.
-// מה שכן מבטל: IFVG · שבירה נגדית באותה מסגרת זמן · החלפת מיכל.
-if frDir != 0
-    int idx = f_findGapIdx(frGapId)
-    if idx == -1
-        frDir := 0
-    else
-        Gap ga = array.get(gaps, idx)
-        if ga.dead
-            // IFVG — הרעיון מתבטל, והגאפ עצמו יוצא מהמשחק
-            frDir := 0
-        else
-            float aN = ga.depth(true)
-            float aE = ga.depth(false)
-            int   aDeg = f_degree(math.max(aN, aE), math.min(aN, aE))
-            if aDeg > frDeg
-                frDeg  := aDeg
-                frLead := aN > aE ? "NQ" : "ES"
-
-// ── רישום שבירות בסגירת נר ──
-if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK
-
-    // שבירה נגדית מבטלת את הנוכחית — נסרקת גם כשיש שבירה פעילה
-    if frDir != 0
-        [oId, oDir, oDeg, oLd] = f_scan(-frDir, frGapId)
-        if oDeg > 0
-            seqCounter += 1
-            frDir   := oDir
-            frDeg   := oDeg
-            frLead  := oLd
-            frGapId := oId
-            frSigB  := bar_index
-            frSeq   := seqCounter
-            frYPos  := oDir == 1 ? low - atr * offsetMlt : high + atr * offsetMlt
-
-    // אין שבירה פעילה — מחפשים חדשה בכל כיוון
-    if frDir == 0
-        [nId, nDir, nDeg, nLd] = f_scan(0, -1)
-        if nDeg > 0
-            seqCounter += 1
-            frDir   := nDir
-            frDeg   := nDeg
-            frLead  := nLd
-            frGapId := nId
-            frSigB  := bar_index
-            frSeq   := seqCounter
-            frYPos  := nDir == 1 ? low - atr * offsetMlt : high + atr * offsetMlt
+if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK and array.size(gaps) > 0
+    for i = 0 to array.size(gaps) - 1
+        Gap gr = array.get(gaps, i)
+        if not gr.dead and gr.armed
+            float dN  = gr.depth(true)
+            float dE  = gr.depth(false)
+            int   deg = f_degree(math.max(dN, dE), math.min(dN, dE))
+            if deg > gr.fDeg
+                if gr.fDeg == 0
+                    // שבירה חדשה על הגאפ הזה
+                    seqCounter += 1
+                    gr.fSeq  := seqCounter
+                    gr.fSigB := bar_index
+                    gr.fYPos := gr.dir == 1 ? low - atr * offsetMlt : high + atr * offsetMlt
+                gr.fDeg  := deg
+                gr.fLead := dN > dE ? "NQ" : "ES"
 
 // ═══════════════════════════════════════════════════════════════════
-// ציור — תווית + קופסת הגאפ של נכס הגרף (רק השבירה הפעילה)
+// בחירת מה מוצג — השבירה החיה העדכנית ביותר
+// ═══════════════════════════════════════════════════════════════════
+
+int selIdx = -1
+int selSeq = -1
+if array.size(gaps) > 0
+    for i = 0 to array.size(gaps) - 1
+        Gap gv = array.get(gaps, i)
+        if not gv.dead and gv.fDeg > 0 and gv.fSeq > selSeq
+            selSeq := gv.fSeq
+            selIdx := i
+
+// שבירה נגדית מבטלת את השבירות בכיוון הישן (באותה מסגרת זמן)
+var int shownDir = 0
+if newLifeCycle
+    shownDir := 0
+if selIdx != -1
+    int newDirShown = array.get(gaps, selIdx).dir
+    if shownDir != 0 and newDirShown != shownDir
+        for i = 0 to array.size(gaps) - 1
+            Gap gk = array.get(gaps, i)
+            if gk.dir == shownDir
+                gk.fDeg := 0
+    shownDir := newDirShown
+
+// ═══════════════════════════════════════════════════════════════════
+// ציור — תווית + קופסת הגאפ של נכס הגרף (רק השבירה המוצגת)
 // ═══════════════════════════════════════════════════════════════════
 
 cs    = syminfo.tickerid
 isESc = str.contains(cs, "ES")
 
-var label aLbl  = na
-var box   aBox  = na
-var line  aCE   = na
+var label aLbl = na
+var box   aBox = na
+var line  aCE  = na
 var int   drawnSeq = -999
 var int   drawnDeg = -999
 
-curIdx = frDir != 0 ? f_findGapIdx(frGapId) : -1
+int shownSeq = selIdx == -1 ? -999 : array.get(gaps, selIdx).fSeq
+int shownDeg = selIdx == -1 ? -999 : array.get(gaps, selIdx).fDeg
 
-needRedraw = frSeq != drawnSeq or frDeg != drawnDeg or (frDir == 0 and drawnSeq != -999)
-
-if needRedraw
+if shownSeq != drawnSeq or shownDeg != drawnDeg
     if not na(aLbl)
         label.delete(aLbl)
         aLbl := na
@@ -441,24 +396,24 @@ if needRedraw
     if not na(aCE)
         line.delete(aCE)
         aCE := na
-    if frDir != 0 and curIdx != -1 and not na(frYPos)
-        Gap   gd   = array.get(gaps, curIdx)
-        color col  = frDir == 1 ? colBull : colBear
+    if selIdx != -1
+        Gap   gd   = array.get(gaps, selIdx)
+        color col  = gd.dir == 1 ? colBull : colBear
         // דרגה גבוהה = צבע חזק יותר
-        color cFin = frDeg == 3 ? col : frDeg == 2 ? color.new(col, 25) : color.new(col, 45)
+        color cFin = gd.fDeg == 3 ? col : gd.fDeg == 2 ? color.new(col, 25) : color.new(col, 45)
         float gTop = isESc ? gd.esTop : gd.nqTop
         float gBot = isESc ? gd.esBot : gd.nqBot
-        aLbl := label.new(frSigB, frYPos, "F" + str.tostring(frDeg) + " " + frLead, style = label.style_none, textcolor = cFin, size = labelSize, textalign = text.align_center)
+        aLbl := label.new(gd.fSigB, gd.fYPos, "F" + str.tostring(gd.fDeg) + " " + gd.fLead, style = label.style_none, textcolor = cFin, size = labelSize, textalign = text.align_center)
         if showBox
             aBox := box.new(gd.birth, gTop, bar_index, gBot, border_color = cFin, border_width = 1, bgcolor = color.new(col, boxTransp))
         if showCE
             float ce = (gTop + gBot) / 2
             aCE := line.new(gd.birth, ce, bar_index, ce, color = cFin, style = line.style_dashed, width = 1)
-    drawnSeq := frDir != 0 ? frSeq : -999
-    drawnDeg := frDir != 0 ? frDeg : -999
+    drawnSeq := shownSeq
+    drawnDeg := shownDeg
 
 // הרחבת הציור לנר הנוכחי
-if frDir != 0 and curIdx != -1
+if selIdx != -1
     if not na(aBox)
         box.set_right(aBox, bar_index)
     if not na(aCE)
@@ -476,19 +431,20 @@ if showDebug and barstate.islast
     hc = color.gray
     wc = color.white
 
-    // כמה גאפים חיים ודרוכים
     int tLive  = 0
     int tArmed = 0
+    int tFrac  = 0
     if array.size(gaps) > 0
         for i = 0 to array.size(gaps) - 1
             if not array.get(gaps, i).dead
                 tLive += 1
                 if array.get(gaps, i).armed
                     tArmed += 1
+                if array.get(gaps, i).fDeg > 0
+                    tFrac += 1
 
-    // הגאפ שמוצג בטבלה: זה של השבירה הפעילה, ואם אין — הגאפ החי האחרון.
-    // כך רואים למה גאפ קיים לא ייצר שבירה (לא דרוך? עומק? גודל?).
-    int dIdx = curIdx
+    // הגאפ שמוצג בטבלה: זה של השבירה המוצגת, ואם אין — הגאפ החי האחרון
+    int dIdx = selIdx
     if dIdx == -1 and array.size(gaps) > 0
         for i = array.size(gaps) - 1 to 0
             if dIdx == -1 and not array.get(gaps, i).dead
@@ -499,7 +455,9 @@ if showDebug and barstate.islast
     int   tDir   = 0
     bool  tArm   = false
     int   tId    = -1
-    int   tDeg   = 0
+    int   tNow   = 0
+    int   tReg   = 0
+    string tLd   = ""
     float tNqTop = na
     float tNqBot = na
     float tEsTop = na
@@ -511,7 +469,9 @@ if showDebug and barstate.islast
         tDir   := gt.dir
         tArm   := gt.armed
         tId    := gt.id
-        tDeg   := f_degree(math.max(tN, tE), math.min(tN, tE))
+        tNow   := f_degree(math.max(tN, tE), math.min(tN, tE))
+        tReg   := gt.fDeg
+        tLd    := gt.fLead
         tNqTop := gt.nqTop
         tNqBot := gt.nqBot
         tEsTop := gt.esTop
@@ -525,18 +485,18 @@ if showDebug and barstate.islast
     table.cell(dbg, 1, 1, "tf " + str.tostring(tfClass), bgcolor = wc)
     table.cell(dbg, 2, 1, str.tostring(tArmed) + " arm/" + str.tostring(tLive) + " live", bgcolor = wc)
 
-    table.cell(dbg, 0, 2, "שבירה", bgcolor = hc, text_color = wc)
-    table.cell(dbg, 1, 2, frDir == 0 ? "אין" : (frDir == 1 ? "שורית" : "דובית"), bgcolor = wc)
-    table.cell(dbg, 2, 2, frDir == 0 ? "-" : "F" + str.tostring(frDeg) + " " + frLead, bgcolor = wc)
+    table.cell(dbg, 0, 2, "שבירות פעילות", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 2, str.tostring(tFrac), bgcolor = wc)
+    table.cell(dbg, 2, 2, shownDir == 0 ? "-" : (shownDir == 1 ? "שורית" : "דובית"), bgcolor = wc)
 
-    table.cell(dbg, 0, 3, "── הגאפ האחרון ──", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 0, 3, "── הגאפ המוצג ──", bgcolor = hc, text_color = wc)
     table.cell(dbg, 1, 3, "id " + str.tostring(tId), bgcolor = wc)
     table.cell(dbg, 2, 3, tDir == 0 ? "-" : (tDir == 1 ? "שורי" : "דובי"), bgcolor = wc)
 
-    // אם armed = X — הגאפ עדיין בתת-המחזור שבו נולד, ולכן לא יכול לייצר שבירה
-    table.cell(dbg, 0, 4, "דרוך?", bgcolor = hc, text_color = wc)
-    table.cell(dbg, 1, 4, tArm ? "V" : "X", bgcolor = wc)
-    table.cell(dbg, 2, 4, "deg " + str.tostring(tDeg), bgcolor = wc)
+    // deg נרשם = הדרגה שנרשמה בפועל · deg עכשיו = מה שהעומקים נותנים כרגע
+    table.cell(dbg, 0, 4, "deg נרשם/עכשיו", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 4, str.tostring(tReg) + " " + tLd, bgcolor = wc)
+    table.cell(dbg, 2, 4, str.tostring(tNow) + (tArm ? " arm" : " —"), bgcolor = wc)
 
     table.cell(dbg, 0, 5, "עומק", bgcolor = hc, text_color = wc)
     table.cell(dbg, 1, 5, f_pct(tN), bgcolor = wc)
@@ -550,14 +510,13 @@ if showDebug and barstate.islast
     table.cell(dbg, 1, 7, f_num(tNqBot), bgcolor = wc)
     table.cell(dbg, 2, 7, f_num(tEsBot), bgcolor = wc)
 
-    // גודל הגאפ כאחוז מהמחיר — מול "גודל גאפ מינימלי" שבהגדרות
     table.cell(dbg, 0, 8, "גודל %", bgcolor = hc, text_color = wc)
     table.cell(dbg, 1, 8, na(tNqTop) ? "-" : str.tostring((tNqTop - tNqBot) / nqC * 100, "#.###"), bgcolor = wc)
     table.cell(dbg, 2, 8, na(tEsTop) ? "-" : str.tostring((tEsTop - tEsBot) / esC * 100, "#.###"), bgcolor = wc)
 
     table.cell(dbg, 0, 9, "סף מינימום", bgcolor = hc, text_color = wc)
     table.cell(dbg, 1, 9, str.tostring(minGapPct, "#.###"), bgcolor = wc)
-    table.cell(dbg, 2, 9, "seq " + str.tostring(frSeq), bgcolor = wc)
+    table.cell(dbg, 2, 9, "seq " + str.tostring(seqCounter), bgcolor = wc)
 
     table.cell(dbg, 0, 10, "שבוע", bgcolor = hc, text_color = wc)
     table.cell(dbg, 1, 10, "Q" + str.tostring(qtWeekNum), bgcolor = wc)
