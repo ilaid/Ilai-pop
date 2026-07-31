@@ -73,14 +73,16 @@ quarterIdx    = math.floor(minsInMicro / 22.5)
 
 daysSinceMonday = tdDow == dayofweek.sunday ? 6 : tdDow - 2
 mondayTime      = tradeDayTime - daysSinceMonday * 86400000
-fridayTime      = mondayTime + 4 * 86400000
+thursdayTime    = mondayTime + 3 * 86400000
 
 monMonth = month(mondayTime, TZ)
 monDom   = dayofmonth(mondayTime, TZ)
 monYear  = year(mondayTime, TZ)
-friMonth = month(fridayTime, TZ)
+thuMonth = month(thursdayTime, TZ)
 
-isDeadWeek = monMonth != friMonth
+// שבוע מת = יום שני עד יום חמישי אינם באותו חודש. שבוע נספר לחודש רק אם שני–חמישי
+// שלו באותו חודש (למשל 4.7–9.7 = השבוע הראשון; שבוע שמתחיל 30.6 הוא שבוע מת).
+isDeadWeek = monMonth != thuMonth
 qtWeekNum  = isDeadWeek ? 0 : math.floor((monDom - 1) / 7) + 1
 
 // ═══════════════════════════════════════════════════════════════════
