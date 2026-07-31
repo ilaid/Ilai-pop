@@ -614,8 +614,6 @@ if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK and nLevel
         bearFrozES := nbT == 2 ? array.get(esHiCA, nbI) : array.get(esHiA, nbI)
         bearTkNQ := nbnq
         bearTkES := nbes
-        // שבירה נגדית "שוברת" את השורית (נשמר bullStr כדי שלא תחזור)
-        bullType := 0
 
     [nuT, nuI, nuS, nunq, nues, nuym] = f_findBull(nqLoA, esLoA, ymLoA, nqLoCA, esLoCA, ymLoCA, nqCL, esCL, ymCL, nqCLC, esCLC, ymCLC)
     if nuT != 0 and bullOK and nuS != bullStr
@@ -633,8 +631,6 @@ if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK and nLevel
         bullTkNQ := nunq
         bullTkES := nues
         bullTkYM := nuym
-        // שבירה נגדית "שוברת" את הדובית (נשמר bearStr כדי שלא תחזור)
-        bearType := 0
 
 // ═══════════════════════════════════════════════════════════════════
 // בחירת מה מוצג
