@@ -438,8 +438,9 @@ f_findBear(nqHiA, esHiA, ymHiA, nqHiCA, esHiCA, ymHiCA, nqCH, esCH, ymCH, nqCHC,
         float nqMHc = nqCHC
         float esMHc = esCHC
         float ymMHc = ymCHC
+        bool stopped = false
         for i = n - 1 to 0
-            if bT == 0
+            if bT == 0 and not stopped
                 nw = nqMH > array.get(nqHiA, i)
                 ew = esMH > array.get(esHiA, i)
                 yw = ymMH > array.get(ymHiA, i)
@@ -454,6 +455,8 @@ f_findBear(nqHiA, esHiA, ymHiA, nqHiCA, esHiCA, ymHiCA, nqCH, esCH, ymCH, nqCHC,
                     bT := hs != "" ? 2 : 1
                     bI := i
                     bS := lbl
+                else if nw and ew
+                    stopped := true      // שני החזקים לקחו גבוה — הסכמה, אין שבירה דובית
             nqMH  := math.max(nqMH,  array.get(nqHiA, i))
             esMH  := math.max(esMH,  array.get(esHiA, i))
             ymMH  := math.max(ymMH,  array.get(ymHiA, i))
@@ -476,8 +479,9 @@ f_findBull(nqLoA, esLoA, ymLoA, nqLoCA, esLoCA, ymLoCA, nqCL, esCL, ymCL, nqCLC,
         float nqMLc = nqCLC
         float esMLc = esCLC
         float ymMLc = ymCLC
+        bool stopped = false
         for i = n - 1 to 0
-            if bT == 0
+            if bT == 0 and not stopped
                 nw = nqML < array.get(nqLoA, i)
                 ew = esML < array.get(esLoA, i)
                 yw = ymML < array.get(ymLoA, i)
@@ -492,6 +496,8 @@ f_findBull(nqLoA, esLoA, ymLoA, nqLoCA, esLoCA, ymLoCA, nqCL, esCL, ymCL, nqCLC,
                     bT := hs != "" ? 2 : 1
                     bI := i
                     bS := lbl
+                else if nw and ew and yw
+                    stopped := true      // כל השלושה לקחו נמוך — הסכמה, אין שבירה שורית
             nqML  := math.min(nqML,  array.get(nqLoA, i))
             esML  := math.min(esML,  array.get(esLoA, i))
             ymML  := math.min(ymML,  array.get(ymLoA, i))
@@ -548,8 +554,8 @@ if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK and nLevel
         if bearType == 0                       // תחילת שבירה דובית חדשה
             seqCounter += 1
             bearSeq  := seqCounter
-            bearSigB := bar_index
-            bearYPos := high + atr * offsetMlt
+        bearSigB := bar_index                  // התווית עוקבת אחרי הנר הנוכחי
+        bearYPos := high + atr * offsetMlt
         bearType := nbT
         bearStr  := nbS
         bearLvl  := nbT == 2 ? (isNQc ? array.get(nqHiCA, nbI) : isESc ? array.get(esHiCA, nbI) : array.get(ymHiCA, nbI)) : (isNQc ? array.get(nqHiA, nbI) : isESc ? array.get(esHiA, nbI) : array.get(ymHiA, nbI))
@@ -562,8 +568,8 @@ if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK and nLevel
         if bullType == 0                       // תחילת שבירה שורית חדשה
             seqCounter += 1
             bullSeq  := seqCounter
-            bullSigB := bar_index
-            bullYPos := low - atr * offsetMlt
+        bullSigB := bar_index                  // התווית עוקבת אחרי הנר הנוכחי
+        bullYPos := low - atr * offsetMlt
         bullType := nuT
         bullStr  := nuS
         bullLvl  := nuT == 2 ? (isNQc ? array.get(nqLoCA, nuI) : isESc ? array.get(esLoCA, nuI) : array.get(ymLoCA, nuI)) : (isNQc ? array.get(nqLoA, nuI) : isESc ? array.get(esLoA, nuI) : array.get(ymLoA, nuI))
@@ -625,6 +631,10 @@ if needRedraw
     drawnStr  := dispStr
     drawnLvl  := dispLvl
 
+// התווית והקו עוקבים אחרי הנר הנוכחי
+if not na(aLbl) and showDir != 0
+    label.set_x(aLbl, dispSigB)
+    label.set_y(aLbl, dispYPos)
 if not na(aLine) and showDir != 0
     line.set_x2(aLine, bar_index)
 
