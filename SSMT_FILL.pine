@@ -169,9 +169,11 @@ type Gap
     bool  dead     // הפך ל-IFVG — הרעיון מתבטל
     bool  armed    // תת-המחזור שבו נולד הגאפ הסתיים — רק עכשיו הוא יכול לייצר שבירה
 
-var array<Gap> gaps     = array.new<Gap>()
-var array<int> firedIds = array.new<int>()   // גאפים ששבירתם כבר מתה — בלי החייאה
-var int gapCounter = 0
+// הגאפ עצמו נשאר גאפ תקף כל עוד הוא לא הפך ל-IFVG. שבירה שמתה עליו (למשל
+// כשפתיל של הנכס המפגר סתם את הפער) הורגת את השבירה בלבד — לא את הגאפ.
+// אם מאוחר יותר המוביל מעמיק שוב ונוצרת דרגה גבוהה יותר, הגאפ מייצר שבירה חדשה.
+var array<Gap> gaps = array.new<Gap>()
+var int gapCounter  = 0
 
 // עומק החדירה של נכס לתוך הגאפ שלו, ביחידות של אחוז מהגאפ (פתיל)
 // 0 = לא נגע · 0.5 = CE · 1.0 = הקצה הרחוק · >1 = מעבר לגאפ בפתיל
@@ -215,7 +217,6 @@ if newLifeCycle
     else
         array.clear(gaps)
         seedActive := false
-    array.clear(firedIds)
 else if newRefCycle and seedActive
     if array.size(gaps) > 0
         for i = array.size(gaps) - 1 to 0
@@ -343,7 +344,7 @@ f_scan(int dirFilter, int skipId) =>
         for i = array.size(gaps) - 1 to 0
             if rDeg == 0
                 Gap gs = array.get(gaps, i)
-                bool skip = gs.dead or not gs.armed or gs.id == skipId or array.includes(firedIds, gs.id) or (dirFilter != 0 and gs.dir != dirFilter)
+                bool skip = gs.dead or not gs.armed or gs.id == skipId or (dirFilter != 0 and gs.dir != dirFilter)
                 if not skip
                     float dN = gs.depth(true)
                     float dE = gs.depth(false)
@@ -369,18 +370,15 @@ if frDir != 0
     else
         Gap ga = array.get(gaps, idx)
         if ga.dead
-            // IFVG — הרעיון מתבטל
-            if not array.includes(firedIds, ga.id)
-                array.push(firedIds, ga.id)
+            // IFVG — הרעיון מתבטל, והגאפ עצמו יוצא מהמשחק
             frDir := 0
         else
             float aN = ga.depth(true)
             float aE = ga.depth(false)
             int   aDeg = f_degree(math.max(aN, aE), math.min(aN, aE))
             if aDeg == 0
-                // הנכס המפגר השלים את הפער — השבירה מתה
-                if not array.includes(firedIds, ga.id)
-                    array.push(firedIds, ga.id)
+                // הנכס המפגר השלים את הפער — מתה השבירה בלבד. הגאפ נשאר תקף
+                // ויכול לייצר שבירה חדשה אם המוביל יעמיק שוב.
                 frDir := 0
             else
                 frDeg  := aDeg
@@ -393,8 +391,6 @@ if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK
     if frDir != 0
         [oId, oDir, oDeg, oLd] = f_scan(-frDir, frGapId)
         if oDeg > 0
-            if not array.includes(firedIds, frGapId)
-                array.push(firedIds, frGapId)
             seqCounter += 1
             frDir   := oDir
             frDeg   := oDeg
@@ -560,7 +556,7 @@ if showDebug and barstate.islast
 
     table.cell(dbg, 0, 9, "סף מינימום", bgcolor = hc, text_color = wc)
     table.cell(dbg, 1, 9, str.tostring(minGapPct, "#.###"), bgcolor = wc)
-    table.cell(dbg, 2, 9, "fired " + str.tostring(array.size(firedIds)), bgcolor = wc)
+    table.cell(dbg, 2, 9, "seq " + str.tostring(frSeq), bgcolor = wc)
 
     table.cell(dbg, 0, 10, "שבוע", bgcolor = hc, text_color = wc)
     table.cell(dbg, 1, 10, "Q" + str.tostring(qtWeekNum), bgcolor = wc)
