@@ -1,0 +1,514 @@
+//@version=5
+indicator("SSMT Fill | Quarterly Theory", overlay = true, max_labels_count = 20, max_lines_count = 20, max_boxes_count = 30)
+
+// ═══════════════════════════════════════════════════════════════════
+// SSMT Fill — סטיית קורלציה לפי מילוי גאפים
+//
+// גאפ קולקטיבי = FVG באותו כיוון, באותו נר, בשני הנכסים (NQ + ES).
+// שבירה = נכס אחד נכנס לגאפ עמוק יותר מהשני. שלוש דרגות:
+//   דרגה 1 — נכס אחד נגע, השני לא נגע בכלל.
+//   דרגה 2 — נכס אחד הגיע ל-CE (50%), השני לא.
+//   דרגה 3 — נכס אחד הגיע לקצה הרחוק (או מעבר בפתיל, בלי סגירה), השני לא.
+// כשכמה דרגות מתקיימות יחד — מוצגת הגבוהה ביותר.
+//
+// הצנרת (זמן, סייקלים, תת-מחזור/מיכל, מחזור חיים) זהה ל-SSMT+HSSMT.
+// ═══════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════
+// הגדרות משתמש
+// ═══════════════════════════════════════════════════════════════════
+
+grpSym = "סימבולים"
+useMicro  = input.bool(false, "השתמש בחוזי מיקרו", group = grpSym)
+symNQ_std = input.symbol("CME_MINI:NQ1!", "NQ רגיל",  group = grpSym)
+symES_std = input.symbol("CME_MINI:ES1!", "ES רגיל",  group = grpSym)
+symNQ_mic = input.symbol("CME_MINI:MNQ1!", "NQ מיקרו", group = grpSym)
+symES_mic = input.symbol("CME_MINI:MES1!", "ES מיקרו", group = grpSym)
+
+grpGap = "הגדרת גאפ"
+extendBodies = input.bool(true,  "הרחב גאפ לגופי הנרות (רווח סגירה/פתיחה)", group = grpGap)
+minGapTicks  = input.float(0.0, "גודל גאפ מינימלי (בטיקים)", minval = 0.0, step = 1.0, group = grpGap)
+
+grpVis = "תצוגה"
+colBull   = input.color(#26a69a, "צבע שורי", group = grpVis)
+colBear   = input.color(#ef5350, "צבע דובי", group = grpVis)
+labelSize = input.string("small", "גודל תווית", options = ["tiny", "small", "normal"], group = grpVis)
+offsetMlt = input.float(1.5, "מרחק התווית מהנר (ATR)", minval = 0.1, maxval = 6.0, step = 0.1, group = grpVis)
+showBox   = input.bool(true, "הצג קופסת גאפ", group = grpVis)
+boxTransp = input.int(88, "שקיפות הקופסה", minval = 60, maxval = 98, group = grpVis)
+showCE    = input.bool(false, "הצג קו CE (חצי גאפ)", group = grpVis)
+showDebug = input.bool(false, "הצג טבלת בדיקה", group = grpVis)
+
+grpLogic = "לוגיקה"
+blockDeadWeek = input.bool(true, "חסום שבירות בשבוע מת (4H בלבד)", group = grpLogic)
+maxGaps       = input.int(60, "מקסימום גאפים במיכל", minval = 5, maxval = 200, group = grpLogic)
+
+// ═══════════════════════════════════════════════════════════════════
+// בחירת סימבולים
+// ═══════════════════════════════════════════════════════════════════
+
+sNQ = useMicro ? symNQ_mic : symNQ_std
+sES = useMicro ? symES_mic : symES_std
+
+// ═══════════════════════════════════════════════════════════════════
+// זיהוי Timeframe
+// ═══════════════════════════════════════════════════════════════════
+
+tfMin   = timeframe.in_seconds() / 60
+tfClass = tfMin <= 1 ? 1 : tfMin <= 5 ? 2 : tfMin <= 15 ? 3 : tfMin <= 60 ? 4 : tfMin <= 240 ? 5 : 0
+
+// ═══════════════════════════════════════════════════════════════════
+// חישובי זמן EST — יום המסחר מתחיל ב-18:00 ניו-יורק
+// ═══════════════════════════════════════════════════════════════════
+
+TZ = "America/New_York"
+estHour = hour(time, TZ)
+estMin  = minute(time, TZ)
+
+minutesOfDay = estHour * 60 + estMin
+
+isPostOpen       = minutesOfDay >= 1080
+minsFromDayStart = isPostOpen ? minutesOfDay - 1080 : minutesOfDay + 360
+
+tradeDayTime = isPostOpen ? time + 86400000 : time
+tdYear = year(tradeDayTime, TZ)
+tdMon  = month(tradeDayTime, TZ)
+tdDom  = dayofmonth(tradeDayTime, TZ)
+tdDow  = dayofweek(tradeDayTime, TZ)
+
+sessionIdx    = math.floor(minsFromDayStart / 360)
+minsInSession = minsFromDayStart % 360
+microIdx      = math.floor(minsInSession / 90)
+minsInMicro   = minsInSession % 90
+quarterIdx    = math.floor(minsInMicro / 22.5)
+
+// ═══════════════════════════════════════════════════════════════════
+// מספור שבועות לפי QT
+// ═══════════════════════════════════════════════════════════════════
+
+daysSinceMonday = tdDow == dayofweek.sunday ? 6 : tdDow - 2
+mondayTime      = tradeDayTime - daysSinceMonday * 86400000
+fridayTime      = mondayTime + 4 * 86400000
+
+monMonth = month(mondayTime, TZ)
+monDom   = dayofmonth(mondayTime, TZ)
+monYear  = year(mondayTime, TZ)
+friMonth = month(fridayTime, TZ)
+
+isDeadWeek = monMonth != friMonth
+qtWeekNum  = isDeadWeek ? 0 : math.floor((monDom - 1) / 7) + 1
+
+// ═══════════════════════════════════════════════════════════════════
+// מזהי מחזורים
+// ═══════════════════════════════════════════════════════════════════
+
+tradeDayId = tdYear * 10000 + tdMon * 100 + tdDom
+weekId     = monYear * 10000 + monMonth * 100 + monDom
+// חודש-מחזור ל-4H נקבע לפי חודש יום-שני של השבוע — כך הגבול תמיד נופל
+// בתחילת שבוע (ולא באמצע שבוע מת) והמיכל מתאפס נכון.
+monthId    = monYear * 100 + monMonth
+sessionId  = tradeDayId * 10 + sessionIdx
+microId    = sessionId * 10 + microIdx
+quarterId  = microId * 10 + quarterIdx
+
+refCycleId = 0
+if tfClass == 5
+    refCycleId := weekId
+else if tfClass == 4
+    refCycleId := tradeDayId
+else if tfClass == 3
+    refCycleId := sessionId
+else if tfClass == 2
+    refCycleId := microId
+else if tfClass == 1
+    refCycleId := quarterId
+
+lifeCycleId = 0
+if tfClass == 5
+    lifeCycleId := monthId
+else if tfClass == 4
+    lifeCycleId := weekId
+else if tfClass == 3
+    lifeCycleId := tradeDayId
+else if tfClass == 2
+    lifeCycleId := sessionId
+else if tfClass == 1
+    lifeCycleId := microId
+
+newRefCycle  = ta.change(refCycleId)  != 0
+newLifeCycle = ta.change(lifeCycleId) != 0
+
+// ב-1H התת-מחזור הראשון (יום שני) משווה גם לגאפים של התת-מחזור האחרון
+// של השבוע הקודם (שישי) — אותו "זרע" נמחק אחרי היום הראשון.
+keepLast = tfClass == 4
+
+// ═══════════════════════════════════════════════════════════════════
+// משיכת נתוני שני הנכסים
+// ═══════════════════════════════════════════════════════════════════
+
+[nqO, nqH, nqL, nqC] = request.security(sNQ, timeframe.period, [open, high, low, close], lookahead = barmerge.lookahead_off)
+[esO, esH, esL, esC] = request.security(sES, timeframe.period, [open, high, low, close], lookahead = barmerge.lookahead_off)
+
+// ═══════════════════════════════════════════════════════════════════
+// טיפוס הגאפ הקולקטיבי
+// ═══════════════════════════════════════════════════════════════════
+
+type Gap
+    int   id
+    int   dir      // 1 = שורי (יושב מתחת למחיר), -1 = דובי
+    float nqBot
+    float nqTop
+    float esBot
+    float esTop
+    int   refId
+    int   birth
+    float nqExt    // הקיצוניות המתגלגלת של NQ מאז הלידה (min ל-bull, max ל-bear)
+    float esExt
+    bool  dead     // הפך ל-IFVG — הרעיון מתבטל
+
+var array<Gap> gaps     = array.new<Gap>()
+var array<int> firedIds = array.new<int>()   // גאפים ששבירתם כבר מתה — בלי החייאה
+var int gapCounter = 0
+
+// עומק החדירה של נכס לתוך הגאפ שלו, ביחידות של אחוז מהגאפ (פתיל)
+// 0 = לא נגע · 0.5 = CE · 1.0 = הקצה הרחוק · >1 = מעבר לגאפ בפתיל
+method depth(Gap g, bool isNQ) =>
+    float top = isNQ ? g.nqTop : g.esTop
+    float bot = isNQ ? g.nqBot : g.esBot
+    float ext = isNQ ? g.nqExt : g.esExt
+    float rng = top - bot
+    float d = 0.0
+    if rng > 0 and not na(ext)
+        d := g.dir == 1 ? (top - ext) / rng : (ext - bot) / rng
+    math.max(d, 0.0)
+
+// דרגת השבירה — הגבוהה ביותר שמתקיימת. 0 = אין שבירה.
+f_degree(float dLead, float dLag) =>
+    int deg = 0
+    if dLead >= 1.0 and dLag < 1.0
+        deg := 3
+    else if dLead >= 0.5 and dLag < 0.5
+        deg := 2
+    else if dLead > 0.0 and dLag <= 0.0
+        deg := 1
+    deg
+
+// ═══════════════════════════════════════════════════════════════════
+// איפוס מיכל + מנגנון הזרע (שני/שישי ב-1H)
+// ═══════════════════════════════════════════════════════════════════
+
+var bool seedActive = false
+var int  seedRefId  = 0
+
+if newLifeCycle
+    int prevRef = nz(refCycleId[1], 0)
+    if keepLast
+        if array.size(gaps) > 0
+            for i = array.size(gaps) - 1 to 0
+                if array.get(gaps, i).refId != prevRef
+                    array.remove(gaps, i)
+        seedRefId  := prevRef
+        seedActive := array.size(gaps) > 0
+    else
+        array.clear(gaps)
+        seedActive := false
+    array.clear(firedIds)
+else if newRefCycle and seedActive
+    if array.size(gaps) > 0
+        for i = array.size(gaps) - 1 to 0
+            if array.get(gaps, i).refId == seedRefId
+                array.remove(gaps, i)
+    seedActive := false
+
+// ═══════════════════════════════════════════════════════════════════
+// עדכון עומק החדירה + מוות ב-IFVG
+// ═══════════════════════════════════════════════════════════════════
+
+if array.size(gaps) > 0
+    for i = 0 to array.size(gaps) - 1
+        Gap gu = array.get(gaps, i)
+        if not gu.dead and bar_index > gu.birth
+            if gu.dir == 1
+                gu.nqExt := math.min(gu.nqExt, nqL)
+                gu.esExt := math.min(gu.esExt, esL)
+                // IFVG: סגירה מתחת לגאפ הופכת אותו — הרעיון מתבטל
+                if barstate.isconfirmed and (nqC < gu.nqBot or esC < gu.esBot)
+                    gu.dead := true
+            else
+                gu.nqExt := math.max(gu.nqExt, nqH)
+                gu.esExt := math.max(gu.esExt, esH)
+                if barstate.isconfirmed and (nqC > gu.nqTop or esC > gu.esTop)
+                    gu.dead := true
+
+// ═══════════════════════════════════════════════════════════════════
+// זיהוי גאפ קולקטיבי — FVG באותו כיוון, באותו נר, בשני הנכסים
+//
+// נרות: 1 = [2] · 2 = [1] · 3 = [0]
+// גבול נמדד בפתיל, ומורחב לגוף בכל צד שיש בו רווח בין הגופים:
+//   שורי  — תחתון: high[2] → close[2] אם open[1] > close[2]
+//            עליון:  low[0]  → open[0]  אם open[0] > close[1]
+//   דובי  — עליון:  low[2]   → close[2] אם open[1] < close[2]
+//            תחתון: high[0]  → open[0]  אם open[0] < close[1]
+// ═══════════════════════════════════════════════════════════════════
+
+minGapSize = minGapTicks * syminfo.mintick
+
+if barstate.isconfirmed and tfClass != 0 and bar_index > 2
+    bool bullNQ = nqL > nqH[2]
+    bool bullES = esL > esH[2]
+    bool bearNQ = nqH < nqL[2]
+    bool bearES = esH < esL[2]
+
+    int  newDir = (bullNQ and bullES) ? 1 : (bearNQ and bearES) ? -1 : 0
+
+    if newDir != 0
+        float nb = na
+        float nt = na
+        float eb = na
+        float et = na
+
+        if newDir == 1
+            nb := (extendBodies and nqO[1] > nqC[2]) ? nqC[2] : nqH[2]
+            nt := (extendBodies and nqO    > nqC[1]) ? nqO    : nqL
+            eb := (extendBodies and esO[1] > esC[2]) ? esC[2] : esH[2]
+            et := (extendBodies and esO    > esC[1]) ? esO    : esL
+        else
+            nt := (extendBodies and nqO[1] < nqC[2]) ? nqC[2] : nqL[2]
+            nb := (extendBodies and nqO    < nqC[1]) ? nqO    : nqH
+            et := (extendBodies and esO[1] < esC[2]) ? esC[2] : esL[2]
+            eb := (extendBodies and esO    < esC[1]) ? esO    : esH
+
+        if nt - nb > minGapSize and et - eb > minGapSize
+            gapCounter += 1
+            Gap gn = Gap.new(gapCounter, newDir, nb, nt, eb, et, refCycleId, bar_index, newDir == 1 ? nt : nb, newDir == 1 ? et : eb, false)
+            array.push(gaps, gn)
+            if array.size(gaps) > maxGaps
+                array.shift(gaps)
+
+// ═══════════════════════════════════════════════════════════════════
+// חסימות
+// ═══════════════════════════════════════════════════════════════════
+
+cycleOK  = not (tfClass == 5 and blockDeadWeek and isDeadWeek)
+friBlock = (tfClass == 5 or tfClass == 4) and tdDow == dayofweek.friday
+
+// ═══════════════════════════════════════════════════════════════════
+// מצב השבירה
+// ═══════════════════════════════════════════════════════════════════
+
+atr = ta.atr(14)
+
+var int    frDir   = 0     // 0 = אין שבירה
+var int    frDeg   = 0
+var string frLead  = ""
+var int    frGapId = -1
+var int    frSigB  = 0
+var int    frSeq   = 0
+var float  frYPos  = na
+var int    seqCounter = 0
+
+// אינדקס הגאפ הפעיל במערך (האינדקסים זזים כשגאפים נמחקים — נמצא מחדש בכל נר)
+f_findGapIdx(int id) =>
+    int found = -1
+    if array.size(gaps) > 0
+        for i = array.size(gaps) - 1 to 0
+            if found == -1 and array.get(gaps, i).id == id
+                found := i
+    found
+
+// סורק את הגאפים מהחדש לישן ומחזיר את השבירה הראשונה שנמצאה.
+// dirFilter: 0 = כל כיוון · אחרת רק הכיוון הזה.
+f_scan(int dirFilter, int skipId) =>
+    int    rId  = -1
+    int    rDir = 0
+    int    rDeg = 0
+    string rLd  = ""
+    if array.size(gaps) > 0
+        for i = array.size(gaps) - 1 to 0
+            if rDeg == 0
+                Gap gs = array.get(gaps, i)
+                bool skip = gs.dead or gs.id == skipId or array.includes(firedIds, gs.id) or (dirFilter != 0 and gs.dir != dirFilter)
+                if not skip
+                    float dN = gs.depth(true)
+                    float dE = gs.depth(false)
+                    int   deg = f_degree(math.max(dN, dE), math.min(dN, dE))
+                    if deg > 0
+                        rId  := gs.id
+                        rDir := gs.dir
+                        rDeg := deg
+                        rLd  := dN > dE ? "NQ" : "ES"
+    [rId, rDir, rDeg, rLd]
+
+// ── פקיעת מיכל — מוחקת את השבירה ──
+if newLifeCycle
+    frDir   := 0
+    frDeg   := 0
+    frGapId := -1
+
+// ── עדכון / מוות של השבירה הפעילה ──
+if frDir != 0
+    int idx = f_findGapIdx(frGapId)
+    if idx == -1
+        frDir := 0
+    else
+        Gap ga = array.get(gaps, idx)
+        if ga.dead
+            // IFVG — הרעיון מתבטל
+            if not array.includes(firedIds, ga.id)
+                array.push(firedIds, ga.id)
+            frDir := 0
+        else
+            float aN = ga.depth(true)
+            float aE = ga.depth(false)
+            int   aDeg = f_degree(math.max(aN, aE), math.min(aN, aE))
+            if aDeg == 0
+                // הנכס המפגר השלים את הפער — השבירה מתה
+                if not array.includes(firedIds, ga.id)
+                    array.push(firedIds, ga.id)
+                frDir := 0
+            else
+                frDeg  := aDeg
+                frLead := aN > aE ? "NQ" : "ES"
+
+// ── רישום שבירות בסגירת נר ──
+if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK
+
+    // שבירה נגדית מבטלת את הנוכחית — נסרקת גם כשיש שבירה פעילה
+    if frDir != 0
+        [oId, oDir, oDeg, oLd] = f_scan(-frDir, frGapId)
+        if oDeg > 0
+            if not array.includes(firedIds, frGapId)
+                array.push(firedIds, frGapId)
+            seqCounter += 1
+            frDir   := oDir
+            frDeg   := oDeg
+            frLead  := oLd
+            frGapId := oId
+            frSigB  := bar_index
+            frSeq   := seqCounter
+            frYPos  := oDir == 1 ? low - atr * offsetMlt : high + atr * offsetMlt
+
+    // אין שבירה פעילה — מחפשים חדשה בכל כיוון
+    if frDir == 0
+        [nId, nDir, nDeg, nLd] = f_scan(0, -1)
+        if nDeg > 0
+            seqCounter += 1
+            frDir   := nDir
+            frDeg   := nDeg
+            frLead  := nLd
+            frGapId := nId
+            frSigB  := bar_index
+            frSeq   := seqCounter
+            frYPos  := nDir == 1 ? low - atr * offsetMlt : high + atr * offsetMlt
+
+// ═══════════════════════════════════════════════════════════════════
+// ציור — תווית + קופסת הגאפ של נכס הגרף (רק השבירה הפעילה)
+// ═══════════════════════════════════════════════════════════════════
+
+cs    = syminfo.tickerid
+isESc = str.contains(cs, "ES")
+
+var label aLbl  = na
+var box   aBox  = na
+var line  aCE   = na
+var int   drawnSeq = -999
+var int   drawnDeg = -999
+
+curIdx = frDir != 0 ? f_findGapIdx(frGapId) : -1
+
+needRedraw = frSeq != drawnSeq or frDeg != drawnDeg or (frDir == 0 and drawnSeq != -999)
+
+if needRedraw
+    if not na(aLbl)
+        label.delete(aLbl)
+        aLbl := na
+    if not na(aBox)
+        box.delete(aBox)
+        aBox := na
+    if not na(aCE)
+        line.delete(aCE)
+        aCE := na
+    if frDir != 0 and curIdx != -1 and not na(frYPos)
+        Gap   gd   = array.get(gaps, curIdx)
+        color col  = frDir == 1 ? colBull : colBear
+        // דרגה גבוהה = צבע חזק יותר
+        color cFin = frDeg == 3 ? col : frDeg == 2 ? color.new(col, 25) : color.new(col, 45)
+        float gTop = isESc ? gd.esTop : gd.nqTop
+        float gBot = isESc ? gd.esBot : gd.nqBot
+        aLbl := label.new(frSigB, frYPos, "F" + str.tostring(frDeg) + " " + frLead, style = label.style_none, textcolor = cFin, size = labelSize, textalign = text.align_center)
+        if showBox
+            aBox := box.new(gd.birth, gTop, bar_index, gBot, border_color = cFin, border_width = 1, bgcolor = color.new(col, boxTransp))
+        if showCE
+            float ce = (gTop + gBot) / 2
+            aCE := line.new(gd.birth, ce, bar_index, ce, color = cFin, style = line.style_dashed, width = 1)
+    drawnSeq := frDir != 0 ? frSeq : -999
+    drawnDeg := frDir != 0 ? frDeg : -999
+
+// הרחבת הציור לנר הנוכחי
+if frDir != 0 and curIdx != -1
+    if not na(aBox)
+        box.set_right(aBox, bar_index)
+    if not na(aCE)
+        line.set_x2(aCE, bar_index)
+
+// ═══════════════════════════════════════════════════════════════════
+// טבלת בדיקה (אבחון — כבויה כברירת מחדל)
+// ═══════════════════════════════════════════════════════════════════
+
+f_num(float x) => na(x) ? "-" : str.tostring(x, format.mintick)
+f_pct(float x) => na(x) ? "-" : str.tostring(math.round(x * 100)) + "%"
+
+var table dbg = table.new(position.top_right, 3, 10, border_width = 1)
+if showDebug and barstate.islast
+    hc = color.gray
+    wc = color.white
+    float tN = na
+    float tE = na
+    float tTop = na
+    float tBot = na
+    if curIdx != -1
+        Gap gt = array.get(gaps, curIdx)
+        tN   := gt.depth(true)
+        tE   := gt.depth(false)
+        tTop := isESc ? gt.esTop : gt.nqTop
+        tBot := isESc ? gt.esBot : gt.nqBot
+
+    table.cell(dbg, 0, 0, "SSMT Fill", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 0, "NQ", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 2, 0, "ES", bgcolor = hc, text_color = wc)
+
+    table.cell(dbg, 0, 1, "tfClass", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 1, str.tostring(tfClass), bgcolor = wc)
+    table.cell(dbg, 2, 1, "gaps " + str.tostring(array.size(gaps)), bgcolor = wc)
+
+    table.cell(dbg, 0, 2, "dir/deg", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 2, str.tostring(frDir), bgcolor = wc)
+    table.cell(dbg, 2, 2, str.tostring(frDeg), bgcolor = wc)
+
+    table.cell(dbg, 0, 3, "lead", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 3, frLead, bgcolor = wc)
+    table.cell(dbg, 2, 3, "seq " + str.tostring(frSeq), bgcolor = wc)
+
+    table.cell(dbg, 0, 4, "depth", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 4, f_pct(tN), bgcolor = wc)
+    table.cell(dbg, 2, 4, f_pct(tE), bgcolor = wc)
+
+    table.cell(dbg, 0, 5, "gapTop", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 5, f_num(tTop), bgcolor = wc)
+    table.cell(dbg, 2, 5, "", bgcolor = wc)
+
+    table.cell(dbg, 0, 6, "gapBot", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 6, f_num(tBot), bgcolor = wc)
+    table.cell(dbg, 2, 6, "", bgcolor = wc)
+
+    table.cell(dbg, 0, 7, "gapId", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 7, str.tostring(frGapId), bgcolor = wc)
+    table.cell(dbg, 2, 7, "fired " + str.tostring(array.size(firedIds)), bgcolor = wc)
+
+    table.cell(dbg, 0, 8, "week", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 8, "Q" + str.tostring(qtWeekNum), bgcolor = wc)
+    table.cell(dbg, 2, 8, isDeadWeek ? "DEAD" : "-", bgcolor = wc)
+
+    table.cell(dbg, 0, 9, "seed", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 9, seedActive ? "V" : "X", bgcolor = wc)
+    table.cell(dbg, 2, 9, friBlock ? "FRI" : "-", bgcolor = wc)
