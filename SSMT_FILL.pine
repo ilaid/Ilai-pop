@@ -166,6 +166,9 @@ type Gap
     int   birth
     float nqExt    // הקיצוניות המתגלגלת של NQ מאז הדריכה (min ל-bull, max ל-bear)
     float esExt
+    int   nqExtB   // הנר שבו NQ הגיע לעומק הזה — לאבחון
+    int   esExtB
+    int   armB     // הנר שבו הגאפ נדרך — לאבחון
     bool  dead     // הפך ל-IFVG — הרעיון מתבטל
     bool  armed    // תת-המחזור שבו נולד הגאפ הסתיים — רק עכשיו הוא יכול לייצר שבירה
     // ── השבירה של הגאפ הזה. כל גאפ מחזיק את שלו, הן לא מתחרות על מקום אחד ──
@@ -244,17 +247,26 @@ if array.size(gaps) > 0
         if not gu.dead
             if not gu.armed and gu.refId != refCycleId
                 gu.armed := true
+                gu.armB  := bar_index
             if gu.dir == 1
                 if gu.armed
-                    gu.nqExt := math.min(gu.nqExt, nqL)
-                    gu.esExt := math.min(gu.esExt, esL)
+                    if nqL < gu.nqExt
+                        gu.nqExt  := nqL
+                        gu.nqExtB := bar_index
+                    if esL < gu.esExt
+                        gu.esExt  := esL
+                        gu.esExtB := bar_index
                 // IFVG: סגירה מתחת לגאפ הופכת אותו — הרעיון מתבטל (גם לפני הדריכה)
                 if barstate.isconfirmed and bar_index > gu.birth and (nqC < gu.nqBot or esC < gu.esBot)
                     gu.dead := true
             else
                 if gu.armed
-                    gu.nqExt := math.max(gu.nqExt, nqH)
-                    gu.esExt := math.max(gu.esExt, esH)
+                    if nqH > gu.nqExt
+                        gu.nqExt  := nqH
+                        gu.nqExtB := bar_index
+                    if esH > gu.esExt
+                        gu.esExt  := esH
+                        gu.esExtB := bar_index
                 if barstate.isconfirmed and bar_index > gu.birth and (nqC > gu.nqTop or esC > gu.esTop)
                     gu.dead := true
 
@@ -302,7 +314,7 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
 
         if nt - nb > minNQSize and et - eb > minESSize
             gapCounter += 1
-            Gap gn = Gap.new(gapCounter, newDir, nb, nt, eb, et, refCycleId, bar_index, newDir == 1 ? nt : nb, newDir == 1 ? et : eb, false, false, 0, "", 0, 0, na)
+            Gap gn = Gap.new(gapCounter, newDir, nb, nt, eb, et, refCycleId, bar_index, newDir == 1 ? nt : nb, newDir == 1 ? et : eb, 0, 0, 0, false, false, 0, "", 0, 0, na)
             array.push(gaps, gn)
             if array.size(gaps) > maxGaps
                 array.shift(gaps)
@@ -425,6 +437,10 @@ if selIdx != -1
 
 f_num(float x) => na(x) ? "-" : str.tostring(x, format.mintick)
 f_pct(float x) => na(x) ? "-" : str.tostring(math.round(x * 100)) + "%"
+// שעת EST של נר לפי bar_index
+f_time(int b) =>
+    int off = bar_index - b
+    b <= 0 or off < 0 ? "-" : str.format_time(time[off], "HH:mm", TZ)
 
 var table dbg = table.new(position.top_right, 3, 12, border_width = 1)
 if showDebug and barstate.islast
@@ -462,8 +478,16 @@ if showDebug and barstate.islast
     float tNqBot = na
     float tEsTop = na
     float tEsBot = na
+    int   tNqExtB = 0
+    int   tEsExtB = 0
+    int   tArmB   = 0
+    int   tBirth  = 0
     if dIdx != -1
         Gap gt = array.get(gaps, dIdx)
+        tNqExtB := gt.nqExtB
+        tEsExtB := gt.esExtB
+        tArmB   := gt.armB
+        tBirth  := gt.birth
         tN     := gt.depth(true)
         tE     := gt.depth(false)
         tDir   := gt.dir
@@ -510,13 +534,15 @@ if showDebug and barstate.islast
     table.cell(dbg, 1, 7, f_num(tNqBot), bgcolor = wc)
     table.cell(dbg, 2, 7, f_num(tEsBot), bgcolor = wc)
 
-    table.cell(dbg, 0, 8, "גודל %", bgcolor = hc, text_color = wc)
-    table.cell(dbg, 1, 8, na(tNqTop) ? "-" : str.tostring((tNqTop - tNqBot) / nqC * 100, "#.###"), bgcolor = wc)
-    table.cell(dbg, 2, 8, na(tEsTop) ? "-" : str.tostring((tEsTop - tEsBot) / esC * 100, "#.###"), bgcolor = wc)
+    // מתי כל נכס הגיע לעומק שלו, ומתי הגאפ נדרך — מגלה אם נספרת תנועה
+    // מלפני הדריכה (כלומר מהתת-מחזור שבו הגאפ נולד)
+    table.cell(dbg, 0, 8, "שעת העומק", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 8, f_time(tNqExtB), bgcolor = wc)
+    table.cell(dbg, 2, 8, f_time(tEsExtB), bgcolor = wc)
 
-    table.cell(dbg, 0, 9, "סף מינימום", bgcolor = hc, text_color = wc)
-    table.cell(dbg, 1, 9, str.tostring(minGapPct, "#.###"), bgcolor = wc)
-    table.cell(dbg, 2, 9, "seq " + str.tostring(seqCounter), bgcolor = wc)
+    table.cell(dbg, 0, 9, "נולד / נדרך", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 9, f_time(tBirth), bgcolor = wc)
+    table.cell(dbg, 2, 9, f_time(tArmB), bgcolor = wc)
 
     table.cell(dbg, 0, 10, "שבוע", bgcolor = hc, text_color = wc)
     table.cell(dbg, 1, 10, "Q" + str.tostring(qtWeekNum), bgcolor = wc)
