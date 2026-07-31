@@ -362,7 +362,12 @@ if newLifeCycle
     frDeg   := 0
     frGapId := -1
 
-// ── עדכון / מוות של השבירה הפעילה ──
+// ── עדכון השבירה הפעילה ──
+//
+// שבירה היא אירוע שקרה. אחרי שנרשמה היא נשארת על המסך כל עוד הגאפ לא הפך
+// ל-IFVG — פתיל של הנכס המפגר שמשלים את הפער אינו מבטל אותה. הדרגה יכולה
+// רק לעלות (עדכון תווית), אף פעם לא לרדת.
+// מה שכן מבטל: IFVG · שבירה נגדית באותה מסגרת זמן · החלפת מיכל.
 if frDir != 0
     int idx = f_findGapIdx(frGapId)
     if idx == -1
@@ -376,11 +381,7 @@ if frDir != 0
             float aN = ga.depth(true)
             float aE = ga.depth(false)
             int   aDeg = f_degree(math.max(aN, aE), math.min(aN, aE))
-            if aDeg == 0
-                // הנכס המפגר השלים את הפער — מתה השבירה בלבד. הגאפ נשאר תקף
-                // ויכול לייצר שבירה חדשה אם המוביל יעמיק שוב.
-                frDir := 0
-            else
+            if aDeg > frDeg
                 frDeg  := aDeg
                 frLead := aN > aE ? "NQ" : "ES"
 
