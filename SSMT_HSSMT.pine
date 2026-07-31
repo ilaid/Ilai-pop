@@ -447,10 +447,13 @@ f_findBear(nqHiA, esHiA, ymHiA, nqHiCA, esHiCA, ymHiCA, nqCH, esCH, ymCH, nqCHC,
                 ec = esMHc > array.get(esHiCA, i)
                 yc = ymMHc > array.get(ymHiCA, i)
                 if (nw or ew or yw) and not (nw and ew)
-                    isH = (nc or ec or yc) and not (nc and ec)
-                    bT := isH ? 2 : 1
+                    hs = f_str(nc, ec, yc, false)                                  // סגרו מעבר → H
+                    ss = f_str(nw and not nc, ew and not ec, yw and not yc, false) // רק פתיל → S
+                    lbl = hs != "" ? "H " + hs : ""
+                    lbl := ss != "" ? (lbl != "" ? lbl + " S " + ss : "S " + ss) : lbl
+                    bT := hs != "" ? 2 : 1
                     bI := i
-                    bS := f_str(nw, ew, yw, false)
+                    bS := lbl
             nqMH  := math.max(nqMH,  array.get(nqHiA, i))
             esMH  := math.max(esMH,  array.get(esHiA, i))
             ymMH  := math.max(ymMH,  array.get(ymHiA, i))
@@ -482,10 +485,13 @@ f_findBull(nqLoA, esLoA, ymLoA, nqLoCA, esLoCA, ymLoCA, nqCL, esCL, ymCL, nqCLC,
                 ec = esMLc < array.get(esLoCA, i)
                 yc = ymMLc < array.get(ymLoCA, i)
                 if (nw or ew) and not (nw and ew and yw)
-                    isH = (nc or ec) and not (nc and ec and yc)
-                    bT := isH ? 2 : 1
+                    hs = f_str(nc, ec, yc, true)                                  // סגרו מתחת → H (YM מושמט)
+                    ss = f_str(nw and not nc, ew and not ec, yw and not yc, true) // רק פתיל → S (YM מושמט)
+                    lbl = hs != "" ? "H " + hs : ""
+                    lbl := ss != "" ? (lbl != "" ? lbl + " S " + ss : "S " + ss) : lbl
+                    bT := hs != "" ? 2 : 1
                     bI := i
-                    bS := f_str(nw, ew, yw, true)
+                    bS := lbl
             nqML  := math.min(nqML,  array.get(nqLoA, i))
             esML  := math.min(esML,  array.get(esLoA, i))
             ymML  := math.min(ymML,  array.get(ymLoA, i))
@@ -609,7 +615,7 @@ if needRedraw
     if showDir != 0 and not na(dispYPos)
         col  = showDir == 1 ? colBull : colBear
         cFin = dispType == 2 ? col : color.new(col, 30)
-        txt  = "W " + (dispType == 2 ? "H " : "S ") + dispStr
+        txt  = "W " + dispStr
         aLbl := label.new(dispSigB, dispYPos, txt, style = label.style_none, textcolor = cFin, size = labelSize, textalign = text.align_center)
         if showLine and not na(dispLvl) and dispRefB > 0
             aLine := line.new(dispRefB, dispLvl, bar_index, dispLvl, color = cFin, style = line.style_solid, width = lineWidth)
