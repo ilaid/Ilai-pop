@@ -443,22 +443,28 @@ f_findBear(nqHiA, esHiA, ymHiA, nqHiCA, esHiCA, ymHiCA, nqCH, esCH, ymCH, nqCHC,
         bool stopped = false
         for i = n - 1 to 0
             if bT == 0 and not stopped
-                nw = nqMH > array.get(nqHiA, i)
+                nw = nqMH > array.get(nqHiA, i)    // פתיל מעל הפתיל-הגבוה של הייחוס (SSMT)
                 ew = esMH > array.get(esHiA, i)
                 yw = ymMH > array.get(ymHiA, i)
-                nc = nqMHc > array.get(nqHiA, i)   // סגירה מעל הגבוה האמיתי (הפתיל) של הייחוס
-                ec = esMHc > array.get(esHiA, i)
-                yc = ymMHc > array.get(ymHiA, i)
-                if (nw or ew or yw) and not (nw and ew)
-                    hs = f_str(nc, ec, yc, false)                                  // סגר מעל הגבוה → H
-                    ss = f_str(nw and not nc, ew and not ec, yw and not yc, false) // לקח בפתיל בלבד → S
+                nc = nqMHc > array.get(nqHiCA, i)  // סגירה מעל הסגירה-הגבוהה של הייחוס (HSSMT)
+                ec = esMHc > array.get(esHiCA, i)
+                yc = ymMHc > array.get(ymHiCA, i)
+                hValid = (nc or ec or yc) and not (nc and ec)   // סטיית סגירה: מישהו סגר מעבר, לא שני החזקים
+                wValid = (nw or ew or yw) and not (nw and ew)   // סטיית פתיל: מישהו סחף מעבר, לא שני החזקים
+                if hValid or wValid
+                    hN = hValid and nc
+                    hE = hValid and ec
+                    hY = hValid and yc
+                    hs = f_str(hN, hE, hY, false)                                        // סגר מעל הסגירה-הגבוהה → H
+                    ss = f_str(nw and not hN, ew and not hE, yw and not hY, false)       // סחף מעל הפתיל בלבד → S
+                    ss := wValid ? ss : ""
                     lbl = hs != "" ? "H " + hs : ""
                     lbl := ss != "" ? (lbl != "" ? lbl + " S " + ss : "S " + ss) : lbl
                     bT := hs != "" ? 2 : 1
                     bI := i
                     bS := lbl
-                else if nw and ew
-                    stopped := true      // שני החזקים לקחו גבוה — הסכמה, אין שבירה דובית
+                else if (nw and ew) or (nc and ec)
+                    stopped := true      // הגרעין הסכים (בפתיל או בסגירה) — אין שבירה דובית
             nqMH  := math.max(nqMH,  array.get(nqHiA, i))
             esMH  := math.max(esMH,  array.get(esHiA, i))
             ymMH  := math.max(ymMH,  array.get(ymHiA, i))
@@ -484,22 +490,28 @@ f_findBull(nqLoA, esLoA, ymLoA, nqLoCA, esLoCA, ymLoCA, nqCL, esCL, ymCL, nqCLC,
         bool stopped = false
         for i = n - 1 to 0
             if bT == 0 and not stopped
-                nw = nqML < array.get(nqLoA, i)
+                nw = nqML < array.get(nqLoA, i)    // פתיל מתחת לפתיל-הנמוך של הייחוס (SSMT)
                 ew = esML < array.get(esLoA, i)
                 yw = ymML < array.get(ymLoA, i)
-                nc = nqMLc < array.get(nqLoA, i)   // סגירה מתחת לנמוך האמיתי (הפתיל) של הייחוס
-                ec = esMLc < array.get(esLoA, i)
-                yc = ymMLc < array.get(ymLoA, i)
-                if (nw or ew) and not (nw and ew and yw)
-                    hs = f_str(nc, ec, yc, true)                                  // סגר מתחת לנמוך → H (YM מושמט)
-                    ss = f_str(nw and not nc, ew and not ec, yw and not yc, true) // לקח בפתיל בלבד → S (YM מושמט)
+                nc = nqMLc < array.get(nqLoCA, i)  // סגירה מתחת לסגירה-הנמוכה של הייחוס (HSSMT)
+                ec = esMLc < array.get(esLoCA, i)
+                yc = ymMLc < array.get(ymLoCA, i)
+                hValid = (nc or ec) and not (nc and ec and yc)   // סטיית סגירה: חזק אחד סגר מתחת, לא כל השלושה
+                wValid = (nw or ew) and not (nw and ew and yw)   // סטיית פתיל: חזק אחד סחף מתחת, לא כל השלושה
+                if hValid or wValid
+                    hN = hValid and nc
+                    hE = hValid and ec
+                    hY = hValid and yc
+                    hs = f_str(hN, hE, hY, true)                                         // סגר מתחת לסגירה-הנמוכה → H (YM מושמט)
+                    ss = f_str(nw and not hN, ew and not hE, yw and not hY, true)        // סחף מתחת לפתיל בלבד → S (YM מושמט)
+                    ss := wValid ? ss : ""
                     lbl = hs != "" ? "H " + hs : ""
                     lbl := ss != "" ? (lbl != "" ? lbl + " S " + ss : "S " + ss) : lbl
                     bT := hs != "" ? 2 : 1
                     bI := i
                     bS := lbl
-                else if nw and ew and yw
-                    stopped := true      // כל השלושה לקחו נמוך — הסכמה, אין שבירה שורית
+                else if (nw and ew and yw) or (nc and ec and yc)
+                    stopped := true      // כל השלושה לקחו את הנמוך — הסכמה, אין שבירה שורית
             nqML  := math.min(nqML,  array.get(nqLoA, i))
             esML  := math.min(esML,  array.get(esLoA, i))
             ymML  := math.min(ymML,  array.get(ymLoA, i))
@@ -560,8 +572,8 @@ if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK and nLevel
         bearYPos := high + atr * offsetMlt
         bearType := nbT
         bearStr  := nbS
-        bearLvl  := isNQc ? array.get(nqHiA, nbI) : isESc ? array.get(esHiA, nbI) : array.get(ymHiA, nbI)
-        bearRefB := isNQc ? array.get(nqHiBA, nbI) : isESc ? array.get(esHiBA, nbI) : array.get(ymHiBA, nbI)
+        bearLvl  := nbT == 2 ? (isNQc ? array.get(nqHiCA, nbI) : isESc ? array.get(esHiCA, nbI) : array.get(ymHiCA, nbI)) : (isNQc ? array.get(nqHiA, nbI) : isESc ? array.get(esHiA, nbI) : array.get(ymHiA, nbI))
+        bearRefB := nbT == 2 ? (isNQc ? array.get(nqHiCBA, nbI) : isESc ? array.get(esHiCBA, nbI) : array.get(ymHiCBA, nbI)) : (isNQc ? array.get(nqHiBA, nbI) : isESc ? array.get(esHiBA, nbI) : array.get(ymHiBA, nbI))
     else
         bearType := 0
 
@@ -574,8 +586,8 @@ if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK and nLevel
         bullYPos := low - atr * offsetMlt
         bullType := nuT
         bullStr  := nuS
-        bullLvl  := isNQc ? array.get(nqLoA, nuI) : isESc ? array.get(esLoA, nuI) : array.get(ymLoA, nuI)
-        bullRefB := isNQc ? array.get(nqLoBA, nuI) : isESc ? array.get(esLoBA, nuI) : array.get(ymLoBA, nuI)
+        bullLvl  := nuT == 2 ? (isNQc ? array.get(nqLoCA, nuI) : isESc ? array.get(esLoCA, nuI) : array.get(ymLoCA, nuI)) : (isNQc ? array.get(nqLoA, nuI) : isESc ? array.get(esLoA, nuI) : array.get(ymLoA, nuI))
+        bullRefB := nuT == 2 ? (isNQc ? array.get(nqLoCBA, nuI) : isESc ? array.get(esLoCBA, nuI) : array.get(ymLoCBA, nuI)) : (isNQc ? array.get(nqLoBA, nuI) : isESc ? array.get(esLoBA, nuI) : array.get(ymLoBA, nuI))
     else
         bullType := 0
 
