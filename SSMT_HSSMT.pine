@@ -450,8 +450,8 @@ f_findBear(nqHiA, esHiA, ymHiA, nqHiCA, esHiCA, ymHiCA, nqCH, esCH, ymCH, nqCHC,
                 ec = esMHc > array.get(esHiCA, i)
                 yc = ymMHc > array.get(ymHiCA, i)
                 if (nw or ew or yw) and not (nw and ew)
-                    hs = f_str(nc, ec, yc, false)                                  // סגרו מעבר → H
-                    ss = f_str(nw and not nc, ew and not ec, yw and not yc, false) // רק פתיל → S
+                    hs = f_str(nw and nc, ew and ec, yw and yc, false)             // לקח גבוה וגם סגר מעבר → H
+                    ss = f_str(nw and not nc, ew and not ec, yw and not yc, false) // לקח גבוה רק בפתיל → S
                     lbl = hs != "" ? "H " + hs : ""
                     lbl := ss != "" ? (lbl != "" ? lbl + " S " + ss : "S " + ss) : lbl
                     bT := hs != "" ? 2 : 1
@@ -491,8 +491,8 @@ f_findBull(nqLoA, esLoA, ymLoA, nqLoCA, esLoCA, ymLoCA, nqCL, esCL, ymCL, nqCLC,
                 ec = esMLc < array.get(esLoCA, i)
                 yc = ymMLc < array.get(ymLoCA, i)
                 if (nw or ew) and not (nw and ew and yw)
-                    hs = f_str(nc, ec, yc, true)                                  // סגרו מתחת → H (YM מושמט)
-                    ss = f_str(nw and not nc, ew and not ec, yw and not yc, true) // רק פתיל → S (YM מושמט)
+                    hs = f_str(nw and nc, ew and ec, yw and yc, true)             // לקח נמוך וגם סגר מתחת → H (YM מושמט)
+                    ss = f_str(nw and not nc, ew and not ec, yw and not yc, true) // לקח נמוך רק בפתיל → S (YM מושמט)
                     lbl = hs != "" ? "H " + hs : ""
                     lbl := ss != "" ? (lbl != "" ? lbl + " S " + ss : "S " + ss) : lbl
                     bT := hs != "" ? 2 : 1
