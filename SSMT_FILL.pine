@@ -197,10 +197,14 @@ keepLast = tfClass == 4 or tfClass == 6 or tfClass == 7
 type Gap
     int    id
     int    dir      // 1 = שורי (יושב מתחת למחיר), -1 = דובי
-    float  nqBot
+    float  nqBot    // הגבולות הסופיים — פתיל, מורחב לגוף היכן שיש רווח אמיתי
     float  nqTop
     float  esBot
     float  esTop
+    float  nqRawBot // ה-FVG הקלאסי בפתילים בלבד, בלי הרחבה — לאבחון
+    float  nqRawTop
+    float  esRawBot
+    float  esRawTop
     int    refId    // תת-המחזור שבו נולד
     int    birth    // הנר השלישי — הנר שסגר את ה-FVG
     int    origin   // הנר הראשון של ה-FVG — משם מתחילה הקופסה
@@ -362,6 +366,12 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
         float nt = na
         float eb = na
         float et = na
+        // ה-FVG הקלאסי בפתילים בלבד — נשמר כדי שאפשר יהיה לראות בטבלה
+        // בדיוק מה ההרחבה לגופים עשתה לגבולות
+        float nrb = newDir == 1 ? nqH[2] : nqH
+        float nrt = newDir == 1 ? nqL    : nqL[2]
+        float erb = newDir == 1 ? esH[2] : esH
+        float ert = newDir == 1 ? esL    : esL[2]
 
         if newDir == 1
             nb := (extendBodies and nqO[1] > nqH[2]) ? nqC[2] : nqH[2]
@@ -376,7 +386,7 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
 
         if nt - nb > minNQSize and et - eb > minESSize
             gapCounter += 1
-            Gap gn = Gap.new(gapCounter, newDir, nb, nt, eb, et, refCycleId, bar_index, bar_index - 2, newDir == 1 ? nt : nb, newDir == 1 ? et : eb, 0, 0, 0, 0, false, false, false, 0, "", 0, 0, na)
+            Gap gn = Gap.new(gapCounter, newDir, nb, nt, eb, et, nrb, nrt, erb, ert, refCycleId, bar_index, bar_index - 2, newDir == 1 ? nt : nb, newDir == 1 ? et : eb, 0, 0, 0, 0, false, false, false, 0, "", 0, 0, na)
             array.push(gaps, gn)
             if array.size(gaps) > maxGaps
                 array.shift(gaps)
@@ -551,12 +561,18 @@ if showDebug and barstate.islast
     float  tNqBot  = na
     float  tEsTop  = na
     float  tEsBot  = na
-    int    tNqExtB = 0
-    int    tEsExtB = 0
     int    tArmB   = 0
     int    tBirth  = 0
+    float  tNqRawTop = na
+    float  tNqRawBot = na
+    float  tEsRawTop = na
+    float  tEsRawBot = na
     if dIdx != -1
-        Gap gt   = array.get(gaps, dIdx)
+        Gap gt      = array.get(gaps, dIdx)
+        tNqRawTop  := gt.nqRawTop
+        tNqRawBot  := gt.nqRawBot
+        tEsRawTop  := gt.esRawTop
+        tEsRawBot  := gt.esRawBot
         tN      := gt.depth(true)
         tE      := gt.depth(false)
         tDir    := gt.dir
@@ -570,8 +586,6 @@ if showDebug and barstate.islast
         tNqBot  := gt.nqBot
         tEsTop  := gt.esTop
         tEsBot  := gt.esBot
-        tNqExtB := gt.nqExtB
-        tEsExtB := gt.esExtB
         tArmB   := gt.armB
         tBirth  := gt.birth
 
@@ -609,9 +623,11 @@ if showDebug and barstate.islast
     table.cell(dbg, 1, 7, f_num(tNqBot), bgcolor = wc)
     table.cell(dbg, 2, 7, f_num(tEsBot), bgcolor = wc)
 
-    table.cell(dbg, 0, 8, "שעת העומק", bgcolor = hc, text_color = wc)
-    table.cell(dbg, 1, 8, f_time(tNqExtB), bgcolor = wc)
-    table.cell(dbg, 2, 8, f_time(tEsExtB), bgcolor = wc)
+    // גבולות ה-FVG הקלאסי בפתילים. אם אלה שונים מ-gapTop/gapBot למעלה —
+    // ההפרש הוא בדיוק מה שההרחבה לגופים הוסיפה.
+    table.cell(dbg, 0, 8, "פתילים top/bot", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 8, f_num(tNqRawTop) + " / " + f_num(tNqRawBot), bgcolor = wc)
+    table.cell(dbg, 2, 8, f_num(tEsRawTop) + " / " + f_num(tEsRawBot), bgcolor = wc)
 
     table.cell(dbg, 0, 9, "נולד / נדרך", bgcolor = hc, text_color = wc)
     table.cell(dbg, 1, 9, f_time(tBirth), bgcolor = wc)
