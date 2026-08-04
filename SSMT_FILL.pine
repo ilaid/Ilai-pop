@@ -19,6 +19,12 @@ indicator("SSMT Fill | Quarterly Theory", overlay = true, max_labels_count = 20,
 // שבירה היא אירוע שקרה — אחרי שנרשמה היא נשארת, והדרגה יכולה רק לעלות.
 // רק שלושה דברים מבטלים אותה: IFVG · שבירה נגדית · החלפת מיכל.
 //
+// מיפוי תת-מחזור/מיכל לכל מסגרת זמן:
+//   1M  — רבע 22.5m   → מיקרו-סשן    5M  — מיקרו-סשן → סשן
+//   15M — סשן          → יום מסחר      1H  — יום מסחר  → שבוע
+//   4H  — שבוע         → חודש          1D  — חודש      → רבעון
+//   1W  — רבעון        → שנה
+//
 // הצנרת (זמן, סייקלים, תת-מחזור/מיכל) זהה ל-SSMT+HSSMT.
 // ═══════════════════════════════════════════════════════════════════
 
@@ -64,8 +70,9 @@ sES = useMicro ? symES_mic : symES_std
 // זיהוי Timeframe
 // ═══════════════════════════════════════════════════════════════════
 
+// 1 = 1M · 2 = 5M · 3 = 15M · 4 = 1H · 5 = 4H · 6 = יומי · 7 = שבועי
 tfMin   = timeframe.in_seconds() / 60
-tfClass = tfMin <= 1 ? 1 : tfMin <= 5 ? 2 : tfMin <= 15 ? 3 : tfMin <= 60 ? 4 : tfMin <= 240 ? 5 : 0
+tfClass = tfMin <= 1 ? 1 : tfMin <= 5 ? 2 : tfMin <= 15 ? 3 : tfMin <= 60 ? 4 : tfMin <= 240 ? 5 : tfMin <= 1440 ? 6 : tfMin <= 10080 ? 7 : 0
 
 // ═══════════════════════════════════════════════════════════════════
 // חישובי זמן EST
@@ -123,8 +130,21 @@ sessionId  = tradeDayId * 10 + sessionIdx
 microId    = sessionId * 10 + microIdx
 quarterId  = microId * 10 + quarterIdx
 
+// הרמות שמעל החודש — משמשות את היומי והשבועי.
+// החודש כאן הוא חודש קלנדרי של יום המסחר (לא מעוגן ליום שני כמו ב-4H),
+// כי ביומי היחידה היא היום והגבול לא חייב ליפול בתחילת שבוע.
+// רבעון = שלושה חודשים קלנדריים: ינו–מרץ · אפר–יוני · יולי–ספט · אוק–דצמ.
+calMonthId = tdYear * 100 + tdMon
+qOfYear    = int(math.ceil(tdMon / 3.0))
+qtrId      = tdYear * 10 + qOfYear
+yearId     = tdYear
+
 refCycleId = 0
-if tfClass == 5
+if tfClass == 7
+    refCycleId := qtrId
+else if tfClass == 6
+    refCycleId := calMonthId
+else if tfClass == 5
     refCycleId := weekId
 else if tfClass == 4
     refCycleId := tradeDayId
@@ -136,7 +156,11 @@ else if tfClass == 1
     refCycleId := quarterId
 
 lifeCycleId = 0
-if tfClass == 5
+if tfClass == 7
+    lifeCycleId := yearId
+else if tfClass == 6
+    lifeCycleId := qtrId
+else if tfClass == 5
     lifeCycleId := monthId
 else if tfClass == 4
     lifeCycleId := weekId
@@ -251,6 +275,8 @@ else if newRefCycle and seedActive
 // כמו שרמת ייחוס באינדיקטור הישן נדחפה למערך רק בסוף תת-המחזור שלה.
 // חזרה לגאפ באותו תת-מחזור שבו נוצר אינה שבירה ואינה נספרת.
 // (1H: תת-מחזור = יום מסחר · 4H: שבוע · 15M: סשן · 5M: מיקרו-סשן · 1M: רבע)
+//
+// (יומי: תת-מחזור = חודש · שבועי: רבעון)
 //
 // ביקור: כשאף אחד מהנכסים לא נוגע בגאפ — הביקור נגמר והעומקים מתאפסים.
 // כך מילוי משותף בביקור אחד לא חוסם שבירה בביקור הבא. הגאפ עצמו נשאר תקף
@@ -474,6 +500,9 @@ f_pct(float x) => na(x) ? "-" : str.tostring(math.round(x * 100)) + "%"
 f_time(int b) =>
     int off = bar_index - b
     b <= 0 or off < 0 ? "-" : str.format_time(time[off], "HH:mm", TZ)
+// תת-מחזור ומיכל בשמות, לאימות שהמיפוי נכון למסגרת הזמן שנבחרה
+f_cycles() =>
+    tfClass == 7 ? "רבעון>שנה" : tfClass == 6 ? "חודש>רבעון" : tfClass == 5 ? "שבוע>חודש" : tfClass == 4 ? "יום>שבוע" : tfClass == 3 ? "סשן>יום" : tfClass == 2 ? "מיקרו>סשן" : tfClass == 1 ? "רבע>מיקרו" : "לא נתמך"
 
 var table dbg = table.new(position.top_right, 3, 12, border_width = 1)
 if showDebug and barstate.islast
@@ -540,8 +569,8 @@ if showDebug and barstate.islast
     table.cell(dbg, 1, 0, "NQ", bgcolor = hc, text_color = wc)
     table.cell(dbg, 2, 0, "ES", bgcolor = hc, text_color = wc)
 
-    table.cell(dbg, 0, 1, "tf/gaps", bgcolor = hc, text_color = wc)
-    table.cell(dbg, 1, 1, "tf " + str.tostring(tfClass), bgcolor = wc)
+    table.cell(dbg, 0, 1, "סייקל/גאפים", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 1, f_cycles(), bgcolor = wc)
     table.cell(dbg, 2, 1, str.tostring(tArmed) + " arm/" + str.tostring(tLive) + " live", bgcolor = wc)
 
     table.cell(dbg, 0, 2, "שבירות פעילות", bgcolor = hc, text_color = wc)
