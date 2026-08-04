@@ -607,7 +607,7 @@ if newLifeCycle
     bearRefI := -1
     bullRefI := -1
 
-// מחיקת ה"זרע" (1H בלבד) מזיזה את כל האינדקסים ב-1 — מיישרים כדי שלא ייחשב ייחוס חדש
+// מחיקת ה"זרע" (1H / 1D / 1W) מזיזה את כל האינדקסים ב-1 — מיישרים כדי שלא ייחשב ייחוס חדש
 if dropSeedNow
     bearRefI := bearRefI > 0 ? bearRefI - 1 : -1
     bullRefI := bullRefI > 0 ? bullRefI - 1 : -1
