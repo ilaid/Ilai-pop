@@ -40,7 +40,11 @@ sYM = useMicro ? symYM_mic : symYM_std
 // ═══════════════════════════════════════════════════════════════════
 
 tfMin   = timeframe.in_seconds() / 60
-tfClass = tfMin <= 1 ? 1 : tfMin <= 5 ? 2 : tfMin <= 15 ? 3 : tfMin <= 60 ? 4 : tfMin <= 240 ? 5 : 0
+// 6 = יומי (ייחוס חודש, מיכל רבעון), 7 = שבועי (ייחוס רבעון, מיכל שנה).
+// רק 1D ו-1W בדיוק; כל טווח אחר מעל 4H כבוי.
+isD1 = timeframe.isdaily  and timeframe.multiplier == 1
+isW1 = timeframe.isweekly and timeframe.multiplier == 1
+tfClass = isD1 ? 6 : isW1 ? 7 : tfMin <= 1 ? 1 : tfMin <= 5 ? 2 : tfMin <= 15 ? 3 : tfMin <= 60 ? 4 : tfMin <= 240 ? 5 : 0
 
 // ═══════════════════════════════════════════════════════════════════
 // חישובי זמן EST
@@ -86,6 +90,16 @@ isDeadWeek = monMonth != thuMonth
 qtWeekNum  = isDeadWeek ? 0 : math.floor((monDom - 1) / 7) + 1
 
 // ═══════════════════════════════════════════════════════════════════
+// שנת QT — מתחילה באפריל. Q1 = אפר/מאי/יונ, Q2 = יול/אוג/ספט,
+// Q3 = אוק/נוב/דצמ, Q4 = ינו/פבר/מרץ (של שנת הלוח הבאה).
+// ═══════════════════════════════════════════════════════════════════
+
+qtMonIdx    = tdMon >= 4 ? tdMon - 4 : tdMon + 8   // 0 = אפריל ... 11 = מרץ
+qtYearNum   = tdMon >= 4 ? tdYear : tdYear - 1     // תווית שנת QT (אפריל–מרץ)
+qtQtrNum    = math.floor(qtMonIdx / 3) + 1         // 1..4 בתוך שנת QT
+monInQtr    = qtMonIdx % 3                         // 0..2 — מקום החודש בתוך הרבעון
+
+// ═══════════════════════════════════════════════════════════════════
 // מזהי מחזורים
 // ═══════════════════════════════════════════════════════════════════
 
@@ -97,9 +111,18 @@ monthId    = monYear * 100 + monMonth
 sessionId  = tradeDayId * 10 + sessionIdx
 microId    = sessionId * 10 + microIdx
 quarterId  = microId * 10 + quarterIdx
+// בגרף היומי החודש נקבע לפי חודש יום-המסחר עצמו (גבול החודש נופל על גבול יום)
+dayMonthId = tdYear * 100 + tdMon
+// בגרף השבועי הרבעון/שנה נקבעים לפי יום-שני של השבוע — כמו שהחודש נקבע ב-4H
+qtrId      = qtYearNum * 10 + qtQtrNum
+qtYearId   = qtYearNum
 
 refCycleId = 0
-if tfClass == 5
+if tfClass == 7
+    refCycleId := qtrId
+else if tfClass == 6
+    refCycleId := dayMonthId
+else if tfClass == 5
     refCycleId := weekId
 else if tfClass == 4
     refCycleId := tradeDayId
@@ -111,7 +134,11 @@ else if tfClass == 1
     refCycleId := quarterId
 
 lifeCycleId = 0
-if tfClass == 5
+if tfClass == 7
+    lifeCycleId := qtYearId
+else if tfClass == 6
+    lifeCycleId := qtrId
+else if tfClass == 5
     lifeCycleId := monthId
 else if tfClass == 4
     lifeCycleId := weekId
@@ -128,18 +155,24 @@ newLifeCycle = ta.change(lifeCycleId) != 0
 // ב-1H תת-המחזור הראשון (יום שני) משווה לתת-המחזור האחרון של השבוע הקודם (שישי),
 // אבל אותו "זרע" נמחק אחרי היום הראשון — שישי משווה רק לשני, לא לשאר השבוע.
 // ב-4H המחזור החודשי עומד בפני עצמו: השבועות משווים רק בתוך אותו חודש (בלי חודש קודם).
-keepLast = tfClass == 4
+// ביומי ובשבועי אותו עיקרון כמו 1H: החודש/הרבעון הראשון של המיכל משווה גם ליחידה
+// האחרונה של המיכל הקודם (יולי מול יוני), והזרע הזה נמחק אחרי היחידה הראשונה.
+keepLast = tfClass == 4 or tfClass == 6 or tfClass == 7
 
 // ═══════════════════════════════════════════════════════════════════
 // True Open
 // ═══════════════════════════════════════════════════════════════════
 
+inYearlyQ2  = qtQtrNum == 2          // Q2 של שנת QT = יול/אוג/ספט
+inQtrQ2     = monInQtr == 1          // החודש השני של הרבעון (מאי/אוג/נוב/פבר)
 inMonthlyQ2 = qtWeekNum == 2
 inWeeklyQ2  = tdDow == dayofweek.tuesday
 inDailyQ2   = minsFromDayStart >= 360 and minsFromDayStart < 720
 inSessionQ2 = microIdx == 1
 inMicroQ2   = quarterIdx == 1
 
+var bool pYrQ2  = false
+var bool pQtrQ2 = false
 var bool pMonQ2 = false
 var bool pWkQ2  = false
 var bool pDayQ2 = false
@@ -147,7 +180,11 @@ var bool pSesQ2 = false
 var bool pMicQ2 = false
 
 isTrueOpenBar = false
-if tfClass == 5
+if tfClass == 7
+    isTrueOpenBar := inYearlyQ2 and not pYrQ2
+else if tfClass == 6
+    isTrueOpenBar := inQtrQ2 and not pQtrQ2
+else if tfClass == 5
     isTrueOpenBar := inMonthlyQ2 and not pMonQ2
 else if tfClass == 4
     isTrueOpenBar := inWeeklyQ2 and not pWkQ2
@@ -158,6 +195,8 @@ else if tfClass == 2
 else if tfClass == 1
     isTrueOpenBar := inMicroQ2 and not pMicQ2
 
+pYrQ2  := inYearlyQ2
+pQtrQ2 := inQtrQ2
 pMonQ2 := inMonthlyQ2
 pWkQ2  := inWeeklyQ2
 pDayQ2 := inDailyQ2
