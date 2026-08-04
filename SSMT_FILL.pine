@@ -52,7 +52,8 @@ colBear   = input.color(#ef5350, "צבע דובי", group = grpVis)
 labelSize = input.string("small", "גודל תווית", options = ["tiny", "small", "normal"], group = grpVis)
 offsetMlt = input.float(1.5, "מרחק התווית מהנר (ATR)", minval = 0.1, maxval = 6.0, step = 0.1, group = grpVis)
 showBox   = input.bool(true, "הצג קופסת גאפ", group = grpVis)
-boxTransp = input.int(88, "שקיפות הקופסה", minval = 60, maxval = 98, group = grpVis)
+boxTransp = input.int(85, "שקיפות הקופסה", minval = 50, maxval = 98, group = grpVis)
+showLabel = input.bool(true, "הצג תווית מרחפת בנר השבירה", group = grpVis)
 showCE    = input.bool(false, "הצג קו CE (חצי גאפ)", group = grpVis)
 showDebug = input.bool(false, "הצג טבלת בדיקה", group = grpVis)
 
@@ -201,7 +202,8 @@ type Gap
     float  esBot
     float  esTop
     int    refId    // תת-המחזור שבו נולד
-    int    birth
+    int    birth    // הנר השלישי — הנר שסגר את ה-FVG
+    int    origin   // הנר הראשון של ה-FVG — משם מתחילה הקופסה
     float  nqExt    // הקיצוניות של NQ בביקור הנוכחי (min ל-bull, max ל-bear)
     float  esExt
     int    nqExtB   // הנר של הקיצוניות — לאבחון
@@ -374,7 +376,7 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
 
         if nt - nb > minNQSize and et - eb > minESSize
             gapCounter += 1
-            Gap gn = Gap.new(gapCounter, newDir, nb, nt, eb, et, refCycleId, bar_index, newDir == 1 ? nt : nb, newDir == 1 ? et : eb, 0, 0, 0, 0, false, false, false, 0, "", 0, 0, na)
+            Gap gn = Gap.new(gapCounter, newDir, nb, nt, eb, et, refCycleId, bar_index, bar_index - 2, newDir == 1 ? nt : nb, newDir == 1 ? et : eb, 0, 0, 0, 0, false, false, false, 0, "", 0, 0, na)
             array.push(gaps, gn)
             if array.size(gaps) > maxGaps
                 array.shift(gaps)
@@ -476,14 +478,18 @@ if shownSeq != drawnSeq or shownDeg != drawnDeg
         color col  = gd.dir == 1 ? colBull : colBear
         // דרגה גבוהה = צבע חזק יותר
         color cFin = gd.fDeg == 3 ? col : gd.fDeg == 2 ? color.new(col, 25) : color.new(col, 45)
-        float gTop = isESc ? gd.esTop : gd.nqTop
-        float gBot = isESc ? gd.esBot : gd.nqBot
-        aLbl := label.new(gd.fSigB, gd.fYPos, "F" + str.tostring(gd.fDeg) + " " + gd.fLead, style = label.style_none, textcolor = cFin, size = labelSize, textalign = text.align_center)
+        float  gTop = isESc ? gd.esTop : gd.nqTop
+        float  gBot = isESc ? gd.esBot : gd.nqBot
+        string txt  = "F" + str.tostring(gd.fDeg) + " " + gd.fLead
+        if showLabel
+            aLbl := label.new(gd.fSigB, gd.fYPos, txt, style = label.style_none, textcolor = cFin, size = labelSize, textalign = text.align_center)
         if showBox
-            aBox := box.new(gd.birth, gTop, bar_index, gBot, border_color = cFin, border_width = 1, bgcolor = color.new(col, boxTransp))
+            // הקופסה מתחילה מהנר הראשון של ה-FVG כדי שתשב על התבנית שיצרה
+            // את הגאפ, והטקסט יושב בתוכה כדי שיהיה ברור שזו הקופסה של השבירה.
+            aBox := box.new(gd.origin, gTop, bar_index, gBot, border_color = cFin, border_width = 1, bgcolor = color.new(col, boxTransp), text = txt, text_color = cFin, text_size = labelSize, text_halign = text.align_right, text_valign = text.align_center)
         if showCE
             float ce = (gTop + gBot) / 2
-            aCE := line.new(gd.birth, ce, bar_index, ce, color = cFin, style = line.style_dashed, width = 1)
+            aCE := line.new(gd.origin, ce, bar_index, ce, color = cFin, style = line.style_dashed, width = 1)
     drawnSeq := shownSeq
     drawnDeg := shownDeg
 
