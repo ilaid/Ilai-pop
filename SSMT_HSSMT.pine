@@ -460,6 +460,9 @@ f_findBear(nqHiA, esHiA, ymHiA, nqHiCA, esHiCA, ymHiCA, nqCH, esCH, ymCH, nqCHC,
                     ss := wValid ? ss : ""
                     lbl = hs != "" ? "H " + hs : ""
                     lbl := ss != "" ? (lbl != "" ? lbl + " S " + ss : "S " + ss) : lbl
+                    // אין HSSMT כי הסגירות הסכימו, אבל ה-SSMT (פתיל) עדיין תקף — מסמנים זאת
+                    if not hValid and nc and ec
+                        lbl := lbl + (yc ? " (all closed)" : " (core closed)")
                     bT := hs != "" ? 2 : 1
                     bI := i
                     bS := lbl
@@ -507,6 +510,9 @@ f_findBull(nqLoA, esLoA, ymLoA, nqLoCA, esLoCA, ymLoCA, nqCL, esCL, ymCL, nqCLC,
                     ss := wValid ? ss : ""
                     lbl = hs != "" ? "H " + hs : ""
                     lbl := ss != "" ? (lbl != "" ? lbl + " S " + ss : "S " + ss) : lbl
+                    // כל השלושה סגרו מתחת — ה-HSSMT בטל, אבל ה-SSMT (פתיל) עדיין תקף
+                    if not hValid and nc and ec and yc
+                        lbl := lbl + " (all closed)"
                     bT := hs != "" ? 2 : 1
                     bI := i
                     bS := lbl
@@ -542,6 +548,7 @@ var int    bearRefB = 0
 var int    bearSigB = 0
 var float  bearYPos = na
 var int    bearSeq  = 0
+var int    bearRefI = -1
 
 var int    bullType = 0
 var string bullStr  = ""
@@ -550,6 +557,7 @@ var int    bullRefB = 0
 var int    bullSigB = 0
 var float  bullYPos = na
 var int    bullSeq  = 0
+var int    bullRefI = -1
 
 var int seqCounter = 0
 
@@ -557,6 +565,13 @@ var int seqCounter = 0
 if newLifeCycle
     bearType := 0
     bullType := 0
+    bearRefI := -1
+    bullRefI := -1
+
+// מחיקת ה"זרע" (1H בלבד) מזיזה את כל האינדקסים ב-1 — מיישרים כדי שלא ייחשב ייחוס חדש
+if dropSeedNow
+    bearRefI := bearRefI > 0 ? bearRefI - 1 : -1
+    bullRefI := bullRefI > 0 ? bullRefI - 1 : -1
 
 // ── עדכון חי בסגירת נר: מציגים את הסטייה התקפה הנוכחית לכל כיוון.
 //    התווית גדלה (מוסיפה נכסים שלקחו) ומשדרגת S→H חי. סטייה שכבר לא תקפה
@@ -565,9 +580,11 @@ if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK and nLevel
 
     [nbT, nbI, nbS] = f_findBear(nqHiA, esHiA, ymHiA, nqHiCA, esHiCA, ymHiCA, nqCH, esCH, ymCH, nqCHC, esCHC, ymCHC)
     if nbT != 0 and bearOK
-        if bearType == 0                       // תחילת שבירה דובית חדשה
+        // שבירה חדשה = כיוון שהיה כבוי, או התעגנות לתת-מחזור ייחוס אחר (גם אם הכיוון כבר היה חי)
+        if bearType == 0 or nbI != bearRefI
             seqCounter += 1
             bearSeq  := seqCounter
+        bearRefI := nbI
         bearSigB := bar_index                  // התווית עוקבת אחרי הנר הנוכחי
         bearYPos := high + atr * offsetMlt
         bearType := nbT
@@ -576,12 +593,15 @@ if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK and nLevel
         bearRefB := nbT == 2 ? (isNQc ? array.get(nqHiCBA, nbI) : isESc ? array.get(esHiCBA, nbI) : array.get(ymHiCBA, nbI)) : (isNQc ? array.get(nqHiBA, nbI) : isESc ? array.get(esHiBA, nbI) : array.get(ymHiBA, nbI))
     else
         bearType := 0
+        bearRefI := -1
 
     [nuT, nuI, nuS] = f_findBull(nqLoA, esLoA, ymLoA, nqLoCA, esLoCA, ymLoCA, nqCL, esCL, ymCL, nqCLC, esCLC, ymCLC)
     if nuT != 0 and bullOK
-        if bullType == 0                       // תחילת שבירה שורית חדשה
+        // שבירה חדשה = כיוון שהיה כבוי, או התעגנות לתת-מחזור ייחוס אחר (גם אם הכיוון כבר היה חי)
+        if bullType == 0 or nuI != bullRefI
             seqCounter += 1
             bullSeq  := seqCounter
+        bullRefI := nuI
         bullSigB := bar_index                  // התווית עוקבת אחרי הנר הנוכחי
         bullYPos := low - atr * offsetMlt
         bullType := nuT
@@ -590,6 +610,7 @@ if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK and nLevel
         bullRefB := nuT == 2 ? (isNQc ? array.get(nqLoCBA, nuI) : isESc ? array.get(esLoCBA, nuI) : array.get(ymLoCBA, nuI)) : (isNQc ? array.get(nqLoBA, nuI) : isESc ? array.get(esLoBA, nuI) : array.get(ymLoBA, nuI))
     else
         bullType := 0
+        bullRefI := -1
 
 // ═══════════════════════════════════════════════════════════════════
 // בחירת מה מוצג
@@ -662,7 +683,7 @@ if not na(aLine) and showDir != 0
 
 f_num(x) => na(x) ? "-" : str.tostring(x, format.mintick)
 
-var table dbg = table.new(position.top_right, 4, 12, border_width = 1)
+var table dbg = table.new(position.top_right, 4, 14, border_width = 1)
 if showDebug and barstate.islast
     // רמות ייחוס הכי נמוכות/גבוהות במיכל (סגירה) — "הכי נמוך/גבוה בחודש"
     float nqMinLoC = nLevels > 0 ? array.min(nqLoCA) : na
@@ -731,3 +752,12 @@ if showDebug and barstate.islast
     table.cell(dbg, 1, 11, f_num(nqMaxHiC), bgcolor = wc)
     table.cell(dbg, 2, 11, f_num(esMaxHiC), bgcolor = wc)
     table.cell(dbg, 3, 11, f_num(ymMaxHiC), bgcolor = wc)
+    // אינדקס תת-מחזור הייחוס ומונה הסדר — מי נוצר אחרון (גבוה יותר = חדש יותר)
+    table.cell(dbg, 0, 12, "refI b/u", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 12, str.tostring(bearRefI) + "/" + str.tostring(bullRefI), bgcolor = wc)
+    table.cell(dbg, 2, 12, "", bgcolor = wc)
+    table.cell(dbg, 3, 12, "", bgcolor = wc)
+    table.cell(dbg, 0, 13, "seq b/u", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 13, str.tostring(bearSeq) + "/" + str.tostring(bullSeq), bgcolor = wc)
+    table.cell(dbg, 2, 13, "", bgcolor = wc)
+    table.cell(dbg, 3, 13, "", bgcolor = wc)
