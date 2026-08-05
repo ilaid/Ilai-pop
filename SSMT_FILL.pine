@@ -33,7 +33,10 @@ indicator("SSMT Fill | Quarterly Theory", overlay = true, max_labels_count = 20,
 // ═══════════════════════════════════════════════════════════════════
 
 grpSym = "סימבולים"
-useMicro  = input.bool(false, "השתמש בחוזי מיקרו", group = grpSym)
+// "אוטומטי" מתאים את סט החוזים לגרף. גרף MNQ שקורא נתוני NQ (או להפך) נותן
+// גבולות גאפ שנכונים מתמטית אבל לא יושבים על הנרות שרואים — שתי הסדרות
+// הרציפות מתגלגלות בתאריכים שונים ומחיריהן ההיסטוריים אינם זהים.
+contractSet = input.string("אוטומטי", "סט חוזים", options = ["אוטומטי", "רגיל", "מיקרו"], group = grpSym)
 symNQ_std = input.symbol("CME_MINI:NQ1!",  "NQ רגיל", group = grpSym)
 symES_std = input.symbol("CME_MINI:ES1!",  "ES רגיל", group = grpSym)
 symNQ_mic = input.symbol("CME_MINI:MNQ1!", "NQ מיקרו", group = grpSym)
@@ -66,6 +69,11 @@ blockDeadWeek = input.bool(true, "חסום שבירות בשבוע מת (4H בל
 // ═══════════════════════════════════════════════════════════════════
 // בחירת סימבולים
 // ═══════════════════════════════════════════════════════════════════
+
+cs           = syminfo.tickerid
+isESc        = str.contains(cs, "ES")
+chartIsMicro = str.contains(cs, "MNQ") or str.contains(cs, "MES") or str.contains(cs, "MYM")
+useMicro     = contractSet == "מיקרו" or (contractSet == "אוטומטי" and chartIsMicro)
 
 sNQ = useMicro ? symNQ_mic : symNQ_std
 sES = useMicro ? symES_mic : symES_std
@@ -464,9 +472,6 @@ if tfClass == 4 and tdDow == dayofweek.friday
 // ציור — תווית + קופסת הגאפ של נכס הגרף (רק השבירה המוצגת)
 // ═══════════════════════════════════════════════════════════════════
 
-cs    = syminfo.tickerid
-isESc = str.contains(cs, "ES")
-
 var label aLbl = na
 var box   aBox = na
 var line  aCE  = na
@@ -551,7 +556,7 @@ f_time(int b) =>
 f_cycles() =>
     tfClass == 7 ? "רבעון>שנה" : tfClass == 6 ? "חודש>רבעון" : tfClass == 5 ? "שבוע>חודש" : tfClass == 4 ? "יום>שבוע" : tfClass == 3 ? "סשן>יום" : tfClass == 2 ? "מיקרו>סשן" : tfClass == 1 ? "רבע>מיקרו" : "לא נתמך"
 
-var table dbg = table.new(position.top_right, 3, 12, border_width = 1)
+var table dbg = table.new(position.top_right, 3, 13, border_width = 1)
 if showDebug and barstate.islast
     hc = color.gray
     wc = color.white
@@ -624,46 +629,52 @@ if showDebug and barstate.islast
     table.cell(dbg, 1, 1, f_cycles(), bgcolor = wc)
     table.cell(dbg, 2, 1, str.tostring(tArmed) + " arm/" + str.tostring(tLive) + " live", bgcolor = wc)
 
-    table.cell(dbg, 0, 2, "שבירות פעילות", bgcolor = hc, text_color = wc)
-    table.cell(dbg, 1, 2, str.tostring(tFrac), bgcolor = wc)
-    table.cell(dbg, 2, 2, shownDir == 0 ? "-" : (shownDir == 1 ? "שורית" : "דובית"), bgcolor = wc)
+    // הסדרות שמהן נקראים הנתונים. חייבות להתאים למשפחת החוזים של הגרף,
+    // אחרת הגבולות לא יושבים על הנרות שרואים.
+    table.cell(dbg, 0, 2, "מקור נתונים", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 2, useMicro ? "מיקרו" : "רגיל", bgcolor = wc)
+    table.cell(dbg, 2, 2, chartIsMicro ? "גרף מיקרו" : "גרף רגיל", bgcolor = wc)
 
-    table.cell(dbg, 0, 3, "── הגאפ המוצג ──", bgcolor = hc, text_color = wc)
-    table.cell(dbg, 1, 3, "id " + str.tostring(tId), bgcolor = wc)
-    table.cell(dbg, 2, 3, tDir == 0 ? "-" : (tDir == 1 ? "שורי" : "דובי"), bgcolor = wc)
+    table.cell(dbg, 0, 3, "שבירות פעילות", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 3, str.tostring(tFrac), bgcolor = wc)
+    table.cell(dbg, 2, 3, shownDir == 0 ? "-" : (shownDir == 1 ? "שורית" : "דובית"), bgcolor = wc)
+
+    table.cell(dbg, 0, 4, "── הגאפ המוצג ──", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 4, "id " + str.tostring(tId), bgcolor = wc)
+    table.cell(dbg, 2, 4, tDir == 0 ? "-" : (tDir == 1 ? "שורי" : "דובי"), bgcolor = wc)
 
     // deg נרשם = הדרגה שנרשמה בפועל ונשארת · deg עכשיו = מה שהעומקים נותנים
-    table.cell(dbg, 0, 4, "deg נרשם/עכשיו", bgcolor = hc, text_color = wc)
-    table.cell(dbg, 1, 4, str.tostring(tReg) + " " + tLd, bgcolor = wc)
-    table.cell(dbg, 2, 4, str.tostring(tNow) + (tArm ? " arm" : " —"), bgcolor = wc)
+    table.cell(dbg, 0, 5, "deg נרשם/עכשיו", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 5, str.tostring(tReg) + " " + tLd, bgcolor = wc)
+    table.cell(dbg, 2, 5, str.tostring(tNow) + (tArm ? " arm" : " —"), bgcolor = wc)
 
     // העומק הוא של הביקור הנוכחי בלבד. ביקור = כניסה לגאפ אחרי יציאה ממנו.
-    table.cell(dbg, 0, 5, "עומק ביקור " + str.tostring(tVisits), bgcolor = hc, text_color = wc)
-    table.cell(dbg, 1, 5, f_pct(tN), bgcolor = wc)
-    table.cell(dbg, 2, 5, f_pct(tE), bgcolor = wc)
+    table.cell(dbg, 0, 6, "עומק ביקור " + str.tostring(tVisits), bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 6, f_pct(tN), bgcolor = wc)
+    table.cell(dbg, 2, 6, f_pct(tE), bgcolor = wc)
 
-    table.cell(dbg, 0, 6, "gapTop", bgcolor = hc, text_color = wc)
-    table.cell(dbg, 1, 6, f_num(tNqTop), bgcolor = wc)
-    table.cell(dbg, 2, 6, f_num(tEsTop), bgcolor = wc)
+    table.cell(dbg, 0, 7, "gapTop", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 7, f_num(tNqTop), bgcolor = wc)
+    table.cell(dbg, 2, 7, f_num(tEsTop), bgcolor = wc)
 
-    table.cell(dbg, 0, 7, "gapBot", bgcolor = hc, text_color = wc)
-    table.cell(dbg, 1, 7, f_num(tNqBot), bgcolor = wc)
-    table.cell(dbg, 2, 7, f_num(tEsBot), bgcolor = wc)
+    table.cell(dbg, 0, 8, "gapBot", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 8, f_num(tNqBot), bgcolor = wc)
+    table.cell(dbg, 2, 8, f_num(tEsBot), bgcolor = wc)
 
     // גבולות ה-FVG הקלאסי בפתילים. אם אלה שונים מ-gapTop/gapBot למעלה —
     // ההפרש הוא בדיוק מה שההרחבה לגופים הוסיפה.
-    table.cell(dbg, 0, 8, "פתילים top/bot", bgcolor = hc, text_color = wc)
-    table.cell(dbg, 1, 8, f_num(tNqRawTop) + " / " + f_num(tNqRawBot), bgcolor = wc)
-    table.cell(dbg, 2, 8, f_num(tEsRawTop) + " / " + f_num(tEsRawBot), bgcolor = wc)
+    table.cell(dbg, 0, 9, "פתילים top/bot", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 9, f_num(tNqRawTop) + " / " + f_num(tNqRawBot), bgcolor = wc)
+    table.cell(dbg, 2, 9, f_num(tEsRawTop) + " / " + f_num(tEsRawBot), bgcolor = wc)
 
-    table.cell(dbg, 0, 9, "נולד / נדרך", bgcolor = hc, text_color = wc)
-    table.cell(dbg, 1, 9, f_time(tBirth), bgcolor = wc)
-    table.cell(dbg, 2, 9, f_time(tArmB), bgcolor = wc)
+    table.cell(dbg, 0, 10, "נולד / נדרך", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 10, f_time(tBirth), bgcolor = wc)
+    table.cell(dbg, 2, 10, f_time(tArmB), bgcolor = wc)
 
-    table.cell(dbg, 0, 10, "שבוע", bgcolor = hc, text_color = wc)
-    table.cell(dbg, 1, 10, "Q" + str.tostring(qtWeekNum), bgcolor = wc)
-    table.cell(dbg, 2, 10, isDeadWeek ? "DEAD" : "-", bgcolor = wc)
+    table.cell(dbg, 0, 11, "שבוע", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 11, "Q" + str.tostring(qtWeekNum), bgcolor = wc)
+    table.cell(dbg, 2, 11, isDeadWeek ? "DEAD" : "-", bgcolor = wc)
 
-    table.cell(dbg, 0, 11, "זרע/שישי", bgcolor = hc, text_color = wc)
-    table.cell(dbg, 1, 11, seedActive ? "V" : "X", bgcolor = wc)
-    table.cell(dbg, 2, 11, friBlock ? "FRI" : "-", bgcolor = wc)
+    table.cell(dbg, 0, 12, "זרע/שישי", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 12, seedActive ? "V" : "X", bgcolor = wc)
+    table.cell(dbg, 2, 12, friBlock ? "FRI" : "-", bgcolor = wc)
