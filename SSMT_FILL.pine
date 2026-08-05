@@ -1,5 +1,5 @@
 //@version=5
-indicator("SSMT Fill | Quarterly Theory", overlay = true, max_labels_count = 20, max_lines_count = 20, max_boxes_count = 30)
+indicator("SSMT Fill | Quarterly Theory", overlay = true, max_labels_count = 20, max_lines_count = 20, max_boxes_count = 250)
 
 // ═══════════════════════════════════════════════════════════════════
 // SSMT Fill — סטיית קורלציה לפי מילוי גאפים
@@ -55,7 +55,10 @@ showBox   = input.bool(true, "הצג קופסת גאפ", group = grpVis)
 boxTransp = input.int(85, "שקיפות הקופסה", minval = 50, maxval = 98, group = grpVis)
 showLabel = input.bool(true, "הצג תווית מרחפת בנר השבירה", group = grpVis)
 showCE    = input.bool(false, "הצג קו CE (חצי גאפ)", group = grpVis)
-showDebug = input.bool(false, "הצג טבלת בדיקה", group = grpVis)
+// מצייר כל גאפ קולקטיבי חי, לא רק את זה שנושא את השבירה. מסומן #id,
+// ו-✕ מסמן גאפ שעדיין לא נדרך. שימושי לבדוק מה בדיוק הזיהוי מצא.
+showAllGaps = input.bool(false, "הצג את כל הגאפים החיים", group = grpVis)
+showDebug   = input.bool(false, "הצג טבלת בדיקה", group = grpVis)
 
 grpLogic = "לוגיקה"
 blockDeadWeek = input.bool(true, "חסום שבירות בשבוע מת (4H בלבד)", group = grpLogic)
@@ -509,6 +512,30 @@ if selIdx != -1
         box.set_right(aBox, bar_index)
     if not na(aCE)
         line.set_x2(aCE, bar_index)
+
+// ═══════════════════════════════════════════════════════════════════
+// ציור כל הגאפים החיים (אבחון — כבוי כברירת מחדל)
+//
+// מראה מה הזיהוי מצא בפועל, כולל גאפים שלא נושאים שבירה. כל קופסה
+// מסומנת ב-#id של הגאפ, ו-✕ אומר שהוא עדיין לא נדרך.
+// ═══════════════════════════════════════════════════════════════════
+
+var array<box> dbgBoxes = array.new<box>()
+
+if showAllGaps and barstate.islast
+    if array.size(dbgBoxes) > 0
+        for i = 0 to array.size(dbgBoxes) - 1
+            box.delete(array.get(dbgBoxes, i))
+        array.clear(dbgBoxes)
+    if array.size(gaps) > 0
+        for i = 0 to array.size(gaps) - 1
+            Gap gz = array.get(gaps, i)
+            if not gz.dead
+                float  zTop = isESc ? gz.esTop : gz.nqTop
+                float  zBot = isESc ? gz.esBot : gz.nqBot
+                color  zCol = gz.dir == 1 ? colBull : colBear
+                string zTxt = "#" + str.tostring(gz.id) + (gz.armed ? "" : " ✕")
+                array.push(dbgBoxes, box.new(gz.origin, zTop, bar_index, zBot, border_color = color.new(zCol, 35), border_width = 1, bgcolor = color.new(zCol, 94), text = zTxt, text_color = color.new(zCol, 20), text_size = size.tiny, text_halign = text.align_left, text_valign = text.align_top))
 
 // ═══════════════════════════════════════════════════════════════════
 // טבלת בדיקה (אבחון — כבויה כברירת מחדל)
