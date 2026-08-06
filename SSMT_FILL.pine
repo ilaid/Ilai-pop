@@ -22,8 +22,8 @@ indicator("SSMT Fill | Quarterly Theory", overlay = true, max_labels_count = 20,
 // מיפוי תת-מחזור/מיכל לכל מסגרת זמן:
 //   1M  — רבע 22.5m   → מיקרו-סשן    5M  — מיקרו-סשן → סשן
 //   15M — סשן          → יום מסחר      1H  — יום מסחר  → שבוע
-//   4H  — שבוע         → חודש          1D  — חודש      → רבעון
-//   1W  — רבעון        → שנה
+//   4H  — שבוע         → חודש          1D  — רבעון     → שנה
+//   1W  — שנה          → מחזור 4 שנים
 //
 // הצנרת (זמן, סייקלים, תת-מחזור/מיכל) זהה ל-SSMT+HSSMT.
 // ═══════════════════════════════════════════════════════════════════
@@ -143,19 +143,18 @@ microId    = sessionId * 10 + microIdx
 quarterId  = microId * 10 + quarterIdx
 
 // הרמות שמעל החודש — משמשות את היומי והשבועי.
-// החודש כאן הוא חודש קלנדרי של יום המסחר (לא מעוגן ליום שני כמו ב-4H),
-// כי ביומי היחידה היא היום והגבול לא חייב ליפול בתחילת שבוע.
 // רבעון = שלושה חודשים קלנדריים: ינו–מרץ · אפר–יוני · יולי–ספט · אוק–דצמ.
-calMonthId = tdYear * 100 + tdMon
-qOfYear    = int(math.ceil(tdMon / 3.0))
-qtrId      = tdYear * 10 + qOfYear
-yearId     = tdYear
+// מחזור 4 שנים = בלוק שמתחיל בשנת בחירות (2024, 2028, ...).
+qOfYear = int(math.ceil(tdMon / 3.0))
+qtrId   = tdYear * 10 + qOfYear
+yearId  = tdYear
+quadId  = int(math.floor(tdYear / 4.0))
 
 refCycleId = 0
 if tfClass == 7
-    refCycleId := qtrId
+    refCycleId := yearId
 else if tfClass == 6
-    refCycleId := calMonthId
+    refCycleId := qtrId
 else if tfClass == 5
     refCycleId := weekId
 else if tfClass == 4
@@ -169,9 +168,9 @@ else if tfClass == 1
 
 lifeCycleId = 0
 if tfClass == 7
-    lifeCycleId := yearId
+    lifeCycleId := quadId
 else if tfClass == 6
-    lifeCycleId := qtrId
+    lifeCycleId := yearId
 else if tfClass == 5
     lifeCycleId := monthId
 else if tfClass == 4
@@ -189,8 +188,8 @@ newLifeCycle = ta.change(lifeCycleId) != 0
 // "זרע": התת-מחזור הראשון של מיכל חדש משווה גם לגאפים של התת-מחזור האחרון
 // של המיכל הקודם, והזרע נמחק כשהתת-מחזור הראשון נגמר.
 //   1H — יום שני משווה גם לגאפי יום שישי, שנמחקים בסוף יום שני.
-//   1D — יולי (תחילת Q3) משווה גם לגאפי יוני, שנמחקים בסוף יולי.
-//   1W — Q1 משווה גם לגאפי Q4 של השנה הקודמת, שנמחקים בסוף Q1.
+//   1D — Q1 משווה גם לגאפי Q4 של השנה הקודמת, שנמחקים בסוף Q1.
+//   1W — השנה הראשונה במחזור משווה גם לגאפי השנה האחרונה שלפניה.
 // ב-4H אין זרע: המחזור החודשי עומד בפני עצמו, רק שבועות של אותו חודש.
 keepLast = tfClass == 4 or tfClass == 6 or tfClass == 7
 
@@ -264,7 +263,7 @@ f_degree(float dLead, float dLag) =>
 
 // ═══════════════════════════════════════════════════════════════════
 // איפוס מיכל + מנגנון הזרע
-// (1H: שני/שישי · 1D: יולי/יוני · 1W: Q1/Q4)
+// (1H: שני/שישי · 1D: Q1/Q4 · 1W: שנה ראשונה/אחרונה במחזור)
 // ═══════════════════════════════════════════════════════════════════
 
 var bool seedActive = false
@@ -297,7 +296,7 @@ else if newRefCycle and seedActive
 // חזרה לגאפ באותו תת-מחזור שבו נוצר אינה שבירה ואינה נספרת.
 // (1H: תת-מחזור = יום מסחר · 4H: שבוע · 15M: סשן · 5M: מיקרו-סשן · 1M: רבע)
 //
-// (יומי: תת-מחזור = חודש · שבועי: רבעון)
+// (יומי: תת-מחזור = רבעון · שבועי: שנה)
 //
 // ביקור: כשאף אחד מהנכסים לא נוגע בגאפ — הביקור נגמר והעומקים מתאפסים.
 // כך מילוי משותף בביקור אחד לא חוסם שבירה בביקור הבא. הגאפ עצמו נשאר תקף
@@ -554,7 +553,7 @@ f_time(int b) =>
     b <= 0 or off < 0 ? "-" : str.format_time(time[off], "HH:mm", TZ)
 // תת-מחזור ומיכל בשמות, לאימות שהמיפוי נכון למסגרת הזמן שנבחרה
 f_cycles() =>
-    tfClass == 7 ? "רבעון>שנה" : tfClass == 6 ? "חודש>רבעון" : tfClass == 5 ? "שבוע>חודש" : tfClass == 4 ? "יום>שבוע" : tfClass == 3 ? "סשן>יום" : tfClass == 2 ? "מיקרו>סשן" : tfClass == 1 ? "רבע>מיקרו" : "לא נתמך"
+    tfClass == 7 ? "שנה>4 שנים" : tfClass == 6 ? "רבעון>שנה" : tfClass == 5 ? "שבוע>חודש" : tfClass == 4 ? "יום>שבוע" : tfClass == 3 ? "סשן>יום" : tfClass == 2 ? "מיקרו>סשן" : tfClass == 1 ? "רבע>מיקרו" : "לא נתמך"
 
 var table dbg = table.new(position.top_right, 3, 13, border_width = 1)
 if showDebug and barstate.islast
