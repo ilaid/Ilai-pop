@@ -1,0 +1,1269 @@
+//@version=5
+indicator("Confluence Engine | QT Funnel", shorttitle = "QT Funnel", overlay = true,
+     max_labels_count = 200, max_lines_count = 50, max_boxes_count = 50)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Confluence Engine — מנוע אישור כיוון
+//
+// מאחד שלושה אינדיקטורים לשרשרת אישורים אחת, ומתריע כשהיא נסגרת.
+// המערכת אינה מבצעת עסקאות ואינה יכולה לבצע — היא קוראת מחירים ומתריעה.
+//
+// ┌─ שלב 1 · עוגן ────────── 1H או 4H ────────────────────────────────┐
+// │ השבירה הראשונה במיכל, באחד משלושת הסוגים, קובעת את הכיוון.        │
+// │ 1H → המיכל הוא שבוע · 4H → המיכל הוא חודש. שני העוגנים עצמאיים.    │
+// └───────────────────────────────────────────────────────────────────┘
+// ┌─ שלב 2 · אישור ───────── 15m או 5m ───────────────────────────────┐
+// │ שבירה נוספת באחד משלושת הסוגים, באותו כיוון כמו העוגן.            │
+// └───────────────────────────────────────────────────────────────────┘
+// ┌─ שלב 3 · הדק ────────── רמת הנר ──────────────────────────────────┐
+// │ נר השבירה של שלב 2 נושא PCP → הנר הבא מאשר אותו כקצה → PSP.       │
+// │ (PSP מוגדר כ-is_pcp[1] + סווינג — כלומר רצף אחד, לא שתי חלופות.)  │
+// └───────────────────────────────────────────────────────────────────┘
+//
+// ── ארכיטקטורה ─────────────────────────────────────────────────────────
+// אי אפשר להריץ מנוע שלם בתוך request.security, כי המנוע צריך NQ+ES+YM
+// בו-זמנית וזה מחייב קינון request.security בתוך request.security — דבר
+// שאינו אפשרי. במקום זה מושכים OHLC גולמי בלבד של כל נכס בכל מסגרת זמן,
+// ומקדמים את מצב המנוע רק ברגע שנר ה-HTF נסגר. הנרות הם נרות TradingView
+// האמיתיים, ולכן הגבולות יושבים בדיוק על מה שרואים בגרף.
+//
+// דפוס [1] בתוך request.security מחזיר תמיד את הנר האחרון שנסגר — אפס
+// repaint. הסקריפט חייב לרוץ על גרף 5 דקות (הרזולוציה הנמוכה במשפך).
+//
+// ── מה לא נכלל בגרסה זו ────────────────────────────────────────────────
+// מסנן True Open (פרימיום/דיסקאונט) מ-ssmt-hssmt.pine אינו ממומש כאן.
+// ברירת המחדל שלו במקור היא כבוי, ולכן ההתנהגות זהה לברירת המחדל.
+// ═══════════════════════════════════════════════════════════════════════════
+
+TZ = "America/New_York"
+
+// ═══════════════════════════════════════════════════════════════════════════
+// הגדרות
+// ═══════════════════════════════════════════════════════════════════════════
+
+grpSym = "סימבולים"
+contractSet = input.string("אוטומטי", "סט חוזים", options = ["אוטומטי", "רגיל", "מיקרו"], group = grpSym,
+     tooltip = "גרף מיקרו שקורא נתוני חוזה רגיל נותן גבולות נכונים מתמטית אך שאינם יושבים על הנרות שרואים — שתי הסדרות הרציפות מתגלגלות בתאריכים שונים.")
+symNQ_std = input.symbol("CME_MINI:NQ1!",   "NQ רגיל",  group = grpSym)
+symES_std = input.symbol("CME_MINI:ES1!",   "ES רגיל",  group = grpSym)
+symYM_std = input.symbol("CBOT_MINI:YM1!",  "YM רגיל",  group = grpSym)
+symNQ_mic = input.symbol("CME_MINI:MNQ1!",  "NQ מיקרו", group = grpSym)
+symES_mic = input.symbol("CME_MINI:MES1!",  "ES מיקרו", group = grpSym)
+symYM_mic = input.symbol("CBOT_MINI:MYM1!", "YM מיקרו", group = grpSym)
+
+grpFun = "משפך"
+useAnchor4H  = input.bool(true, "עוגן 4H (מיכל = חודש)", group = grpFun)
+useAnchor1H  = input.bool(true, "עוגן 1H (מיכל = שבוע)", group = grpFun)
+useConfirm15 = input.bool(true, "אישור 15m",             group = grpFun)
+useConfirm5  = input.bool(true, "אישור 5m",              group = grpFun)
+conflictMode = input.string("נעילה", "שבירה נגדית באותו מיכל", options = ["נעילה", "היפוך", "מוטל בספק"], group = grpFun,
+     tooltip = "נעילה — העוגן הראשון במיכל קובע, ושבירה נגדית מתעלמים ממנה.\nהיפוך — שבירה נגדית מחליפה את כיוון העוגן.\nמוטל בספק — הכיוון נשמר אך הניקוד יורד.")
+triggerWindow = input.int(1, "חלון PCP/PSP (נרות אחרי השבירה)", minval = 0, maxval = 3, group = grpFun,
+     tooltip = "0 = ה-PCP חייב להיות על נר השבירה עצמו. 1 = מותר גם על הנר שאחריו.")
+alertScore = input.int(55, "ניקוד מינימלי להתראה", minval = 0, maxval = 100, group = grpFun)
+alertOnArm = input.bool(false, "התרע גם על PCP ממתין (לפני PSP)", group = grpFun)
+
+grpGap = "הגדרת גאפ (מנוע Fill)"
+extendBodies = input.bool(true, "הרחב גאפ לגופי הנרות", group = grpGap)
+minGapPct    = input.float(0.0, "גודל גאפ מינימלי (% מהמחיר)", minval = 0.0, maxval = 1.0, step = 0.01, group = grpGap)
+maxGaps      = input.int(40, "מקסימום גאפים במיכל", minval = 5, maxval = 120, group = grpGap)
+
+grpLogic = "לוגיקה"
+blockDeadWeek    = input.bool(true, "חסום שבירות בשבוע מת (4H)",     group = grpLogic)
+blockFriday      = input.bool(true, "חסום שבירות ביום שישי (1H/4H)", group = grpLogic)
+dojiIsDivergence = input.bool(true, "דוג'י נחשב חריגה ב-PCP", group = grpLogic,
+     tooltip = "כברירת מחדל נר דוג'י (סגירה = פתיחה) נחשב כיוון שונה ומדליק PCP — כמו במקור. כיבוי מתעלם מדוג'י ודורש שורי מול דובי ממש.")
+
+grpVis = "תצוגה"
+colBull     = input.color(#26a69a, "צבע שורי",  group = grpVis)
+colBear     = input.color(#ef5350, "צבע דובי",  group = grpVis)
+colWait     = input.color(#f59e0b, "צבע ממתין", group = grpVis)
+showTable   = input.bool(true, "הצג לוח מצב", group = grpVis)
+tablePos    = input.string("ימין למעלה", "מיקום הלוח", options = ["ימין למעלה", "ימין למטה", "שמאל למעלה", "שמאל למטה"], group = grpVis)
+showMarkers = input.bool(true, "סמן בגרף כשהשרשרת נסגרת", group = grpVis)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// בחירת משפחת חוזים
+// ═══════════════════════════════════════════════════════════════════════════
+
+cs           = syminfo.tickerid
+chartIsMicro = str.contains(cs, "MNQ") or str.contains(cs, "MES") or str.contains(cs, "MYM")
+useMicro     = contractSet == "מיקרו" or (contractSet == "אוטומטי" and chartIsMicro)
+
+sNQ = useMicro ? symNQ_mic : symNQ_std
+sES = useMicro ? symES_mic : symES_std
+sYM = useMicro ? symYM_mic : symYM_std
+
+// איזה נכס הוא נכס הגרף — עליו נמדד סווינג ה-PSP, כמו במקור
+isESc = str.contains(cs, "ES")
+isYMc = str.contains(cs, "YM")
+
+// ═══════════════════════════════════════════════════════════════════════════
+// שער מסגרת זמן — הסקריפט חייב לרוץ על גרף 5 דקות
+// ═══════════════════════════════════════════════════════════════════════════
+
+chartOk = timeframe.period == "5"
+
+// ═══════════════════════════════════════════════════════════════════════════
+// שכבת נתונים — 12 קריאות request.security מתוך 40 מותרות
+//
+// 5m  — נטיב לגרף, נקרא כמו במקורות ומקודם ב-barstate.isconfirmed
+// שאר — דפוס [1], מחזיר תמיד את נר ה-HTF האחרון שנסגר
+// חותמת הזמן נדרשת רק מ-NQ; היא זהה לכל הנכסים באותה מסגרת.
+// ═══════════════════════════════════════════════════════════════════════════
+
+[nq5o, nq5h, nq5l, nq5c] = request.security(sNQ, timeframe.period, [open, high, low, close], lookahead = barmerge.lookahead_off)
+[es5o, es5h, es5l, es5c] = request.security(sES, timeframe.period, [open, high, low, close], lookahead = barmerge.lookahead_off)
+[ym5o, ym5h, ym5l, ym5c] = request.security(sYM, timeframe.period, [open, high, low, close], lookahead = barmerge.lookahead_off)
+
+[nq15o, nq15h, nq15l, nq15c, t15] = request.security(sNQ, "15", [open[1], high[1], low[1], close[1], time[1]], lookahead = barmerge.lookahead_off)
+[es15o, es15h, es15l, es15c]      = request.security(sES, "15", [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_off)
+[ym15o, ym15h, ym15l, ym15c]      = request.security(sYM, "15", [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_off)
+
+[nq60o, nq60h, nq60l, nq60c, t60] = request.security(sNQ, "60", [open[1], high[1], low[1], close[1], time[1]], lookahead = barmerge.lookahead_off)
+[es60o, es60h, es60l, es60c]      = request.security(sES, "60", [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_off)
+[ym60o, ym60h, ym60l, ym60c]      = request.security(sYM, "60", [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_off)
+
+[nq240o, nq240h, nq240l, nq240c, t240] = request.security(sNQ, "240", [open[1], high[1], low[1], close[1], time[1]], lookahead = barmerge.lookahead_off)
+[es240o, es240h, es240l, es240c]       = request.security(sES, "240", [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_off)
+[ym240o, ym240h, ym240l, ym240c]       = request.security(sYM, "240", [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_off)
+
+// זיהוי רגע סגירת נר HTF. ta.change אינו מתאים כאן כי הערך הראשון הוא na.
+var int lastT15  = 0
+var int lastT60  = 0
+var int lastT240 = 0
+
+step5   = barstate.isconfirmed and chartOk
+step15  = chartOk and not na(t15)  and t15  != lastT15
+step60  = chartOk and not na(t60)  and t60  != lastT60
+step240 = chartOk and not na(t240) and t240 != lastT240
+
+if step15
+    lastT15 := t15
+if step60
+    lastT60 := t60
+if step240
+    lastT240 := t240
+
+// הזמן שממנו נגזרים המחזורים. ב-HTF זהו זמן נר ה-HTF שנסגר, לא זמן נר הגרף —
+// אחרת גבולות המיכל ייפלו במקום הלא נכון.
+tm5   = time
+tm15  = nz(t15,  time)
+tm60  = nz(t60,  time)
+tm240 = nz(t240, time)
+
+// ATR מחושב תמיד, לעולם לא בתוך תנאי — פונקציות ta.* דורשות קריאה בכל נר
+atr14 = ta.atr(14)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// צנרת זמן QT — פונקציה של חותמת זמן, כדי שכל שכבה תחשב את המחזורים שלה
+//
+// tfc: 2 = 5m · 3 = 15m · 4 = 1H · 5 = 4H   (זהה למספור tfClass במקורות)
+// יום המסחר מתחיל ב-18:00 EST · סשן = 360 דק' · מיקרו-סשן = 90 דק'
+// ═══════════════════════════════════════════════════════════════════════════
+
+f_cycle(int t, int tfc) =>
+    int  mod  = hour(t, TZ) * 60 + minute(t, TZ)
+    bool post = mod >= 1080
+    int  mfd  = post ? mod - 1080 : mod + 360
+    int  tdt  = post ? t + 86400000 : t
+
+    int tY = year(tdt, TZ)
+    int tM = month(tdt, TZ)
+    int tD = dayofmonth(tdt, TZ)
+    int tW = dayofweek(tdt, TZ)
+
+    int sIdx = math.floor(mfd / 360)
+    int mIdx = math.floor((mfd % 360) / 90)
+    int qIdx = math.floor((mfd % 90) / 22.5)
+
+    int dsm  = tW == dayofweek.sunday ? 6 : tW - 2
+    int monT = tdt - dsm * 86400000
+    int thuT = monT + 3 * 86400000
+    int mM   = month(monT, TZ)
+    int mD   = dayofmonth(monT, TZ)
+    int mY   = year(monT, TZ)
+
+    // שבוע מת = יום שני ויום חמישי אינם באותו חודש
+    bool dead  = mM != month(thuT, TZ)
+    int  wkNum = dead ? 0 : math.floor((mD - 1) / 7) + 1
+
+    int dayId  = tY * 10000 + tM * 100 + tD
+    int weekId = mY * 10000 + mM * 100 + mD
+    int monId  = mY * 100 + mM
+    int sesId  = dayId * 10 + sIdx
+    int micId  = sesId * 10 + mIdx
+    int qtrId  = micId * 10 + qIdx
+
+    int refId  = tfc == 5 ? weekId : tfc == 4 ? dayId  : tfc == 3 ? sesId : micId
+    int lifeId = tfc == 5 ? monId  : tfc == 4 ? weekId : tfc == 3 ? dayId : sesId
+
+    [refId, lifeId, dead, tW, wkNum]
+
+// ה"זרע" (השוואה גם ליחידה האחרונה של המיכל הקודם) קיים ב-1H בלבד מבין
+// ארבע המסגרות שלנו — ב-4H המחזור החודשי עומד בפני עצמו.
+f_keepLast(int tfc) => tfc == 4
+
+// ═══════════════════════════════════════════════════════════════════════════
+// מנוע 1 · SSMT Fill — סטייה לפי עומק מילוי גאפ קולקטיבי (NQ + ES)
+// ═══════════════════════════════════════════════════════════════════════════
+
+type Gap
+    int    dir        // 1 = שורי · -1 = דובי
+    float  nqBot
+    float  nqTop
+    float  esBot
+    float  esTop
+    int    refId      // תת-המחזור שבו נולד
+    int    birth      // מונה הצעדים בלידה
+    float  nqExt      // הקיצוניות בביקור הנוכחי
+    float  esExt
+    bool   inVisit
+    bool   dead       // הפך ל-IFVG
+    bool   armed      // תת-המחזור שבו נולד הסתיים
+    int    fDeg       // דרגת השבירה שנרשמה. יכולה רק לעלות.
+    string fLead
+    int    fSeq
+    int    fBar       // נר הגרף שבו נרשמה
+
+type FillState
+    array<Gap> gaps
+    bool  seedActive
+    int   seedRefId
+    int   seq
+    int   shownDir
+    int   lastRef
+    int   lastLife
+    int   steps
+    // היסטוריית שלושת הנרות האחרונים של מסגרת הזמן הזו
+    float nqO1
+    float nqH1
+    float nqL1
+    float nqC1
+    float nqH2
+    float nqL2
+    float nqC2
+    float esO1
+    float esH1
+    float esL1
+    float esC1
+    float esH2
+    float esL2
+    float esC2
+    // פלט
+    int    outDir
+    int    outDeg
+    int    outSeq
+    int    outBar
+    string outLead
+
+f_newFill() =>
+    FillState.new(array.new<Gap>(), false, 0, 0, 0, -1, -1, 0,
+         na, na, na, na, na, na, na,
+         na, na, na, na, na, na, na,
+         0, 0, 0, 0, "")
+
+// עומק חדירה של נכס לגאפ שלו, כאחוז מהגאפ שלו.
+// 0 = לא נגע · 0.5 = CE · 1.0 = הקצה הרחוק
+f_depth(Gap g, bool isNQ) =>
+    float top = isNQ ? g.nqTop : g.esTop
+    float bot = isNQ ? g.nqBot : g.esBot
+    float ext = isNQ ? g.nqExt : g.esExt
+    float rng = top - bot
+    float d   = 0.0
+    if rng > 0 and not na(ext)
+        d := g.dir == 1 ? (top - ext) / rng : (ext - bot) / rng
+    math.max(d, 0.0)
+
+// הדרגה הגבוהה ביותר שמתקיימת. 0 = אין שבירה.
+f_degree(float dLead, float dLag) =>
+    int deg = 0
+    if dLead >= 1.0 and dLag < 1.0
+        deg := 3
+    else if dLead >= 0.5 and dLag < 0.5
+        deg := 2
+    else if dLead > 0.0 and dLag <= 0.0
+        deg := 1
+    deg
+
+f_fillStep(FillState st, int refId, int lifeId, bool canRegister, bool keepLast, int bIdx,
+     float nqO, float nqH, float nqL, float nqC, float esO, float esH, float esL, float esC) =>
+
+    bool newRef  = refId  != st.lastRef
+    bool newLife = lifeId != st.lastLife
+    int  prevRef = st.lastRef
+
+    // ── איפוס מיכל + זרע ────────────────────────────────────────────────
+    if newLife
+        if keepLast and st.steps > 0
+            if array.size(st.gaps) > 0
+                for i = array.size(st.gaps) - 1 to 0
+                    if array.get(st.gaps, i).refId != prevRef
+                        array.remove(st.gaps, i)
+            st.seedRefId  := prevRef
+            st.seedActive := array.size(st.gaps) > 0
+        else
+            array.clear(st.gaps)
+            st.seedActive := false
+        st.shownDir := 0
+    else if newRef and st.seedActive
+        if array.size(st.gaps) > 0
+            for i = array.size(st.gaps) - 1 to 0
+                if array.get(st.gaps, i).refId == st.seedRefId
+                    array.remove(st.gaps, i)
+        st.seedActive := false
+
+    st.lastRef  := refId
+    st.lastLife := lifeId
+
+    // ── דריכה · מדידת ביקור · מוות ב-IFVG ───────────────────────────────
+    if array.size(st.gaps) > 0
+        for i = 0 to array.size(st.gaps) - 1
+            Gap gu = array.get(st.gaps, i)
+            if not gu.dead
+                if not gu.armed and gu.refId != refId
+                    gu.armed := true
+
+                if gu.armed
+                    bool bothOut = gu.dir == 1 ? (nqL > gu.nqTop and esL > gu.esTop) : (nqH < gu.nqBot and esH < gu.esBot)
+                    if bothOut
+                        // הביקור נגמר — מאפסים לקראת ביקור חדש
+                        gu.inVisit := false
+                        gu.nqExt   := gu.dir == 1 ? gu.nqTop : gu.nqBot
+                        gu.esExt   := gu.dir == 1 ? gu.esTop : gu.esBot
+                    else
+                        gu.inVisit := true
+                        if gu.dir == 1
+                            gu.nqExt := math.min(gu.nqExt, nqL)
+                            gu.esExt := math.min(gu.esExt, esL)
+                        else
+                            gu.nqExt := math.max(gu.nqExt, nqH)
+                            gu.esExt := math.max(gu.esExt, esH)
+
+                // IFVG — סגירה מעבר לגאפ מבטלת את הרעיון (גם לפני דריכה)
+                if st.steps > gu.birth
+                    if gu.dir == 1
+                        if nqC < gu.nqBot or esC < gu.esBot
+                            gu.dead := true
+                    else
+                        if nqC > gu.nqTop or esC > gu.esTop
+                            gu.dead := true
+
+    // ── זיהוי גאפ קולקטיבי — FVG באותו כיוון, באותו נר, בשני הנכסים ─────
+    // הגבול נמדד בפתיל ומורחב לגוף רק כשיש רווח אמיתי שלא נסחר
+    if st.steps >= 2
+        bool bullBoth = nqL > st.nqH2 and esL > st.esH2
+        bool bearBoth = nqH < st.nqL2 and esH < st.esL2
+        int  newDir   = bullBoth ? 1 : bearBoth ? -1 : 0
+
+        if newDir != 0
+            float nb = na
+            float nt = na
+            float eb = na
+            float et = na
+            if newDir == 1
+                nb := (extendBodies and st.nqO1 > st.nqH2) ? st.nqC2 : st.nqH2
+                nt := (extendBodies and nqL     > st.nqC1) ? nqO     : nqL
+                eb := (extendBodies and st.esO1 > st.esH2) ? st.esC2 : st.esH2
+                et := (extendBodies and esL     > st.esC1) ? esO     : esL
+            else
+                nt := (extendBodies and st.nqO1 < st.nqL2) ? st.nqC2 : st.nqL2
+                nb := (extendBodies and nqH     < st.nqC1) ? nqO     : nqH
+                et := (extendBodies and st.esO1 < st.esL2) ? st.esC2 : st.esL2
+                eb := (extendBodies and esH     < st.esC1) ? esO     : esH
+
+            if nt - nb > minGapPct / 100 * nqC and et - eb > minGapPct / 100 * esC
+                array.push(st.gaps, Gap.new(newDir, nb, nt, eb, et, refId, st.steps,
+                     newDir == 1 ? nt : nb, newDir == 1 ? et : eb,
+                     false, false, false, 0, "", 0, 0))
+                if array.size(st.gaps) > maxGaps
+                    array.shift(st.gaps)
+
+    // ── רישום שבירות. כל גאפ נושא את שלו; הדרגה יכולה רק לעלות ──────────
+    if canRegister and array.size(st.gaps) > 0
+        for i = 0 to array.size(st.gaps) - 1
+            Gap gr = array.get(st.gaps, i)
+            if not gr.dead and gr.armed
+                float dN  = f_depth(gr, true)
+                float dE  = f_depth(gr, false)
+                int   deg = f_degree(math.max(dN, dE), math.min(dN, dE))
+                if deg > gr.fDeg
+                    if gr.fDeg == 0
+                        st.seq  := st.seq + 1
+                        gr.fSeq := st.seq
+                        gr.fBar := bIdx
+                    gr.fDeg  := deg
+                    gr.fLead := dN > dE ? "NQ" : "ES"
+
+    // ── בחירת השבירה החיה העדכנית ביותר ────────────────────────────────
+    int selIdx = -1
+    int selSeq = -1
+    if array.size(st.gaps) > 0
+        for i = 0 to array.size(st.gaps) - 1
+            Gap gv = array.get(st.gaps, i)
+            if not gv.dead and gv.fDeg > 0 and gv.fSeq > selSeq
+                selSeq := gv.fSeq
+                selIdx := i
+
+    // שבירה נגדית מבטלת את השבירות בכיוון הישן
+    if selIdx != -1
+        int nd = array.get(st.gaps, selIdx).dir
+        if st.shownDir != 0 and nd != st.shownDir
+            for i = 0 to array.size(st.gaps) - 1
+                Gap gk = array.get(st.gaps, i)
+                if gk.dir == st.shownDir
+                    gk.fDeg := 0
+        st.shownDir := nd
+
+    if selIdx == -1
+        st.outDir  := 0
+        st.outDeg  := 0
+        st.outLead := ""
+    else
+        Gap gd = array.get(st.gaps, selIdx)
+        st.outDir  := gd.dir
+        st.outDeg  := gd.fDeg
+        st.outSeq  := gd.fSeq
+        st.outBar  := gd.fBar
+        st.outLead := gd.fLead
+
+    // ── הזזת ההיסטוריה ─────────────────────────────────────────────────
+    st.nqH2  := st.nqH1
+    st.nqL2  := st.nqL1
+    st.nqC2  := st.nqC1
+    st.esH2  := st.esH1
+    st.esL2  := st.esL1
+    st.esC2  := st.esC1
+    st.nqO1  := nqO
+    st.nqH1  := nqH
+    st.nqL1  := nqL
+    st.nqC1  := nqC
+    st.esO1  := esO
+    st.esH1  := esH
+    st.esL1  := esL
+    st.esC1  := esC
+    st.steps := st.steps + 1
+
+// ═══════════════════════════════════════════════════════════════════════════
+// מנוע 2 · SSMT / HSSMT — לקיחת רמת ייחוס (NQ + ES + YM)
+//
+// S = פתיל מעבר לפתיל של הייחוס · H = סגירה מעבר לסגירה הקיצונית (חזק יותר)
+// האסימטריה מכוונת: בדובי מספיק שהגרעין (NQ+ES) הסכים כדי לבטל; בשורי
+// נדרשים כל השלושה, ו-YM מושמט מהתווית.
+// ═══════════════════════════════════════════════════════════════════════════
+
+type SsmtState
+    array<float> nqHi
+    array<float> nqLo
+    array<float> nqHiC
+    array<float> nqLoC
+    array<float> esHi
+    array<float> esLo
+    array<float> esHiC
+    array<float> esLoC
+    array<float> ymHi
+    array<float> ymLo
+    array<float> ymHiC
+    array<float> ymLoC
+    float nqCH
+    float nqCL
+    float nqCHC
+    float nqCLC
+    float esCH
+    float esCL
+    float esCHC
+    float esCLC
+    float ymCH
+    float ymCL
+    float ymCHC
+    float ymCLC
+    bool  seedActive
+    int   lastRef
+    int   lastLife
+    int   steps
+    int   bearType
+    int   bullType
+    int   bearRefI
+    int   bullRefI
+    int   bearSeq
+    int   bullSeq
+    string bearStr
+    string bullStr
+    int   seq
+    // פלט
+    int    outDir
+    int    outType
+    int    outSeq
+    int    outBar
+    string outStr
+
+f_newSsmt() =>
+    SsmtState.new(array.new_float(), array.new_float(), array.new_float(), array.new_float(),
+         array.new_float(), array.new_float(), array.new_float(), array.new_float(),
+         array.new_float(), array.new_float(), array.new_float(), array.new_float(),
+         na, na, na, na, na, na, na, na, na, na, na, na,
+         false, -1, -1, 0,
+         0, 0, -1, -1, 0, 0, "", "", 0,
+         0, 0, 0, 0, "")
+
+f_str3(bool bNQ, bool bES, bool bYM, bool isBull) =>
+    string s = ""
+    s := bNQ ? s + "NQ " : s
+    s := bES ? s + "ES " : s
+    s := (bYM and not isBull) ? s + "YM " : s
+    str.trim(s)
+
+// דובי: סורקים מהייחוס העדכני אחורה, עם קיצוניות מצטברת. הראשון שנמצא מנצח.
+// ביטול = הגרעין (NQ+ES) הסכים.
+f_findBear(SsmtState st) =>
+    int    bT = 0
+    int    bI = -1
+    string bS = ""
+    int    n  = array.size(st.nqHi)
+    if n > 0
+        float nqM  = st.nqCH
+        float esM  = st.esCH
+        float ymM  = st.ymCH
+        float nqMc = st.nqCHC
+        float esMc = st.esCHC
+        float ymMc = st.ymCHC
+        bool  stop = false
+        for i = n - 1 to 0
+            if bT == 0 and not stop
+                bool nw = nqM  > array.get(st.nqHi,  i)
+                bool ew = esM  > array.get(st.esHi,  i)
+                bool yw = ymM  > array.get(st.ymHi,  i)
+                bool nc = nqMc > array.get(st.nqHiC, i)
+                bool ec = esMc > array.get(st.esHiC, i)
+                bool yc = ymMc > array.get(st.ymHiC, i)
+                bool hValid = (nc or ec or yc) and not (nc and ec)
+                bool wValid = (nw or ew or yw) and not (nw and ew)
+                if hValid or wValid
+                    bool hN = hValid and nc
+                    bool hE = hValid and ec
+                    bool hY = hValid and yc
+                    string hs  = f_str3(hN, hE, hY, false)
+                    string ss  = wValid ? f_str3(nw and not hN, ew and not hE, yw and not hY, false) : ""
+                    string lbl = hs != "" ? "H " + hs : ""
+                    lbl := ss != "" ? (lbl != "" ? lbl + " S " + ss : "S " + ss) : lbl
+                    if not hValid and nc and ec
+                        lbl := lbl + (yc ? " (all closed)" : " (core closed)")
+                    bT := hs != "" ? 2 : 1
+                    bI := i
+                    bS := lbl
+                else if (nw and ew) or (nc and ec)
+                    stop := true
+            nqM  := math.max(nqM,  array.get(st.nqHi,  i))
+            esM  := math.max(esM,  array.get(st.esHi,  i))
+            ymM  := math.max(ymM,  array.get(st.ymHi,  i))
+            nqMc := math.max(nqMc, array.get(st.nqHiC, i))
+            esMc := math.max(esMc, array.get(st.esHiC, i))
+            ymMc := math.max(ymMc, array.get(st.ymHiC, i))
+    [bT, bI, bS]
+
+// שורי: הביטול דורש את כל השלושה (כולל YM), ו-YM מושמט מהתווית.
+f_findBull(SsmtState st) =>
+    int    bT = 0
+    int    bI = -1
+    string bS = ""
+    int    n  = array.size(st.nqLo)
+    if n > 0
+        float nqM  = st.nqCL
+        float esM  = st.esCL
+        float ymM  = st.ymCL
+        float nqMc = st.nqCLC
+        float esMc = st.esCLC
+        float ymMc = st.ymCLC
+        bool  stop = false
+        for i = n - 1 to 0
+            if bT == 0 and not stop
+                bool nw = nqM  < array.get(st.nqLo,  i)
+                bool ew = esM  < array.get(st.esLo,  i)
+                bool yw = ymM  < array.get(st.ymLo,  i)
+                bool nc = nqMc < array.get(st.nqLoC, i)
+                bool ec = esMc < array.get(st.esLoC, i)
+                bool yc = ymMc < array.get(st.ymLoC, i)
+                bool hValid = (nc or ec) and not (nc and ec and yc)
+                bool wValid = (nw or ew) and not (nw and ew and yw)
+                if hValid or wValid
+                    bool hN = hValid and nc
+                    bool hE = hValid and ec
+                    bool hY = hValid and yc
+                    string hs  = f_str3(hN, hE, hY, true)
+                    string ss  = wValid ? f_str3(nw and not hN, ew and not hE, yw and not hY, true) : ""
+                    string lbl = hs != "" ? "H " + hs : ""
+                    lbl := ss != "" ? (lbl != "" ? lbl + " S " + ss : "S " + ss) : lbl
+                    if not hValid and nc and ec and yc
+                        lbl := lbl + " (all closed)"
+                    bT := hs != "" ? 2 : 1
+                    bI := i
+                    bS := lbl
+                else if (nw and ew and yw) or (nc and ec and yc)
+                    stop := true
+            nqM  := math.min(nqM,  array.get(st.nqLo,  i))
+            esM  := math.min(esM,  array.get(st.esLo,  i))
+            ymM  := math.min(ymM,  array.get(st.ymLo,  i))
+            nqMc := math.min(nqMc, array.get(st.nqLoC, i))
+            esMc := math.min(esMc, array.get(st.esLoC, i))
+            ymMc := math.min(ymMc, array.get(st.ymLoC, i))
+    [bT, bI, bS]
+
+f_ssmtStep(SsmtState st, int refId, int lifeId, bool canRegister, bool keepLast, int bIdx,
+     float nqH, float nqL, float nqC, float esH, float esL, float esC, float ymH, float ymL, float ymC) =>
+
+    bool newRef  = refId  != st.lastRef
+    bool newLife = lifeId != st.lastLife
+    bool first   = st.steps == 0
+
+    // הזרע מחושב כאן, כשהמצברים עדיין מחזיקים את התת-מחזור הקודם
+    bool seedPush = newRef and newLife and keepLast and not na(st.nqCH)
+    bool dropSeed = newRef and (not newLife) and st.seedActive
+
+    if newRef
+        if newLife and not first
+            array.clear(st.nqHi)
+            array.clear(st.nqLo)
+            array.clear(st.nqHiC)
+            array.clear(st.nqLoC)
+            array.clear(st.esHi)
+            array.clear(st.esLo)
+            array.clear(st.esHiC)
+            array.clear(st.esLoC)
+            array.clear(st.ymHi)
+            array.clear(st.ymLo)
+            array.clear(st.ymHiC)
+            array.clear(st.ymLoC)
+        if ((not newLife) or keepLast) and not na(st.nqCH)
+            array.push(st.nqHi,  st.nqCH)
+            array.push(st.nqLo,  st.nqCL)
+            array.push(st.nqHiC, st.nqCHC)
+            array.push(st.nqLoC, st.nqCLC)
+            array.push(st.esHi,  st.esCH)
+            array.push(st.esLo,  st.esCL)
+            array.push(st.esHiC, st.esCHC)
+            array.push(st.esLoC, st.esCLC)
+            array.push(st.ymHi,  st.ymCH)
+            array.push(st.ymLo,  st.ymCL)
+            array.push(st.ymHiC, st.ymCHC)
+            array.push(st.ymLoC, st.ymCLC)
+        if dropSeed and array.size(st.nqHi) > 0
+            array.remove(st.nqHi,  0)
+            array.remove(st.nqLo,  0)
+            array.remove(st.nqHiC, 0)
+            array.remove(st.nqLoC, 0)
+            array.remove(st.esHi,  0)
+            array.remove(st.esLo,  0)
+            array.remove(st.esHiC, 0)
+            array.remove(st.esLoC, 0)
+            array.remove(st.ymHi,  0)
+            array.remove(st.ymLo,  0)
+            array.remove(st.ymHiC, 0)
+            array.remove(st.ymLoC, 0)
+        // פתיחת מצבר תת-מחזור חדש
+        st.nqCH  := nqH
+        st.nqCL  := nqL
+        st.nqCHC := nqC
+        st.nqCLC := nqC
+        st.esCH  := esH
+        st.esCL  := esL
+        st.esCHC := esC
+        st.esCLC := esC
+        st.ymCH  := ymH
+        st.ymCL  := ymL
+        st.ymCHC := ymC
+        st.ymCLC := ymC
+    else
+        st.nqCH  := na(st.nqCH)  ? nqH : math.max(st.nqCH,  nqH)
+        st.nqCL  := na(st.nqCL)  ? nqL : math.min(st.nqCL,  nqL)
+        st.nqCHC := na(st.nqCHC) ? nqC : math.max(st.nqCHC, nqC)
+        st.nqCLC := na(st.nqCLC) ? nqC : math.min(st.nqCLC, nqC)
+        st.esCH  := na(st.esCH)  ? esH : math.max(st.esCH,  esH)
+        st.esCL  := na(st.esCL)  ? esL : math.min(st.esCL,  esL)
+        st.esCHC := na(st.esCHC) ? esC : math.max(st.esCHC, esC)
+        st.esCLC := na(st.esCLC) ? esC : math.min(st.esCLC, esC)
+        st.ymCH  := na(st.ymCH)  ? ymH : math.max(st.ymCH,  ymH)
+        st.ymCL  := na(st.ymCL)  ? ymL : math.min(st.ymCL,  ymL)
+        st.ymCHC := na(st.ymCHC) ? ymC : math.max(st.ymCHC, ymC)
+        st.ymCLC := na(st.ymCLC) ? ymC : math.min(st.ymCLC, ymC)
+
+    if newRef and newLife
+        st.seedActive := seedPush
+    else if newRef
+        st.seedActive := false
+
+    // פקיעת מיכל מאפסת את מצב התצוגה
+    if newLife and not first
+        st.bearType := 0
+        st.bullType := 0
+        st.bearRefI := -1
+        st.bullRefI := -1
+
+    // מחיקת הזרע מזיזה את כל האינדקסים ב-1
+    if dropSeed
+        st.bearRefI := st.bearRefI > 0 ? st.bearRefI - 1 : -1
+        st.bullRefI := st.bullRefI > 0 ? st.bullRefI - 1 : -1
+
+    st.lastRef  := refId
+    st.lastLife := lifeId
+    st.steps    := st.steps + 1
+
+    // ── זיהוי חי. סטייה שכבר לא תקפה נעלמת מעצמה ────────────────────────
+    if canRegister and array.size(st.nqHi) > 0
+        [nbT, nbI, nbS] = f_findBear(st)
+        if nbT != 0
+            if st.bearType == 0 or nbI != st.bearRefI
+                st.seq     := st.seq + 1
+                st.bearSeq := st.seq
+            st.bearRefI := nbI
+            st.bearType := nbT
+            st.bearStr  := nbS
+        else
+            st.bearType := 0
+            st.bearRefI := -1
+
+        [nuT, nuI, nuS] = f_findBull(st)
+        if nuT != 0
+            if st.bullType == 0 or nuI != st.bullRefI
+                st.seq     := st.seq + 1
+                st.bullSeq := st.seq
+            st.bullRefI := nuI
+            st.bullType := nuT
+            st.bullStr  := nuS
+        else
+            st.bullType := 0
+            st.bullRefI := -1
+
+    int dir = 0
+    if st.bearType != 0 and st.bullType != 0
+        dir := st.bearSeq > st.bullSeq ? -1 : 1
+    else if st.bearType != 0
+        dir := -1
+    else if st.bullType != 0
+        dir := 1
+
+    st.outDir  := dir
+    st.outType := dir == -1 ? st.bearType : dir == 1 ? st.bullType : 0
+    st.outStr  := dir == -1 ? st.bearStr  : dir == 1 ? st.bullStr  : ""
+    int ns = dir == -1 ? st.bearSeq : dir == 1 ? st.bullSeq : 0
+    if ns != st.outSeq
+        st.outBar := bIdx
+    st.outSeq := ns
+
+// ═══════════════════════════════════════════════════════════════════════════
+// מנוע 3 · PCP / PSP — סטיית כיוון נר + אישור סווינג תלת-נרי
+//
+// PCP = לא כל הנכסים מסכימים על צבע הנר. הכיוון נקבע בהצבעת רוב, והמיעוט
+// החורג הוא הסיגנל: רוב דובי → סיגנל שורי.
+// PSP = הנר שנשא PCP התברר בדיעבד כקצה מקומי. סווינג נמוך → שורי.
+// ═══════════════════════════════════════════════════════════════════════════
+
+type PcpState
+    bool  pcp0        // PCP של הנר שזה עתה נסגר (הופך ל-bar[1] בצעד הבא)
+    int   pcpDir0
+    float h0
+    float l0
+    float h1
+    float l1
+    int   bar0
+    int   steps
+    // פלט
+    bool  pcpNow      // הנר שזה עתה נסגר הוא PCP
+    int   pcpDirNow
+    int   pspDir      // סווינג שאושר על הנר הקודם: 1 שורי · -1 דובי · 0 אין
+    int   pspBar
+
+f_newPcp() =>
+    PcpState.new(false, 0, na, na, na, na, 0, 0, false, 0, 0, 0)
+
+// ── טיפוסי המשפך. מוצהרים כאן, לצד שאר הטיפוסים, לפני כל שימוש ──────────
+
+type Anchor
+    int  dir
+    int  lifeId
+    bool locked
+    bool contested
+    int  bar
+    bool hasFill
+    bool hasS
+    bool hasH
+    int  bestFillDeg
+    int  seenFillSeq
+    int  seenSsmtSeq
+
+type Confirm
+    bool active
+    int  dir
+    int  fracStep      // מונה הצעדים של אותה מסגרת בעת השבירה
+    int  fracBar
+    bool hasFill
+    bool hasS
+    bool hasH
+    int  fillDeg
+    bool armed         // נמצא PCP בתוך החלון
+    int  pcpBar
+    bool triggered
+    int  seenFillSeq
+    int  seenSsmtSeq
+
+f_candleDir(float o, float c) => c > o ? 1 : c < o ? -1 : 0
+
+f_pcpStep(PcpState st, int bIdx, float chH, float chL,
+     float nqO, float nqC, float esO, float esC, float ymO, float ymC) =>
+
+    int dN = f_candleDir(nqO, nqC)
+    int dE = f_candleDir(esO, esC)
+    int dY = f_candleDir(ymO, ymC)
+
+    bool pcp = false
+    if dojiIsDivergence
+        // התנהגות המקור: דוג'י (0) הוא כיוון נפרד ומדליק PCP
+        pcp := dN != dE or dN != dY
+    else
+        // דורש שורי מול דובי ממש; דוג'י אינו נספר
+        pcp := (dN > 0 or dE > 0 or dY > 0) and (dN < 0 or dE < 0 or dY < 0)
+
+    int bulls = (dN > 0 ? 1 : 0) + (dE > 0 ? 1 : 0) + (dY > 0 ? 1 : 0)
+    int bears = (dN < 0 ? 1 : 0) + (dE < 0 ? 1 : 0) + (dY < 0 ? 1 : 0)
+    // המיעוט החורג הוא הסיגנל — ההיפוך כאן מכוון
+    int pcpDir = bears > bulls ? 1 : bulls > bears ? -1 : 0
+
+    // ── סווינג על bar[1]: הנר הקודם, מול זה שלפניו ומול הנוכחי ──────────
+    st.pspDir := 0
+    if st.steps >= 2 and st.pcp0
+        if st.h0 > st.h1 and st.h0 > chH
+            st.pspDir := -1          // סווינג גבוה → דובי
+            st.pspBar := st.bar0
+        else if st.l0 < st.l1 and st.l0 < chL
+            st.pspDir := 1           // סווינג נמוך → שורי
+            st.pspBar := st.bar0
+
+    st.pcpNow    := pcp
+    st.pcpDirNow := pcpDir
+
+    // ── הזזה ────────────────────────────────────────────────────────────
+    st.h1      := st.h0
+    st.l1      := st.l0
+    st.h0      := chH
+    st.l0      := chL
+    st.pcp0    := pcp
+    st.pcpDir0 := pcpDir
+    st.bar0    := bIdx
+    st.steps   := st.steps + 1
+
+// ═══════════════════════════════════════════════════════════════════════════
+// מופעי המנועים — Fill ו-SSMT בארבע מסגרות, PCP/PSP בשתיים
+// ═══════════════════════════════════════════════════════════════════════════
+
+var FillState fill5   = f_newFill()
+var FillState fill15  = f_newFill()
+var FillState fill60  = f_newFill()
+var FillState fill240 = f_newFill()
+
+var SsmtState ssmt5   = f_newSsmt()
+var SsmtState ssmt15  = f_newSsmt()
+var SsmtState ssmt60  = f_newSsmt()
+var SsmtState ssmt240 = f_newSsmt()
+
+var PcpState  pcp5    = f_newPcp()
+var PcpState  pcp15   = f_newPcp()
+
+// נכס הגרף — עליו נמדד סווינג ה-PSP, כמו במקור
+ch5h  = isESc ? es5h  : isYMc ? ym5h  : nq5h
+ch5l  = isESc ? es5l  : isYMc ? ym5l  : nq5l
+ch15h = isESc ? es15h : isYMc ? ym15h : nq15h
+ch15l = isESc ? es15l : isYMc ? ym15l : nq15l
+
+// ═══════════════════════════════════════════════════════════════════════════
+// קידום המנועים
+// ═══════════════════════════════════════════════════════════════════════════
+
+[ref5,   life5,   dead5,   dow5,   wk5]   = f_cycle(tm5,   2)
+[ref15,  life15,  dead15,  dow15,  wk15]  = f_cycle(tm15,  3)
+[ref60,  life60,  dead60,  dow60,  wk60]  = f_cycle(tm60,  4)
+[ref240, life240, dead240, dow240, wk240] = f_cycle(tm240, 5)
+
+// חסימות: יום שישי ב-1H/4H, שבוע מת ב-4H
+fri60  = blockFriday and dow60  == dayofweek.friday
+fri240 = blockFriday and dow240 == dayofweek.friday
+can60  = not fri60
+can240 = not fri240 and not (blockDeadWeek and dead240)
+
+if step5
+    f_fillStep(fill5, ref5, life5, true, f_keepLast(2), bar_index, nq5o, nq5h, nq5l, nq5c, es5o, es5h, es5l, es5c)
+    f_ssmtStep(ssmt5, ref5, life5, true, f_keepLast(2), bar_index, nq5h, nq5l, nq5c, es5h, es5l, es5c, ym5h, ym5l, ym5c)
+    f_pcpStep(pcp5, bar_index, ch5h, ch5l, nq5o, nq5c, es5o, es5c, ym5o, ym5c)
+
+if step15
+    f_fillStep(fill15, ref15, life15, true, f_keepLast(3), bar_index, nq15o, nq15h, nq15l, nq15c, es15o, es15h, es15l, es15c)
+    f_ssmtStep(ssmt15, ref15, life15, true, f_keepLast(3), bar_index, nq15h, nq15l, nq15c, es15h, es15l, es15c, ym15h, ym15l, ym15c)
+    f_pcpStep(pcp15, bar_index, ch15h, ch15l, nq15o, nq15c, es15o, es15c, ym15o, ym15c)
+
+if step60
+    f_fillStep(fill60, ref60, life60, can60, f_keepLast(4), bar_index, nq60o, nq60h, nq60l, nq60c, es60o, es60h, es60l, es60c)
+    f_ssmtStep(ssmt60, ref60, life60, can60, f_keepLast(4), bar_index, nq60h, nq60l, nq60c, es60h, es60l, es60c, ym60h, ym60l, ym60c)
+
+if step240
+    f_fillStep(fill240, ref240, life240, can240, f_keepLast(5), bar_index, nq240o, nq240h, nq240l, nq240c, es240o, es240h, es240l, es240c)
+    f_ssmtStep(ssmt240, ref240, life240, can240, f_keepLast(5), bar_index, nq240h, nq240l, nq240c, es240h, es240l, es240c, ym240h, ym240l, ym240c)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// שלב 1 · עוגן — הראשונה במיכל קובעת את הכיוון
+// ═══════════════════════════════════════════════════════════════════════════
+
+f_newAnchor() => Anchor.new(0, -1, false, false, 0, false, false, false, 0, 0, 0)
+
+var Anchor anc60  = f_newAnchor()
+var Anchor anc240 = f_newAnchor()
+
+// מיכל חדש מנקה את העוגן
+f_anchorReset(Anchor a, int lifeId) =>
+    if lifeId != a.lifeId
+        a.dir         := 0
+        a.locked      := false
+        a.contested   := false
+        a.hasFill     := false
+        a.hasS        := false
+        a.hasH        := false
+        a.bestFillDeg := 0
+        a.lifeId      := lifeId
+
+// רושם שבירה. הראשונה נועלת כיוון; נוספות באותו כיוון מעלות ניקוד בלבד.
+f_anchorFeed(Anchor a, int dir, bool isFill, int fillDeg, int ssmtType, int bIdx) =>
+    if dir != 0
+        if not a.locked
+            a.dir    := dir
+            a.locked := true
+            a.bar    := bIdx
+        if dir == a.dir
+            if isFill
+                a.hasFill     := true
+                a.bestFillDeg := math.max(a.bestFillDeg, fillDeg)
+            else if ssmtType == 2
+                a.hasH := true
+            else if ssmtType == 1
+                a.hasS := true
+        else if conflictMode == "היפוך"
+            a.dir         := dir
+            a.bar         := bIdx
+            a.contested   := false
+            a.hasFill     := isFill
+            a.hasS        := not isFill and ssmtType == 1
+            a.hasH        := not isFill and ssmtType == 2
+            a.bestFillDeg := isFill ? fillDeg : 0
+        else if conflictMode == "מוטל בספק"
+            a.contested := true
+
+f_anchorUpdate(Anchor a, FillState fs, SsmtState ss, int lifeId, bool enabled, int bIdx) =>
+    if enabled
+        f_anchorReset(a, lifeId)
+        if fs.outSeq != a.seenFillSeq and fs.outDir != 0
+            a.seenFillSeq := fs.outSeq
+            f_anchorFeed(a, fs.outDir, true, fs.outDeg, 0, bIdx)
+        if ss.outSeq != a.seenSsmtSeq and ss.outDir != 0
+            a.seenSsmtSeq := ss.outSeq
+            f_anchorFeed(a, ss.outDir, false, 0, ss.outType, bIdx)
+
+if step60
+    f_anchorUpdate(anc60, fill60, ssmt60, life60, useAnchor1H, bar_index)
+if step240
+    f_anchorUpdate(anc240, fill240, ssmt240, life240, useAnchor4H, bar_index)
+
+// עוגן שעתי מייצג את השבוע (שני–חמישי) — ביום שישי הוא כבר לא רלוונטי
+anc60Dir  = (useAnchor1H and anc60.locked and not fri60) ? anc60.dir : 0
+anc240Dir = (useAnchor4H and anc240.locked) ? anc240.dir : 0
+
+// ═══════════════════════════════════════════════════════════════════════════
+// שלב 2 + 3 · אישור והדק
+// ═══════════════════════════════════════════════════════════════════════════
+
+f_newConfirm() => Confirm.new(false, 0, 0, 0, false, false, false, 0, false, 0, false, 0, 0)
+
+var Confirm cf15 = f_newConfirm()
+var Confirm cf5  = f_newConfirm()
+
+// מחזיר true אם ההדק נורה בצעד הזה (רגע ה-PSP)
+f_confirmStep(Confirm cf, FillState fs, SsmtState ss, PcpState pc,
+     int anchorA, int anchorB, bool enabled, int bIdx, int stepIdx) =>
+    bool fired = false
+    if enabled
+        // ── שבירה חדשה שתומכת באחד העוגנים פותחת אישור ──────────────────
+        bool newFill = fs.outSeq != cf.seenFillSeq and fs.outDir != 0
+        bool newSsmt = ss.outSeq != cf.seenSsmtSeq and ss.outDir != 0
+        if newFill
+            cf.seenFillSeq := fs.outSeq
+        if newSsmt
+            cf.seenSsmtSeq := ss.outSeq
+
+        int cand = 0
+        if newFill and (fs.outDir == anchorA or fs.outDir == anchorB)
+            cand := fs.outDir
+        else if newSsmt and (ss.outDir == anchorA or ss.outDir == anchorB)
+            cand := ss.outDir
+
+        if cand != 0
+            if not cf.active or cf.dir != cand
+                // אישור חדש — חלון ההדק מתחיל מאפס
+                cf.active    := true
+                cf.dir       := cand
+                cf.fracStep  := stepIdx
+                cf.fracBar   := bIdx
+                cf.hasFill   := false
+                cf.hasS      := false
+                cf.hasH      := false
+                cf.fillDeg   := 0
+                cf.armed     := false
+                cf.triggered := false
+            if newFill and fs.outDir == cand
+                cf.hasFill := true
+                cf.fillDeg := math.max(cf.fillDeg, fs.outDeg)
+            if newSsmt and ss.outDir == cand
+                if ss.outType == 2
+                    cf.hasH := true
+                else
+                    cf.hasS := true
+
+        // ── פקיעת החלון ─────────────────────────────────────────────────
+        if cf.active and not cf.triggered and stepIdx - cf.fracStep > triggerWindow + 1
+            cf.active := false
+            cf.armed  := false
+
+        // ── דריכה: PCP בתוך החלון ───────────────────────────────────────
+        // כיוון ההצבעה חייב להתאים, או להיות ניטרלי (תיקו/דוג'י) — שער
+        // הכיוון האמיתי הוא ה-PSP בשלב הבא.
+        if cf.active and not cf.armed and pc.pcpNow and (stepIdx - cf.fracStep) <= triggerWindow
+            if pc.pcpDirNow == cf.dir or pc.pcpDirNow == 0
+                cf.armed  := true
+                cf.pcpBar := bIdx
+
+        // ── הדק: ה-PSP מאשר את אותו נר בדיוק, ובאותו כיוון ──────────────
+        if cf.active and cf.armed and not cf.triggered and pc.pspDir == cf.dir and pc.pspBar == cf.pcpBar
+            cf.triggered := true
+            fired := true
+    fired
+
+fired15 = false
+fired5  = false
+
+if step15
+    fired15 := f_confirmStep(cf15, fill15, ssmt15, pcp15, anc60Dir, anc240Dir, useConfirm15, bar_index, ssmt15.steps)
+if step5
+    fired5 := f_confirmStep(cf5, fill5, ssmt5, pcp5, anc60Dir, anc240Dir, useConfirm5, bar_index, ssmt5.steps)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// בחירת האישור הפעיל — 15m גובר על 5m. סקלרים בלבד, בלי טרנרי על אובייקטים.
+// ═══════════════════════════════════════════════════════════════════════════
+
+act15 = cf15.active and useConfirm15
+act5  = cf5.active  and useConfirm5
+
+cfLive    = act15 or act5
+cfDir     = act15 ? cf15.dir       : act5 ? cf5.dir       : 0
+cfArmed   = act15 ? cf15.armed     : act5 ? cf5.armed     : false
+cfTrig    = act15 ? cf15.triggered : act5 ? cf5.triggered : false
+cfFill    = act15 ? cf15.hasFill   : act5 ? cf5.hasFill   : false
+cfS       = act15 ? cf15.hasS      : act5 ? cf5.hasS      : false
+cfH       = act15 ? cf15.hasH      : act5 ? cf5.hasH      : false
+cfDeg     = act15 ? cf15.fillDeg   : act5 ? cf5.fillDeg   : 0
+cfTfW     = act15 ? 8 : 4
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ניקוד עוצמה (0-100)
+// ═══════════════════════════════════════════════════════════════════════════
+
+f_count3(bool a, bool b, bool c) => (a ? 1 : 0) + (b ? 1 : 0) + (c ? 1 : 0)
+
+f_anchorScore(Anchor a, float tfWeight, bool bothAgree) =>
+    float s = 0.0
+    if a.locked
+        s := 20.0 + tfWeight
+        s := s + math.max(0, f_count3(a.hasFill, a.hasS, a.hasH) - 1) * 8.0
+        s := s + (a.bestFillDeg == 3 ? 6.0 : a.bestFillDeg == 2 ? 3.0 : 0.0)
+        s := s + (a.hasH ? 5.0 : 0.0)
+        s := s + (bothAgree ? 8.0 : 0.0)
+        s := s - (a.contested ? 12.0 : 0.0)
+    math.max(s, 0.0)
+
+bothAgree = anc60Dir != 0 and anc60Dir == anc240Dir
+
+// רק עוגן שתומך בכיוון האישור הפעיל נספר
+sc240 = (useAnchor4H and anc240Dir != 0 and (cfDir == 0 or anc240Dir == cfDir)) ? f_anchorScore(anc240, 10.0, bothAgree) : 0.0
+sc60  = (useAnchor1H and anc60Dir  != 0 and (cfDir == 0 or anc60Dir  == cfDir)) ? f_anchorScore(anc60,  5.0,  bothAgree) : 0.0
+
+anchorScore = math.max(sc240, sc60)
+
+confirmScore = 0.0
+if cfLive
+    confirmScore := 12.0 + cfTfW
+    confirmScore := confirmScore + math.max(0, f_count3(cfFill, cfS, cfH) - 1) * 5.0
+    confirmScore := confirmScore + ((cfH or cfDeg == 3) ? 5.0 : 0.0)
+
+triggerScore = cfLive ? (cfTrig ? 25.0 : cfArmed ? 10.0 : 0.0) : 0.0
+
+totalScore    = math.min(100.0, anchorScore + confirmScore + triggerScore)
+totalScoreInt = int(math.round(totalScore))
+
+// ═══════════════════════════════════════════════════════════════════════════
+// מצב כולל
+// ═══════════════════════════════════════════════════════════════════════════
+
+stateTxt = not chartOk        ? "גרף שגוי" :
+     cfLive and cfTrig        ? "PSP — שרשרת סגורה" :
+     cfLive and cfArmed       ? "PCP ממתין ל-PSP" :
+     cfLive                   ? "אישור פעיל" :
+     (anc60Dir != 0 or anc240Dir != 0) ? "עוגן בלבד" : "ממתין"
+
+dirNow = cfDir != 0 ? cfDir : anc240Dir != 0 ? anc240Dir : anc60Dir
+dirTxt = dirNow == 1 ? "LONG" : dirNow == -1 ? "SHORT" : "—"
+dirCol = dirNow == 1 ? colBull : dirNow == -1 ? colBear : color.gray
+
+f_typesTxt(bool hasFill, bool hasS, bool hasH, int deg) =>
+    string s = ""
+    s := hasFill ? s + "Fill F" + str.tostring(deg) + " " : s
+    s := hasH ? s + "HSSMT " : s
+    s := hasS ? s + "SSMT " : s
+    str.trim(s)
+
+anchorTxt = (anc240Dir != 0 and (cfDir == 0 or anc240Dir == cfDir)) ? "4H" :
+     (anc60Dir != 0 and (cfDir == 0 or anc60Dir == cfDir)) ? "1H" : "—"
+
+// ═══════════════════════════════════════════════════════════════════════════
+// התראה — אחת, עם הודעה דינמית
+//
+// יש ליצור התראה על הסקריפט מסוג "Any alert() function call".
+// היא רצה בשרתי TradingView ואינה דורשת גרף פתוח.
+// ═══════════════════════════════════════════════════════════════════════════
+
+triggeredNow = fired15 or fired5
+armedNow     = cfLive and cfArmed and not cfTrig
+
+if chartOk and triggeredNow and totalScore >= alertScore
+    string side = cfDir == 1 ? "🔺 LONG" : "🔻 SHORT"
+    string msg  = side + " · " + syminfo.ticker +
+         " · עוגן " + anchorTxt +
+         " · אישור " + (fired15 ? "15m" : "5m") + " " + f_typesTxt(cfFill, cfS, cfH, cfDeg) +
+         " · PSP · ניקוד " + str.tostring(totalScoreInt) +
+         " · " + str.tostring(close, format.mintick) +
+         " · " + str.format_time(time, "yyyy-MM-dd HH:mm", TZ) + " EST"
+    alert(msg, alert.freq_once_per_bar_close)
+
+// התראת דריכה — פעם אחת לכל דריכה, לא בכל נר
+var bool armAlerted = false
+if chartOk and alertOnArm and armedNow and not armAlerted and totalScore >= alertScore
+    armAlerted := true
+    string side2 = cfDir == 1 ? "🔺 LONG" : "🔻 SHORT"
+    alert(side2 + " · " + syminfo.ticker + " · PCP ממתין לאישור PSP · ניקוד " + str.tostring(totalScoreInt),
+         alert.freq_once_per_bar_close)
+if not armedNow
+    armAlerted := false
+
+// ═══════════════════════════════════════════════════════════════════════════
+// סימון בגרף — רק כשהשרשרת נסגרת
+// ═══════════════════════════════════════════════════════════════════════════
+
+if showMarkers and chartOk and triggeredNow
+    float off = atr14 * 0.5
+    if cfDir == 1
+        label.new(bar_index, low - off, "▲ " + str.tostring(totalScoreInt),
+             style = label.style_label_up, color = color.new(colBull, 20),
+             textcolor = color.white, size = size.small)
+    else
+        label.new(bar_index, high + off, "▼ " + str.tostring(totalScoreInt),
+             style = label.style_label_down, color = color.new(colBear, 20),
+             textcolor = color.white, size = size.small)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// לוח מצב
+// ═══════════════════════════════════════════════════════════════════════════
+
+f_dirCell(int d)  => d == 1 ? "▲ LONG" : d == -1 ? "▼ SHORT" : "—"
+f_dirColor(int d) => d == 1 ? colBull : d == -1 ? colBear : color.new(color.gray, 40)
+
+tblPosition = tablePos == "ימין למטה" ? position.bottom_right :
+     tablePos == "שמאל למעלה" ? position.top_left :
+     tablePos == "שמאל למטה"  ? position.bottom_left : position.top_right
+
+var table dash = table.new(tblPosition, 4, 9, border_width = 1, frame_width = 1, frame_color = color.new(color.gray, 50))
+
+// הקשר QT להצגה
+minOfDay = hour(time, TZ) * 60 + minute(time, TZ)
+mfdNow   = minOfDay >= 1080 ? minOfDay - 1080 : minOfDay + 360
+sesNow   = math.floor(mfdNow / 360) + 1
+micNow   = math.floor((mfdNow % 360) / 90) + 1
+
+if barstate.islast and showTable
+    color hdr = color.new(#1e2635, 0)
+    color bg  = color.new(#0f1318, 0)
+    color txt = color.new(#c9d1d9, 0)
+
+    table.cell(dash, 0, 0, "QT Funnel", bgcolor = hdr, text_color = color.white, text_size = size.small)
+    table.cell(dash, 1, 0, "כיוון",     bgcolor = hdr, text_color = color.white, text_size = size.small)
+    table.cell(dash, 2, 0, "סוגים",     bgcolor = hdr, text_color = color.white, text_size = size.small)
+    table.cell(dash, 3, 0, "מצב",       bgcolor = hdr, text_color = color.white, text_size = size.small)
+
+    if not chartOk
+        table.cell(dash, 0, 1, "⚠ נדרש גרף 5 דקות", bgcolor = color.new(color.red, 20), text_color = color.white, text_size = size.small)
+        table.cell(dash, 1, 1, "TF נוכחי: " + timeframe.period, bgcolor = bg, text_color = txt, text_size = size.small)
+        table.cell(dash, 2, 1, "", bgcolor = bg)
+        table.cell(dash, 3, 1, "", bgcolor = bg)
+    else
+        // ── עוגן 4H ──
+        table.cell(dash, 0, 1, "עוגן 4H", bgcolor = hdr, text_color = color.white, text_size = size.small)
+        table.cell(dash, 1, 1, f_dirCell(anc240Dir), bgcolor = bg, text_color = f_dirColor(anc240Dir), text_size = size.small)
+        table.cell(dash, 2, 1, f_typesTxt(anc240.hasFill, anc240.hasS, anc240.hasH, anc240.bestFillDeg), bgcolor = bg, text_color = txt, text_size = size.small)
+        table.cell(dash, 3, 1, not useAnchor4H ? "כבוי" : not can240 ? (dead240 ? "שבוע מת" : "שישי") : anc240.contested ? "מוטל בספק" : anc240.locked ? "נעול" : "ממתין",
+             bgcolor = bg, text_color = txt, text_size = size.small)
+
+        // ── עוגן 1H ──
+        table.cell(dash, 0, 2, "עוגן 1H", bgcolor = hdr, text_color = color.white, text_size = size.small)
+        table.cell(dash, 1, 2, f_dirCell(anc60Dir), bgcolor = bg, text_color = f_dirColor(anc60Dir), text_size = size.small)
+        table.cell(dash, 2, 2, f_typesTxt(anc60.hasFill, anc60.hasS, anc60.hasH, anc60.bestFillDeg), bgcolor = bg, text_color = txt, text_size = size.small)
+        table.cell(dash, 3, 2, not useAnchor1H ? "כבוי" : not can60 ? "שישי" : anc60.contested ? "מוטל בספק" : anc60.locked ? "נעול" : "ממתין",
+             bgcolor = bg, text_color = txt, text_size = size.small)
+
+        // ── אישור 15m ──
+        table.cell(dash, 0, 3, "אישור 15m", bgcolor = hdr, text_color = color.white, text_size = size.small)
+        table.cell(dash, 1, 3, f_dirCell(cf15.active ? cf15.dir : 0), bgcolor = bg, text_color = f_dirColor(cf15.active ? cf15.dir : 0), text_size = size.small)
+        table.cell(dash, 2, 3, cf15.active ? f_typesTxt(cf15.hasFill, cf15.hasS, cf15.hasH, cf15.fillDeg) : "", bgcolor = bg, text_color = txt, text_size = size.small)
+        table.cell(dash, 3, 3, not useConfirm15 ? "כבוי" : cf15.triggered ? "PSP ✓" : cf15.armed ? "PCP ⏳" : cf15.active ? "פעיל" : "—",
+             bgcolor = bg, text_color = cf15.triggered ? colBull : cf15.armed ? colWait : txt, text_size = size.small)
+
+        // ── אישור 5m ──
+        table.cell(dash, 0, 4, "אישור 5m", bgcolor = hdr, text_color = color.white, text_size = size.small)
+        table.cell(dash, 1, 4, f_dirCell(cf5.active ? cf5.dir : 0), bgcolor = bg, text_color = f_dirColor(cf5.active ? cf5.dir : 0), text_size = size.small)
+        table.cell(dash, 2, 4, cf5.active ? f_typesTxt(cf5.hasFill, cf5.hasS, cf5.hasH, cf5.fillDeg) : "", bgcolor = bg, text_color = txt, text_size = size.small)
+        table.cell(dash, 3, 4, not useConfirm5 ? "כבוי" : cf5.triggered ? "PSP ✓" : cf5.armed ? "PCP ⏳" : cf5.active ? "פעיל" : "—",
+             bgcolor = bg, text_color = cf5.triggered ? colBull : cf5.armed ? colWait : txt, text_size = size.small)
+
+        // ── PCP אחרון בכל מסגרת ──
+        table.cell(dash, 0, 5, "PCP אחרון", bgcolor = hdr, text_color = color.white, text_size = size.small)
+        table.cell(dash, 1, 5, "15m " + (pcp15.pcpNow ? f_dirCell(pcp15.pcpDirNow) : "—"), bgcolor = bg, text_color = txt, text_size = size.small)
+        table.cell(dash, 2, 5, "5m " + (pcp5.pcpNow ? f_dirCell(pcp5.pcpDirNow) : "—"), bgcolor = bg, text_color = txt, text_size = size.small)
+        table.cell(dash, 3, 5, "", bgcolor = bg, text_size = size.small)
+
+        // ── הקשר QT ──
+        table.cell(dash, 0, 6, "הקשר QT", bgcolor = hdr, text_color = color.white, text_size = size.small)
+        table.cell(dash, 1, 6, "שבוע Q" + str.tostring(wk240) + (dead240 ? " (מת)" : ""), bgcolor = bg, text_color = txt, text_size = size.small)
+        table.cell(dash, 2, 6, "סשן " + str.tostring(sesNow) + " · מיקרו " + str.tostring(micNow), bgcolor = bg, text_color = txt, text_size = size.small)
+        table.cell(dash, 3, 6, useMicro ? "מיקרו" : "רגיל", bgcolor = bg, text_color = txt, text_size = size.small)
+
+        // ── סיכום ──
+        table.cell(dash, 0, 7, "כיוון מסכם", bgcolor = hdr, text_color = color.white, text_size = size.normal)
+        table.cell(dash, 1, 7, dirTxt, bgcolor = color.new(dirCol, 75), text_color = dirCol, text_size = size.normal)
+        table.cell(dash, 2, 7, str.tostring(totalScoreInt) + "/100", bgcolor = bg,
+             text_color = totalScore >= alertScore ? colBull : colWait, text_size = size.normal)
+        table.cell(dash, 3, 7, stateTxt, bgcolor = bg, text_color = txt, text_size = size.small)
+
+        table.cell(dash, 0, 8, "סף התראה", bgcolor = hdr, text_color = color.white, text_size = size.tiny)
+        table.cell(dash, 1, 8, str.tostring(alertScore), bgcolor = bg, text_color = txt, text_size = size.tiny)
+        table.cell(dash, 2, 8, bothAgree ? "1H+4H מסכימים" : "", bgcolor = bg, text_color = colBull, text_size = size.tiny)
+        table.cell(dash, 3, 8, "חלון הדק: " + str.tostring(triggerWindow), bgcolor = bg, text_color = txt, text_size = size.tiny)
+
+// אזהרה בולטת אם הגרף אינו 5 דקות
+var label warnLbl = na
+if barstate.islast and not chartOk
+    if not na(warnLbl)
+        label.delete(warnLbl)
+    warnLbl := label.new(bar_index, high,
+         "⚠ Confluence Engine דורש גרף 5 דקות\nהמסגרת הנוכחית: " + timeframe.period,
+         style = label.style_label_down, color = color.new(color.red, 10),
+         textcolor = color.white, size = size.normal)

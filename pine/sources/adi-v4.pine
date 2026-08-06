@@ -1,0 +1,236 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0
+// © Ilai - Asset Divergence Detector (PCP / PSP) v4.0
+// Pine Script V5
+//
+// v4.0 CHANGELOG:
+//  - Added 1m timeframe (ES & NQ only, no YM)
+//  - Other timeframes use full detection (ES, NQ & YM)
+//  - Removed Dashboard Table
+//  - Removed Gap Engine & Boxes
+//  - Added Circle markers (◉ bullish, ◎ bearish) instead
+
+//@version=5
+indicator("Asset Divergence | PCP & PSP v4", shorttitle="ADI v4",
+     overlay        = true,
+     max_labels_count = 300,
+     max_bars_back    = 5000)
+
+// ══════════════════════════════════════════════════════════════
+//  INPUTS
+// ══════════════════════════════════════════════════════════════
+
+grp_mode   = "═══  Mode  ═══"
+i_mode     = input.string("PSP (Confirmed Swing)", title="Detection Mode",
+     options=["PCP Only", "PSP (Confirmed Swing)"], group=grp_mode)
+
+grp_assets = "═══  Asset Selection  ═══"
+i_asset_grp = input.string("Standard", title="Asset Group",
+     options=["Standard", "Micro"],
+     tooltip="Standard = NQ1! / ES1! / YM1!  |  Micro = MNQ1! / MES1! / MYM1!\nCompare within one group to avoid tick-size mismatch.",
+     group=grp_assets)
+i_use_nq   = input.bool(true,  title="Include NQ / MNQ", group=grp_assets)
+i_use_es   = input.bool(true,  title="Include ES / MES",  group=grp_assets)
+i_use_ym   = input.bool(true,  title="Include YM / MYM",  group=grp_assets)
+
+grp_tf     = "═══  Timeframe Filter  ═══"
+i_tf_1m    = input.bool(true,  title="1m (ES & NQ Only)",  group=grp_tf)
+i_tf_5m    = input.bool(true,  title="5m (ES, NQ & YM)",   group=grp_tf)
+i_tf_15m   = input.bool(true,  title="15m (ES, NQ & YM)",  group=grp_tf)
+i_tf_1h    = input.bool(true,  title="1H (ES, NQ & YM)",   group=grp_tf)
+i_tf_4h    = input.bool(true,  title="4H (ES, NQ & YM)",   group=grp_tf)
+i_tf_1d    = input.bool(true,  title="Daily (ES, NQ & YM)", group=grp_tf)
+
+grp_col    = "═══  Colors  ═══"
+i_col_bull = input.color(color.new(#00e5ff, 0),   title="Bullish Signal",  group=grp_col)
+i_col_bear = input.color(color.new(#ff1744, 0),   title="Bearish Signal",  group=grp_col)
+
+// ══════════════════════════════════════════════════════════════
+//  TIMEFRAME GATE
+// ══════════════════════════════════════════════════════════════
+
+tf_str = timeframe.period
+
+is_1m = tf_str == "1"
+is_5m = tf_str == "5"
+is_15m = tf_str == "15"
+is_1h = tf_str == "60"
+is_4h = tf_str == "240"
+is_1d = tf_str == "D"
+
+tf_allowed = (is_1m and i_tf_1m)  or
+             (is_5m and i_tf_5m)  or
+             (is_15m and i_tf_15m) or
+             (is_1h and i_tf_1h)  or
+             (is_4h and i_tf_4h)  or
+             (is_1d and i_tf_1d)
+
+// ══════════════════════════════════════════════════════════════
+//  SECURITY FETCHES
+//  lookahead_off → proper backtest support for all timeframes
+//  gaps_off      → no na bars when the external symbol has no tick
+// ══════════════════════════════════════════════════════════════
+
+f_sec(sym) =>
+    [o, h, l, c] = request.security(sym, timeframe.period,
+         [open, high, low, close],
+         lookahead = barmerge.lookahead_off,
+         gaps      = barmerge.gaps_off)
+    [o, h, l, c]
+
+// Standard contracts
+[nq_o,  nq_h,  nq_l,  nq_c]  = f_sec("NQ1!")
+[es_o,  es_h,  es_l,  es_c]  = f_sec("ES1!")
+[ym_o,  ym_h,  ym_l,  ym_c]  = f_sec("YM1!")
+
+// Micro contracts
+[mnq_o, mnq_h, mnq_l, mnq_c] = f_sec("MNQ1!")
+[mes_o, mes_h, mes_l, mes_c] = f_sec("MES1!")
+[mym_o, mym_h, mym_l, mym_c] = f_sec("MYM1!")
+
+// ══════════════════════════════════════════════════════════════
+//  ACTIVE GROUP SELECTION
+//  Route each pair to the chosen group so comparison is apples-to-apples
+// ══════════════════════════════════════════════════════════════
+
+use_micro = i_asset_grp == "Micro"
+
+// Active OHLC for NQ leg
+a_nq_o = use_micro ? mnq_o : nq_o
+a_nq_h = use_micro ? mnq_h : nq_h
+a_nq_l = use_micro ? mnq_l : nq_l
+a_nq_c = use_micro ? mnq_c : nq_c
+
+// Active OHLC for ES leg
+a_es_o = use_micro ? mes_o : es_o
+a_es_h = use_micro ? mes_h : es_h
+a_es_l = use_micro ? mes_l : es_l
+a_es_c = use_micro ? mes_c : es_c
+
+// Active OHLC for YM leg
+a_ym_o = use_micro ? mym_o : ym_o
+a_ym_h = use_micro ? mym_h : ym_h
+a_ym_l = use_micro ? mym_l : ym_l
+a_ym_c = use_micro ? mym_c : ym_c
+
+// ══════════════════════════════════════════════════════════════
+//  CANDLE DIRECTION  (+1 Bull / -1 Bear / 0 Doji)
+// ══════════════════════════════════════════════════════════════
+
+f_dir(o, c) =>
+    c > o ? 1 : c < o ? -1 : 0
+
+nq_dir = f_dir(a_nq_o, a_nq_c)
+es_dir = f_dir(a_es_o, a_es_c)
+ym_dir = f_dir(a_ym_o, a_ym_c)
+
+// ══════════════════════════════════════════════════════════════
+//  PCP DETECTION
+//  For 1m: Only ES & NQ
+//  For other TF: ES, NQ & YM
+// ══════════════════════════════════════════════════════════════
+
+var int[] dirs_arr = array.new_int(0)
+
+f_pcp_check() =>
+    array.clear(dirs_arr)
+    if i_use_nq
+        array.push(dirs_arr, nq_dir)
+    if i_use_es
+        array.push(dirs_arr, es_dir)
+    if i_use_ym and not is_1m  // YM excluded in 1m
+        array.push(dirs_arr, ym_dir)
+
+    n      = array.size(dirs_arr)
+    result = false
+    if n > 1
+        d0 = array.get(dirs_arr, 0)
+        for k = 1 to n - 1
+            if array.get(dirs_arr, k) != d0
+                result := true
+    result
+
+is_pcp = f_pcp_check()
+
+// Majority vote to find dominant direction
+bull_count = (i_use_nq and nq_dir > 0 ? 1 : 0) +
+             (i_use_es and es_dir > 0 ? 1 : 0) +
+             (i_use_ym and not is_1m and ym_dir > 0 ? 1 : 0)
+
+bear_count = (i_use_nq and nq_dir < 0 ? 1 : 0) +
+             (i_use_es and es_dir < 0 ? 1 : 0) +
+             (i_use_ym and not is_1m and ym_dir < 0 ? 1 : 0)
+
+pcp_is_bull = bear_count > bull_count   // minority divergent = bullish
+pcp_is_bear = bull_count > bear_count   // minority divergent = bearish
+
+// ══════════════════════════════════════════════════════════════
+//  PSP DETECTION  — 3-Bar Swing, Zero Repaint, No Flicker
+//
+//  Timeline:   bar[2] ←  bar[1]  ← bar[0]
+//                       (SWING)    (confirms, current CLOSED bar)
+//
+//  HIGH swing → bearish PSP:
+//      is_pcp[1] AND high[1] > high[2] AND high[1] > high[0]
+//
+//  LOW swing  → bullish PSP:
+//      is_pcp[1] AND low[1]  < low[2]  AND low[1]  < low[0]
+//
+//  Gate on barstate.isconfirmed: when bar[0] is still forming,
+//  isconfirmed=false → no label is created prematurely.
+// ══════════════════════════════════════════════════════════════
+
+confirmed   = barstate.isconfirmed
+pcp_at_1    = is_pcp[1]   // immutable — bar[1] is fully closed
+
+swing_high  = pcp_at_1 and (high[1] > high[2]) and (high[1] > high[0])
+swing_low   = pcp_at_1 and (low[1]  < low[2])  and (low[1]  < low[0])
+
+is_psp_bear = confirmed and swing_high   // swing HIGH = bearish divergence
+is_psp_bull = confirmed and swing_low    // swing LOW  = bullish divergence
+
+// ══════════════════════════════════════════════════════════════
+//  BARCOLOR  (PCP mode)
+// ══════════════════════════════════════════════════════════════
+
+barcolor(tf_allowed and is_pcp and i_mode == "PCP Only" and pcp_is_bull ? i_col_bull : na,
+     title="PCP Bull Bar")
+barcolor(tf_allowed and is_pcp and i_mode == "PCP Only" and pcp_is_bear ? i_col_bear : na,
+     title="PCP Bear Bar")
+
+// Faint yellow tint on PCP bars when in PSP mode (context only)
+barcolor(tf_allowed and is_pcp and i_mode == "PSP (Confirmed Swing)" ? color.new(color.yellow, 92) : na,
+     title="PCP Bar (PSP Mode)")
+
+// ══════════════════════════════════════════════════════════════
+//  PSP MARKERS — TRIANGLES IN SWING DIRECTION
+// ══════════════════════════════════════════════════════════════
+
+// Offset for marker positioning
+marker_offset = ta.atr(14) * 0.3
+
+// Bullish PSP (Swing LOW): ▼ triangle pointing DOWN (below candle, showing low swing)
+if tf_allowed and i_mode == "PSP (Confirmed Swing)" and is_psp_bull
+    label.new(bar_index - 1, low[1] - marker_offset,
+         text="▼", textcolor=i_col_bull,
+         color=na, size=size.large, style=label.style_label_center)
+
+// Bearish PSP (Swing HIGH): ▲ triangle pointing UP (above candle, showing high swing)
+if tf_allowed and i_mode == "PSP (Confirmed Swing)" and is_psp_bear
+    label.new(bar_index - 1, high[1] + marker_offset,
+         text="▲", textcolor=i_col_bear,
+         color=na, size=size.large, style=label.style_label_center)
+
+// PCP mode markers (light triangles)
+if tf_allowed and i_mode == "PCP Only" and is_pcp
+    if pcp_is_bull
+        label.new(bar_index, low - marker_offset,
+             text="▼", textcolor=color.new(i_col_bull, 40),
+             color=na, size=size.small, style=label.style_label_center)
+    if pcp_is_bear
+        label.new(bar_index, high + marker_offset,
+             text="▲", textcolor=color.new(i_col_bear, 40),
+             color=na, size=size.small, style=label.style_label_center)
+
+// ══════════════════════════════════════════════════════════════
+//  END OF SCRIPT
+// ══════════════════════════════════════════════════════════════

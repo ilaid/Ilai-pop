@@ -1,0 +1,802 @@
+//@version=5
+indicator("SSMT + HSSMT | Quarterly Theory", overlay = true, max_labels_count = 20, max_lines_count = 20)
+
+// ═══════════════════════════════════════════════════════════════════
+// הגדרות משתמש
+// ═══════════════════════════════════════════════════════════════════
+
+grpSym = "סימבולים"
+useMicro  = input.bool(false, "השתמש בחוזי מיקרו", group = grpSym)
+symNQ_std = input.symbol("CME_MINI:NQ1!",  "NQ רגיל", group = grpSym)
+symES_std = input.symbol("CME_MINI:ES1!",  "ES רגיל", group = grpSym)
+symYM_std = input.symbol("CBOT_MINI:YM1!", "YM רגיל", group = grpSym)
+symNQ_mic = input.symbol("CME_MINI:MNQ1!",  "NQ מיקרו", group = grpSym)
+symES_mic = input.symbol("CME_MINI:MES1!",  "ES מיקרו", group = grpSym)
+symYM_mic = input.symbol("CBOT_MINI:MYM1!", "YM מיקרו", group = grpSym)
+
+grpVis = "תצוגה"
+colBull    = input.color(#26a69a, "צבע שורי", group = grpVis)
+colBear    = input.color(#ef5350, "צבע דובי", group = grpVis)
+labelSize  = input.string("small", "גודל תווית", options = ["tiny", "small", "normal"], group = grpVis)
+offsetMlt  = input.float(1.5, "מרחק התווית מהנר (ATR)", minval = 0.1, maxval = 6.0, step = 0.1, group = grpVis)
+showLine   = input.bool(true, "הצג קו שבירה", group = grpVis)
+lineWidth  = input.int(2, "עובי קו", minval = 1, maxval = 4, group = grpVis)
+showDebug  = input.bool(false, "הצג טבלת בדיקה", group = grpVis)
+
+grpLogic = "לוגיקה"
+requireTrueOpen = input.bool(false, "סנן לפי True Open (פרימיום/דיסקאונט)", group = grpLogic)
+blockDeadWeek   = input.bool(true, "חסום שבירות בשבוע מת (4H בלבד)", group = grpLogic)
+
+// ═══════════════════════════════════════════════════════════════════
+// בחירת סימבולים
+// ═══════════════════════════════════════════════════════════════════
+
+sNQ = useMicro ? symNQ_mic : symNQ_std
+sES = useMicro ? symES_mic : symES_std
+sYM = useMicro ? symYM_mic : symYM_std
+
+// ═══════════════════════════════════════════════════════════════════
+// זיהוי Timeframe
+// ═══════════════════════════════════════════════════════════════════
+
+tfMin   = timeframe.in_seconds() / 60
+// 6 = יומי (ייחוס חודש, מיכל רבעון), 7 = שבועי (ייחוס רבעון, מיכל שנה).
+// רק 1D ו-1W בדיוק; כל טווח אחר מעל 4H כבוי.
+isD1 = timeframe.isdaily  and timeframe.multiplier == 1
+isW1 = timeframe.isweekly and timeframe.multiplier == 1
+tfClass = isD1 ? 6 : isW1 ? 7 : tfMin <= 1 ? 1 : tfMin <= 5 ? 2 : tfMin <= 15 ? 3 : tfMin <= 60 ? 4 : tfMin <= 240 ? 5 : 0
+
+// ═══════════════════════════════════════════════════════════════════
+// חישובי זמן EST
+// ═══════════════════════════════════════════════════════════════════
+
+TZ = "America/New_York"
+estHour = hour(time, TZ)
+estMin  = minute(time, TZ)
+
+minutesOfDay = estHour * 60 + estMin
+
+isPostOpen       = minutesOfDay >= 1080
+minsFromDayStart = isPostOpen ? minutesOfDay - 1080 : minutesOfDay + 360
+
+tradeDayTime = isPostOpen ? time + 86400000 : time
+tdYear = year(tradeDayTime, TZ)
+tdMon  = month(tradeDayTime, TZ)
+tdDom  = dayofmonth(tradeDayTime, TZ)
+tdDow  = dayofweek(tradeDayTime, TZ)
+
+sessionIdx    = math.floor(minsFromDayStart / 360)
+minsInSession = minsFromDayStart % 360
+microIdx      = math.floor(minsInSession / 90)
+minsInMicro   = minsInSession % 90
+quarterIdx    = math.floor(minsInMicro / 22.5)
+
+// ═══════════════════════════════════════════════════════════════════
+// מספור שבועות לפי QT
+// ═══════════════════════════════════════════════════════════════════
+
+daysSinceMonday = tdDow == dayofweek.sunday ? 6 : tdDow - 2
+mondayTime      = tradeDayTime - daysSinceMonday * 86400000
+thursdayTime    = mondayTime + 3 * 86400000
+
+monMonth = month(mondayTime, TZ)
+monDom   = dayofmonth(mondayTime, TZ)
+monYear  = year(mondayTime, TZ)
+thuMonth = month(thursdayTime, TZ)
+
+// שבוע מת = יום שני עד יום חמישי אינם באותו חודש. שבוע נספר לחודש רק אם שני–חמישי
+// שלו באותו חודש (למשל 4.7–9.7 = השבוע הראשון; שבוע שמתחיל 30.6 הוא שבוע מת).
+isDeadWeek = monMonth != thuMonth
+qtWeekNum  = isDeadWeek ? 0 : math.floor((monDom - 1) / 7) + 1
+
+// ═══════════════════════════════════════════════════════════════════
+// שנת QT — מתחילה באפריל. Q1 = אפר/מאי/יונ, Q2 = יול/אוג/ספט,
+// Q3 = אוק/נוב/דצמ, Q4 = ינו/פבר/מרץ (של שנת הלוח הבאה).
+// ═══════════════════════════════════════════════════════════════════
+
+qtMonIdx    = tdMon >= 4 ? tdMon - 4 : tdMon + 8   // 0 = אפריל ... 11 = מרץ
+qtYearNum   = tdMon >= 4 ? tdYear : tdYear - 1     // תווית שנת QT (אפריל–מרץ)
+qtQtrNum    = math.floor(qtMonIdx / 3) + 1         // 1..4 בתוך שנת QT
+monInQtr    = qtMonIdx % 3                         // 0..2 — מקום החודש בתוך הרבעון
+
+// ═══════════════════════════════════════════════════════════════════
+// מזהי מחזורים
+// ═══════════════════════════════════════════════════════════════════
+
+tradeDayId = tdYear * 10000 + tdMon * 100 + tdDom
+weekId     = monYear * 10000 + monMonth * 100 + monDom
+// חודש-מחזור ל-4H נקבע לפי חודש יום-שני של השבוע — כך הגבול נופל תמיד בתחילת שבוע
+// (ולא באמצע שבוע מת), המיכל מתאפס נכון, ושבוע 1 = השבוע הראשון שכולו בחודש.
+monthId    = monYear * 100 + monMonth
+sessionId  = tradeDayId * 10 + sessionIdx
+microId    = sessionId * 10 + microIdx
+quarterId  = microId * 10 + quarterIdx
+// בגרף היומי החודש נקבע לפי חודש יום-המסחר עצמו (גבול החודש נופל על גבול יום)
+dayMonthId = tdYear * 100 + tdMon
+// בגרף השבועי הרבעון/שנה נקבעים לפי יום-שני של השבוע — כמו שהחודש נקבע ב-4H
+qtrId      = qtYearNum * 10 + qtQtrNum
+qtYearId   = qtYearNum
+
+refCycleId = 0
+if tfClass == 7
+    refCycleId := qtrId
+else if tfClass == 6
+    refCycleId := dayMonthId
+else if tfClass == 5
+    refCycleId := weekId
+else if tfClass == 4
+    refCycleId := tradeDayId
+else if tfClass == 3
+    refCycleId := sessionId
+else if tfClass == 2
+    refCycleId := microId
+else if tfClass == 1
+    refCycleId := quarterId
+
+lifeCycleId = 0
+if tfClass == 7
+    lifeCycleId := qtYearId
+else if tfClass == 6
+    lifeCycleId := qtrId
+else if tfClass == 5
+    lifeCycleId := monthId
+else if tfClass == 4
+    lifeCycleId := weekId
+else if tfClass == 3
+    lifeCycleId := tradeDayId
+else if tfClass == 2
+    lifeCycleId := sessionId
+else if tfClass == 1
+    lifeCycleId := microId
+
+newRefCycle  = ta.change(refCycleId)  != 0
+newLifeCycle = ta.change(lifeCycleId) != 0
+
+// ב-1H תת-המחזור הראשון (יום שני) משווה לתת-המחזור האחרון של השבוע הקודם (שישי),
+// אבל אותו "זרע" נמחק אחרי היום הראשון — שישי משווה רק לשני, לא לשאר השבוע.
+// ב-4H המחזור החודשי עומד בפני עצמו: השבועות משווים רק בתוך אותו חודש (בלי חודש קודם).
+// ביומי ובשבועי אותו עיקרון כמו 1H: החודש/הרבעון הראשון של המיכל משווה גם ליחידה
+// האחרונה של המיכל הקודם (יולי מול יוני), והזרע הזה נמחק אחרי היחידה הראשונה.
+keepLast = tfClass == 4 or tfClass == 6 or tfClass == 7
+
+// ═══════════════════════════════════════════════════════════════════
+// True Open
+// ═══════════════════════════════════════════════════════════════════
+
+inYearlyQ2  = qtQtrNum == 2          // Q2 של שנת QT = יול/אוג/ספט
+inQtrQ2     = monInQtr == 1          // החודש השני של הרבעון (מאי/אוג/נוב/פבר)
+inMonthlyQ2 = qtWeekNum == 2
+inWeeklyQ2  = tdDow == dayofweek.tuesday
+inDailyQ2   = minsFromDayStart >= 360 and minsFromDayStart < 720
+inSessionQ2 = microIdx == 1
+inMicroQ2   = quarterIdx == 1
+
+var bool pYrQ2  = false
+var bool pQtrQ2 = false
+var bool pMonQ2 = false
+var bool pWkQ2  = false
+var bool pDayQ2 = false
+var bool pSesQ2 = false
+var bool pMicQ2 = false
+
+isTrueOpenBar = false
+if tfClass == 7
+    isTrueOpenBar := inYearlyQ2 and not pYrQ2
+else if tfClass == 6
+    isTrueOpenBar := inQtrQ2 and not pQtrQ2
+else if tfClass == 5
+    isTrueOpenBar := inMonthlyQ2 and not pMonQ2
+else if tfClass == 4
+    isTrueOpenBar := inWeeklyQ2 and not pWkQ2
+else if tfClass == 3
+    isTrueOpenBar := inDailyQ2 and not pDayQ2
+else if tfClass == 2
+    isTrueOpenBar := inSessionQ2 and not pSesQ2
+else if tfClass == 1
+    isTrueOpenBar := inMicroQ2 and not pMicQ2
+
+pYrQ2  := inYearlyQ2
+pQtrQ2 := inQtrQ2
+pMonQ2 := inMonthlyQ2
+pWkQ2  := inWeeklyQ2
+pDayQ2 := inDailyQ2
+pSesQ2 := inSessionQ2
+pMicQ2 := inMicroQ2
+
+var float trueOpenPrice = na
+if isTrueOpenBar
+    trueOpenPrice := open
+
+// ═══════════════════════════════════════════════════════════════════
+// משיכת נתוני שלושת הנכסים
+// ═══════════════════════════════════════════════════════════════════
+
+[nqH, nqL, nqC] = request.security(sNQ, timeframe.period, [high, low, close], lookahead = barmerge.lookahead_off)
+[esH, esL, esC] = request.security(sES, timeframe.period, [high, low, close], lookahead = barmerge.lookahead_off)
+[ymH, ymL, ymC] = request.security(sYM, timeframe.period, [high, low, close], lookahead = barmerge.lookahead_off)
+
+// ═══════════════════════════════════════════════════════════════════
+// צבירת מחזור + מערך רמות לכל תת-מחזור שהסתיים בתוך המיכל
+// ═══════════════════════════════════════════════════════════════════
+
+// NQ — מצבר תת-מחזור נוכחי
+var float nqCH = na
+var float nqCL = na
+var float nqCHC = na
+var float nqCLC = na
+var int   nqCHb = 0
+var int   nqCLb = 0
+var int   nqCHCb = 0
+var int   nqCLCb = 0
+var nqHiA  = array.new_float()
+var nqLoA  = array.new_float()
+var nqHiCA = array.new_float()
+var nqLoCA = array.new_float()
+var nqHiBA  = array.new_int()
+var nqLoBA  = array.new_int()
+var nqHiCBA = array.new_int()
+var nqLoCBA = array.new_int()
+
+// ES
+var float esCH = na
+var float esCL = na
+var float esCHC = na
+var float esCLC = na
+var int   esCHb = 0
+var int   esCLb = 0
+var int   esCHCb = 0
+var int   esCLCb = 0
+var esHiA  = array.new_float()
+var esLoA  = array.new_float()
+var esHiCA = array.new_float()
+var esLoCA = array.new_float()
+var esHiBA  = array.new_int()
+var esLoBA  = array.new_int()
+var esHiCBA = array.new_int()
+var esLoCBA = array.new_int()
+
+// YM
+var float ymCH = na
+var float ymCL = na
+var float ymCHC = na
+var float ymCLC = na
+var int   ymCHb = 0
+var int   ymCLb = 0
+var int   ymCHCb = 0
+var int   ymCLCb = 0
+var ymHiA  = array.new_float()
+var ymLoA  = array.new_float()
+var ymHiCA = array.new_float()
+var ymLoCA = array.new_float()
+var ymHiBA  = array.new_int()
+var ymLoBA  = array.new_int()
+var ymHiCBA = array.new_int()
+var ymLoCBA = array.new_int()
+
+// דגלי ה"זרע" — מחושבים כאן, כשהמצברים עדיין מחזיקים את ערך התת-מחזור הקודם.
+var bool seedActive = false
+seedPushNow = newRefCycle and newLifeCycle and keepLast and not na(nqCH)
+dropSeedNow = newRefCycle and (not newLifeCycle) and seedActive
+
+// ── NQ צבירה ──
+if newRefCycle
+    if newLifeCycle
+        array.clear(nqHiA)
+        array.clear(nqLoA)
+        array.clear(nqHiCA)
+        array.clear(nqLoCA)
+        array.clear(nqHiBA)
+        array.clear(nqLoBA)
+        array.clear(nqHiCBA)
+        array.clear(nqLoCBA)
+    if ((not newLifeCycle) or keepLast) and not na(nqCH)
+        array.push(nqHiA,  nqCH)
+        array.push(nqLoA,  nqCL)
+        array.push(nqHiCA, nqCHC)
+        array.push(nqLoCA, nqCLC)
+        array.push(nqHiBA,  nqCHb)
+        array.push(nqLoBA,  nqCLb)
+        array.push(nqHiCBA, nqCHCb)
+        array.push(nqLoCBA, nqCLCb)
+    if dropSeedNow and array.size(nqHiA) > 0
+        array.remove(nqHiA, 0)
+        array.remove(nqLoA, 0)
+        array.remove(nqHiCA, 0)
+        array.remove(nqLoCA, 0)
+        array.remove(nqHiBA, 0)
+        array.remove(nqLoBA, 0)
+        array.remove(nqHiCBA, 0)
+        array.remove(nqLoCBA, 0)
+    nqCH := nqH
+    nqCL := nqL
+    nqCHC := nqC
+    nqCLC := nqC
+    nqCHb := bar_index
+    nqCLb := bar_index
+    nqCHCb := bar_index
+    nqCLCb := bar_index
+else
+    if na(nqCH) or nqH > nqCH
+        nqCH := nqH
+        nqCHb := bar_index
+    if na(nqCL) or nqL < nqCL
+        nqCL := nqL
+        nqCLb := bar_index
+    if na(nqCHC) or nqC > nqCHC
+        nqCHC := nqC
+        nqCHCb := bar_index
+    if na(nqCLC) or nqC < nqCLC
+        nqCLC := nqC
+        nqCLCb := bar_index
+
+// ── ES צבירה ──
+if newRefCycle
+    if newLifeCycle
+        array.clear(esHiA)
+        array.clear(esLoA)
+        array.clear(esHiCA)
+        array.clear(esLoCA)
+        array.clear(esHiBA)
+        array.clear(esLoBA)
+        array.clear(esHiCBA)
+        array.clear(esLoCBA)
+    if ((not newLifeCycle) or keepLast) and not na(esCH)
+        array.push(esHiA,  esCH)
+        array.push(esLoA,  esCL)
+        array.push(esHiCA, esCHC)
+        array.push(esLoCA, esCLC)
+        array.push(esHiBA,  esCHb)
+        array.push(esLoBA,  esCLb)
+        array.push(esHiCBA, esCHCb)
+        array.push(esLoCBA, esCLCb)
+    if dropSeedNow and array.size(esHiA) > 0
+        array.remove(esHiA, 0)
+        array.remove(esLoA, 0)
+        array.remove(esHiCA, 0)
+        array.remove(esLoCA, 0)
+        array.remove(esHiBA, 0)
+        array.remove(esLoBA, 0)
+        array.remove(esHiCBA, 0)
+        array.remove(esLoCBA, 0)
+    esCH := esH
+    esCL := esL
+    esCHC := esC
+    esCLC := esC
+    esCHb := bar_index
+    esCLb := bar_index
+    esCHCb := bar_index
+    esCLCb := bar_index
+else
+    if na(esCH) or esH > esCH
+        esCH := esH
+        esCHb := bar_index
+    if na(esCL) or esL < esCL
+        esCL := esL
+        esCLb := bar_index
+    if na(esCHC) or esC > esCHC
+        esCHC := esC
+        esCHCb := bar_index
+    if na(esCLC) or esC < esCLC
+        esCLC := esC
+        esCLCb := bar_index
+
+// ── YM צבירה ──
+if newRefCycle
+    if newLifeCycle
+        array.clear(ymHiA)
+        array.clear(ymLoA)
+        array.clear(ymHiCA)
+        array.clear(ymLoCA)
+        array.clear(ymHiBA)
+        array.clear(ymLoBA)
+        array.clear(ymHiCBA)
+        array.clear(ymLoCBA)
+    if ((not newLifeCycle) or keepLast) and not na(ymCH)
+        array.push(ymHiA,  ymCH)
+        array.push(ymLoA,  ymCL)
+        array.push(ymHiCA, ymCHC)
+        array.push(ymLoCA, ymCLC)
+        array.push(ymHiBA,  ymCHb)
+        array.push(ymLoBA,  ymCLb)
+        array.push(ymHiCBA, ymCHCb)
+        array.push(ymLoCBA, ymCLCb)
+    if dropSeedNow and array.size(ymHiA) > 0
+        array.remove(ymHiA, 0)
+        array.remove(ymLoA, 0)
+        array.remove(ymHiCA, 0)
+        array.remove(ymLoCA, 0)
+        array.remove(ymHiBA, 0)
+        array.remove(ymLoBA, 0)
+        array.remove(ymHiCBA, 0)
+        array.remove(ymLoCBA, 0)
+    ymCH := ymH
+    ymCL := ymL
+    ymCHC := ymC
+    ymCLC := ymC
+    ymCHb := bar_index
+    ymCLb := bar_index
+    ymCHCb := bar_index
+    ymCLCb := bar_index
+else
+    if na(ymCH) or ymH > ymCH
+        ymCH := ymH
+        ymCHb := bar_index
+    if na(ymCL) or ymL < ymCL
+        ymCL := ymL
+        ymCLb := bar_index
+    if na(ymCHC) or ymC > ymCHC
+        ymCHC := ymC
+        ymCHCb := bar_index
+    if na(ymCLC) or ymC < ymCLC
+        ymCLC := ymC
+        ymCLCb := bar_index
+
+// עדכון דגל ה"זרע" (המבט אחורה) — פעיל רק ליחידה הראשונה של המיכל
+if newRefCycle and newLifeCycle
+    seedActive := seedPushNow
+else if newRefCycle
+    seedActive := false
+
+// ═══════════════════════════════════════════════════════════════════
+// חסימות
+// ═══════════════════════════════════════════════════════════════════
+
+nLevels = array.size(nqHiA)
+cycleOK   = not (tfClass == 5 and blockDeadWeek and isDeadWeek)
+friBlock  = (tfClass == 5 or tfClass == 4) and tdDow == dayofweek.friday
+
+bearOK = not requireTrueOpen or (not na(trueOpenPrice) and close > trueOpenPrice)
+bullOK = not requireTrueOpen or (not na(trueOpenPrice) and close < trueOpenPrice)
+
+// ═══════════════════════════════════════════════════════════════════
+// מחרוזת נכסים — בשורי YM מושמט
+// ═══════════════════════════════════════════════════════════════════
+
+f_str(bNQ, bES, bYM, isBull) =>
+    s = ""
+    s := bNQ ? s + "NQ " : s
+    s := bES ? s + "ES " : s
+    s := (bYM and not isBull) ? s + "YM " : s
+    str.trim(s)
+
+// ═══════════════════════════════════════════════════════════════════
+// זיהוי — השבירה הכי עדכנית, בלתי-תלוי בנכס הגרף. לקיחה מצטברת.
+// HSSMT = סגר מעבר (ביטול כשכולם סגרו). SSMT = פתיל מעבר (ביטול כשכולם סחפו).
+// מוחזר סטטוס-הלקיחה לפי סוג (סגירה ל-HSSMT / פתיל ל-SSMT) למעקב ביטול.
+// ═══════════════════════════════════════════════════════════════════
+
+// דובי: הסטייה הכי עדכנית (סשן קרוב-ביותר קודם). המחרוזת = כל מי שלקח את הגבוה
+// בפתיל (כולל NQ). הסוג = H אם יש גם סגירה מעבר תקפה, אחרת S.
+f_findBear(nqHiA, esHiA, ymHiA, nqHiCA, esHiCA, ymHiCA, nqCH, esCH, ymCH, nqCHC, esCHC, ymCHC) =>
+    bT = 0
+    bI = -1
+    bS = ""
+    n = array.size(nqHiA)
+    if n > 0
+        float nqMH  = nqCH
+        float esMH  = esCH
+        float ymMH  = ymCH
+        float nqMHc = nqCHC
+        float esMHc = esCHC
+        float ymMHc = ymCHC
+        bool stopped = false
+        for i = n - 1 to 0
+            if bT == 0 and not stopped
+                nw = nqMH > array.get(nqHiA, i)    // פתיל מעל הפתיל-הגבוה של הייחוס (SSMT)
+                ew = esMH > array.get(esHiA, i)
+                yw = ymMH > array.get(ymHiA, i)
+                nc = nqMHc > array.get(nqHiCA, i)  // סגירה מעל הסגירה-הגבוהה של הייחוס (HSSMT)
+                ec = esMHc > array.get(esHiCA, i)
+                yc = ymMHc > array.get(ymHiCA, i)
+                hValid = (nc or ec or yc) and not (nc and ec)   // סטיית סגירה: מישהו סגר מעבר, לא שני החזקים
+                wValid = (nw or ew or yw) and not (nw and ew)   // סטיית פתיל: מישהו סחף מעבר, לא שני החזקים
+                if hValid or wValid
+                    hN = hValid and nc
+                    hE = hValid and ec
+                    hY = hValid and yc
+                    hs = f_str(hN, hE, hY, false)                                        // סגר מעל הסגירה-הגבוהה → H
+                    ss = f_str(nw and not hN, ew and not hE, yw and not hY, false)       // סחף מעל הפתיל בלבד → S
+                    ss := wValid ? ss : ""
+                    lbl = hs != "" ? "H " + hs : ""
+                    lbl := ss != "" ? (lbl != "" ? lbl + " S " + ss : "S " + ss) : lbl
+                    // אין HSSMT כי הסגירות הסכימו, אבל ה-SSMT (פתיל) עדיין תקף — מסמנים זאת
+                    if not hValid and nc and ec
+                        lbl := lbl + (yc ? " (all closed)" : " (core closed)")
+                    bT := hs != "" ? 2 : 1
+                    bI := i
+                    bS := lbl
+                else if (nw and ew) or (nc and ec)
+                    stopped := true      // הגרעין הסכים (בפתיל או בסגירה) — אין שבירה דובית
+            nqMH  := math.max(nqMH,  array.get(nqHiA, i))
+            esMH  := math.max(esMH,  array.get(esHiA, i))
+            ymMH  := math.max(ymMH,  array.get(ymHiA, i))
+            nqMHc := math.max(nqMHc, array.get(nqHiCA, i))
+            esMHc := math.max(esMHc, array.get(esHiCA, i))
+            ymMHc := math.max(ymMHc, array.get(ymHiCA, i))
+    [bT, bI, bS]
+
+// שורי: המחרוזת = מי מהחזקים (NQ/ES) לקח את הנמוך בפתיל (YM מושמט מהתווית).
+// הסוג = H אם יש סגירה מעבר תקפה. תקף עד שכל השלושה לקחו את הנמוך.
+f_findBull(nqLoA, esLoA, ymLoA, nqLoCA, esLoCA, ymLoCA, nqCL, esCL, ymCL, nqCLC, esCLC, ymCLC) =>
+    bT = 0
+    bI = -1
+    bS = ""
+    n = array.size(nqLoA)
+    if n > 0
+        float nqML  = nqCL
+        float esML  = esCL
+        float ymML  = ymCL
+        float nqMLc = nqCLC
+        float esMLc = esCLC
+        float ymMLc = ymCLC
+        bool stopped = false
+        for i = n - 1 to 0
+            if bT == 0 and not stopped
+                nw = nqML < array.get(nqLoA, i)    // פתיל מתחת לפתיל-הנמוך של הייחוס (SSMT)
+                ew = esML < array.get(esLoA, i)
+                yw = ymML < array.get(ymLoA, i)
+                nc = nqMLc < array.get(nqLoCA, i)  // סגירה מתחת לסגירה-הנמוכה של הייחוס (HSSMT)
+                ec = esMLc < array.get(esLoCA, i)
+                yc = ymMLc < array.get(ymLoCA, i)
+                hValid = (nc or ec) and not (nc and ec and yc)   // סטיית סגירה: חזק אחד סגר מתחת, לא כל השלושה
+                wValid = (nw or ew) and not (nw and ew and yw)   // סטיית פתיל: חזק אחד סחף מתחת, לא כל השלושה
+                if hValid or wValid
+                    hN = hValid and nc
+                    hE = hValid and ec
+                    hY = hValid and yc
+                    hs = f_str(hN, hE, hY, true)                                         // סגר מתחת לסגירה-הנמוכה → H (YM מושמט)
+                    ss = f_str(nw and not hN, ew and not hE, yw and not hY, true)        // סחף מתחת לפתיל בלבד → S (YM מושמט)
+                    ss := wValid ? ss : ""
+                    lbl = hs != "" ? "H " + hs : ""
+                    lbl := ss != "" ? (lbl != "" ? lbl + " S " + ss : "S " + ss) : lbl
+                    // כל השלושה סגרו מתחת — ה-HSSMT בטל, אבל ה-SSMT (פתיל) עדיין תקף
+                    if not hValid and nc and ec and yc
+                        lbl := lbl + " (all closed)"
+                    bT := hs != "" ? 2 : 1
+                    bI := i
+                    bS := lbl
+                else if (nw and ew and yw) or (nc and ec and yc)
+                    stopped := true      // כל השלושה לקחו את הנמוך — הסכמה, אין שבירה שורית
+            nqML  := math.min(nqML,  array.get(nqLoA, i))
+            esML  := math.min(esML,  array.get(esLoA, i))
+            ymML  := math.min(ymML,  array.get(ymLoA, i))
+            nqMLc := math.min(nqMLc, array.get(nqLoCA, i))
+            esMLc := math.min(esMLc, array.get(esLoCA, i))
+            ymMLc := math.min(ymMLc, array.get(ymLoCA, i))
+    [bT, bI, bS]
+
+// ═══════════════════════════════════════════════════════════════════
+// נכס הגרף
+// ═══════════════════════════════════════════════════════════════════
+
+cs = syminfo.tickerid
+isNQc = str.contains(cs, "NQ")
+isESc = str.contains(cs, "ES")
+isYMc = str.contains(cs, "YM")
+
+// ═══════════════════════════════════════════════════════════════════
+// מצב מבוסס אירוע
+// ═══════════════════════════════════════════════════════════════════
+
+atr = ta.atr(14)
+
+var int    bearType = 0
+var string bearStr  = ""
+var float  bearLvl  = na
+var int    bearRefB = 0
+var int    bearSigB = 0
+var float  bearYPos = na
+var int    bearSeq  = 0
+var int    bearRefI = -1
+
+var int    bullType = 0
+var string bullStr  = ""
+var float  bullLvl  = na
+var int    bullRefB = 0
+var int    bullSigB = 0
+var float  bullYPos = na
+var int    bullSeq  = 0
+var int    bullRefI = -1
+
+var int seqCounter = 0
+
+// ── פקיעת מחזור־על — מאפסת את מצב התצוגה ──
+if newLifeCycle
+    bearType := 0
+    bullType := 0
+    bearRefI := -1
+    bullRefI := -1
+
+// מחיקת ה"זרע" (1H / 1D / 1W) מזיזה את כל האינדקסים ב-1 — מיישרים כדי שלא ייחשב ייחוס חדש
+if dropSeedNow
+    bearRefI := bearRefI > 0 ? bearRefI - 1 : -1
+    bullRefI := bullRefI > 0 ? bullRefI - 1 : -1
+
+// ── עדכון חי בסגירת נר: מציגים את הסטייה התקפה הנוכחית לכל כיוון.
+//    התווית גדלה (מוסיפה נכסים שלקחו) ומשדרגת S→H חי. סטייה שכבר לא תקפה
+//    (הגרעין לקח את הרמה) נעלמת מעצמה; לקיחה מצטברת מונעת החייאה. ──
+if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK and nLevels > 0
+
+    [nbT, nbI, nbS] = f_findBear(nqHiA, esHiA, ymHiA, nqHiCA, esHiCA, ymHiCA, nqCH, esCH, ymCH, nqCHC, esCHC, ymCHC)
+    if nbT != 0 and bearOK
+        // שבירה חדשה = כיוון שהיה כבוי, או התעגנות לתת-מחזור ייחוס אחר (גם אם הכיוון כבר היה חי)
+        if bearType == 0 or nbI != bearRefI
+            seqCounter += 1
+            bearSeq  := seqCounter
+        bearRefI := nbI
+        bearSigB := bar_index                  // התווית עוקבת אחרי הנר הנוכחי
+        bearYPos := high + atr * offsetMlt
+        bearType := nbT
+        bearStr  := nbS
+        bearLvl  := nbT == 2 ? (isNQc ? array.get(nqHiCA, nbI) : isESc ? array.get(esHiCA, nbI) : array.get(ymHiCA, nbI)) : (isNQc ? array.get(nqHiA, nbI) : isESc ? array.get(esHiA, nbI) : array.get(ymHiA, nbI))
+        bearRefB := nbT == 2 ? (isNQc ? array.get(nqHiCBA, nbI) : isESc ? array.get(esHiCBA, nbI) : array.get(ymHiCBA, nbI)) : (isNQc ? array.get(nqHiBA, nbI) : isESc ? array.get(esHiBA, nbI) : array.get(ymHiBA, nbI))
+    else
+        bearType := 0
+        bearRefI := -1
+
+    [nuT, nuI, nuS] = f_findBull(nqLoA, esLoA, ymLoA, nqLoCA, esLoCA, ymLoCA, nqCL, esCL, ymCL, nqCLC, esCLC, ymCLC)
+    if nuT != 0 and bullOK
+        // שבירה חדשה = כיוון שהיה כבוי, או התעגנות לתת-מחזור ייחוס אחר (גם אם הכיוון כבר היה חי)
+        if bullType == 0 or nuI != bullRefI
+            seqCounter += 1
+            bullSeq  := seqCounter
+        bullRefI := nuI
+        bullSigB := bar_index                  // התווית עוקבת אחרי הנר הנוכחי
+        bullYPos := low - atr * offsetMlt
+        bullType := nuT
+        bullStr  := nuS
+        bullLvl  := nuT == 2 ? (isNQc ? array.get(nqLoCA, nuI) : isESc ? array.get(esLoCA, nuI) : array.get(ymLoCA, nuI)) : (isNQc ? array.get(nqLoA, nuI) : isESc ? array.get(esLoA, nuI) : array.get(ymLoA, nuI))
+        bullRefB := nuT == 2 ? (isNQc ? array.get(nqLoCBA, nuI) : isESc ? array.get(esLoCBA, nuI) : array.get(ymLoCBA, nuI)) : (isNQc ? array.get(nqLoBA, nuI) : isESc ? array.get(esLoBA, nuI) : array.get(ymLoBA, nuI))
+    else
+        bullType := 0
+        bullRefI := -1
+
+// ═══════════════════════════════════════════════════════════════════
+// בחירת מה מוצג
+// ═══════════════════════════════════════════════════════════════════
+
+showDir = 0
+if bearType != 0 and bullType != 0
+    showDir := bearSeq > bullSeq ? -1 : 1
+else if bearType != 0
+    showDir := -1
+else if bullType != 0
+    showDir := 1
+
+// חידוד: שבירה שעתית מייצגת את השבוע (שני–חמישי) — ביום שישי היא כבר לא רלוונטית.
+if tfClass == 4 and tdDow == dayofweek.friday
+    showDir := 0
+
+dispType = showDir == -1 ? bearType : showDir == 1 ? bullType : 0
+dispStr  = showDir == -1 ? bearStr  : showDir == 1 ? bullStr  : ""
+dispLvl  = showDir == -1 ? bearLvl  : showDir == 1 ? bullLvl  : na
+dispRefB = showDir == -1 ? bearRefB : showDir == 1 ? bullRefB : 0
+dispSigB = showDir == -1 ? bearSigB : showDir == 1 ? bullSigB : 0
+dispYPos = showDir == -1 ? bearYPos : showDir == 1 ? bullYPos : na
+curSeq   = showDir == -1 ? bearSeq  : showDir == 1 ? bullSeq  : -1
+
+// ═══════════════════════════════════════════════════════════════════
+// ציור
+// ═══════════════════════════════════════════════════════════════════
+
+var label aLbl  = na
+var line  aLine = na
+var int    drawnSeq  = -999
+var int    drawnDir  = -999
+var int    drawnType = -999
+var string drawnStr  = ""
+var float  drawnLvl  = na
+
+needRedraw = curSeq != drawnSeq or showDir != drawnDir or dispType != drawnType or dispStr != drawnStr or dispLvl != drawnLvl
+
+if needRedraw
+    if not na(aLbl)
+        label.delete(aLbl)
+        aLbl := na
+    if not na(aLine)
+        line.delete(aLine)
+        aLine := na
+    if showDir != 0 and not na(dispYPos)
+        col  = showDir == 1 ? colBull : colBear
+        cFin = dispType == 2 ? col : color.new(col, 30)
+        txt  = "W " + dispStr
+        aLbl := label.new(dispSigB, dispYPos, txt, style = label.style_none, textcolor = cFin, size = labelSize, textalign = text.align_center)
+        if showLine and not na(dispLvl) and dispRefB > 0
+            aLine := line.new(dispRefB, dispLvl, bar_index, dispLvl, color = cFin, style = line.style_solid, width = lineWidth)
+    drawnSeq  := curSeq
+    drawnDir  := showDir
+    drawnType := dispType
+    drawnStr  := dispStr
+    drawnLvl  := dispLvl
+
+// התווית והקו עוקבים אחרי הנר הנוכחי
+if not na(aLbl) and showDir != 0
+    label.set_x(aLbl, dispSigB)
+    label.set_y(aLbl, dispYPos)
+if not na(aLine) and showDir != 0
+    line.set_x2(aLine, bar_index)
+
+// ═══════════════════════════════════════════════════════════════════
+// טבלת בדיקה (אבחון — כבויה כברירת מחדל)
+// ═══════════════════════════════════════════════════════════════════
+
+f_num(x) => na(x) ? "-" : str.tostring(x, format.mintick)
+
+var table dbg = table.new(position.top_right, 4, 14, border_width = 1)
+if showDebug and barstate.islast
+    // רמות ייחוס הכי נמוכות/גבוהות במיכל (סגירה) — "הכי נמוך/גבוה בחודש"
+    float nqMinLoC = nLevels > 0 ? array.min(nqLoCA) : na
+    float esMinLoC = nLevels > 0 ? array.min(esLoCA) : na
+    float ymMinLoC = nLevels > 0 ? array.min(ymLoCA) : na
+    float nqMaxHiC = nLevels > 0 ? array.max(nqHiCA) : na
+    float esMaxHiC = nLevels > 0 ? array.max(esHiCA) : na
+    float ymMaxHiC = nLevels > 0 ? array.max(ymHiCA) : na
+    hc = color.gray
+    wc = color.white
+    // כותרת
+    table.cell(dbg, 0, 0, "", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 0, "NQ", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 2, 0, "ES", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 3, 0, "YM", bgcolor = hc, text_color = wc)
+    // מצב כללי
+    table.cell(dbg, 0, 1, "tf/lvl/dir", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 1, str.tostring(tfClass), bgcolor = wc)
+    table.cell(dbg, 2, 1, str.tostring(nLevels), bgcolor = wc)
+    table.cell(dbg, 3, 1, str.tostring(showDir), bgcolor = wc)
+    table.cell(dbg, 0, 2, "typ b/u", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 2, str.tostring(bearType) + "/" + str.tostring(bullType), bgcolor = wc)
+    table.cell(dbg, 2, 2, "bear:", bgcolor = wc)
+    table.cell(dbg, 3, 2, bearStr, bgcolor = wc)
+    table.cell(dbg, 0, 3, "str bull", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 3, bullStr, bgcolor = wc)
+    table.cell(dbg, 2, 3, "", bgcolor = wc)
+    table.cell(dbg, 3, 3, "", bgcolor = wc)
+    // פתיל נוכחי (מצטבר) מול "הכי גבוה/נמוך במיכל" (פתיל) — ל-SSMT
+    float nqMaxHi = nLevels > 0 ? array.max(nqHiA) : na
+    float esMaxHi = nLevels > 0 ? array.max(esHiA) : na
+    float ymMaxHi = nLevels > 0 ? array.max(ymHiA) : na
+    float nqMinLo = nLevels > 0 ? array.min(nqLoA) : na
+    float esMinLo = nLevels > 0 ? array.min(esLoA) : na
+    float ymMinLo = nLevels > 0 ? array.min(ymLoA) : na
+    table.cell(dbg, 0, 4, "curHi w", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 4, f_num(nqCH), bgcolor = wc)
+    table.cell(dbg, 2, 4, f_num(esCH), bgcolor = wc)
+    table.cell(dbg, 3, 4, f_num(ymCH), bgcolor = wc)
+    table.cell(dbg, 0, 5, "maxHi w", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 5, f_num(nqMaxHi), bgcolor = wc)
+    table.cell(dbg, 2, 5, f_num(esMaxHi), bgcolor = wc)
+    table.cell(dbg, 3, 5, f_num(ymMaxHi), bgcolor = wc)
+    table.cell(dbg, 0, 6, "curLo w", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 6, f_num(nqCL), bgcolor = wc)
+    table.cell(dbg, 2, 6, f_num(esCL), bgcolor = wc)
+    table.cell(dbg, 3, 6, f_num(ymCL), bgcolor = wc)
+    table.cell(dbg, 0, 7, "minLo w", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 7, f_num(nqMinLo), bgcolor = wc)
+    table.cell(dbg, 2, 7, f_num(esMinLo), bgcolor = wc)
+    table.cell(dbg, 3, 7, f_num(ymMinLo), bgcolor = wc)
+    // סגירה נוכחית (מצטבר) מול "הכי נמוך/גבוה במיכל"
+    table.cell(dbg, 0, 8, "curLoC", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 8, f_num(nqCLC), bgcolor = wc)
+    table.cell(dbg, 2, 8, f_num(esCLC), bgcolor = wc)
+    table.cell(dbg, 3, 8, f_num(ymCLC), bgcolor = wc)
+    table.cell(dbg, 0, 9, "minLoC", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 9, f_num(nqMinLoC), bgcolor = wc)
+    table.cell(dbg, 2, 9, f_num(esMinLoC), bgcolor = wc)
+    table.cell(dbg, 3, 9, f_num(ymMinLoC), bgcolor = wc)
+    table.cell(dbg, 0, 10, "curHiC", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 10, f_num(nqCHC), bgcolor = wc)
+    table.cell(dbg, 2, 10, f_num(esCHC), bgcolor = wc)
+    table.cell(dbg, 3, 10, f_num(ymCHC), bgcolor = wc)
+    table.cell(dbg, 0, 11, "maxHiC", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 11, f_num(nqMaxHiC), bgcolor = wc)
+    table.cell(dbg, 2, 11, f_num(esMaxHiC), bgcolor = wc)
+    table.cell(dbg, 3, 11, f_num(ymMaxHiC), bgcolor = wc)
+    // אינדקס תת-מחזור הייחוס ומונה הסדר — מי נוצר אחרון (גבוה יותר = חדש יותר)
+    table.cell(dbg, 0, 12, "refI b/u", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 12, str.tostring(bearRefI) + "/" + str.tostring(bullRefI), bgcolor = wc)
+    table.cell(dbg, 2, 12, "", bgcolor = wc)
+    table.cell(dbg, 3, 12, "", bgcolor = wc)
+    table.cell(dbg, 0, 13, "seq b/u", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 13, str.tostring(bearSeq) + "/" + str.tostring(bullSeq), bgcolor = wc)
+    table.cell(dbg, 2, 13, "", bgcolor = wc)
+    table.cell(dbg, 3, 13, "", bgcolor = wc)
