@@ -72,6 +72,7 @@ blockDeadWeek = input.bool(true, "חסום שבירות בשבוע מת (4H בל
 // ═══════════════════════════════════════════════════════════════════
 
 cs           = syminfo.tickerid
+isNQc        = str.contains(cs, "NQ")
 isESc        = str.contains(cs, "ES")
 chartIsMicro = str.contains(cs, "MNQ") or str.contains(cs, "MES") or str.contains(cs, "MYM")
 useMicro     = contractSet == "מיקרו" or (contractSet == "אוטומטי" and chartIsMicro)
@@ -198,8 +199,23 @@ keepLast = tfClass == 4 or tfClass == 6 or tfClass == 7
 // משיכת נתוני שני הנכסים (open נדרש להרחבת הגאפ לגופים)
 // ═══════════════════════════════════════════════════════════════════
 
-[nqO, nqH, nqL, nqC] = request.security(sNQ, timeframe.period, [open, high, low, close], lookahead = barmerge.lookahead_off)
-[esO, esH, esL, esC] = request.security(sES, timeframe.period, [open, high, low, close], lookahead = barmerge.lookahead_off)
+[rNqO, rNqH, rNqL, rNqC] = request.security(sNQ, timeframe.period, [open, high, low, close], lookahead = barmerge.lookahead_off)
+[rEsO, rEsH, rEsL, rEsC] = request.security(sES, timeframe.period, [open, high, low, close], lookahead = barmerge.lookahead_off)
+
+// לנכס שהגרף מציג לוקחים את נתוני הגרף עצמו ולא את request.security.
+// הסיבה: ההגדרה "Adjust for contract changes" מתקנת אחורה את ההיסטוריה של
+// החוזה הרציף, אבל request.security לא מקבל אותה ומחזיר תמיד סדרה גולמית.
+// בלי זה הגבולות מחושבים בעולם אחד ומצוירים על נרות מעולם אחר, והקופסה
+// יוצאת מוזזת במאות נקודות. הנכס השני נמדד בעולם שלו, וזה תקין —
+// העומק של כל נכס מנורמל לגאפ שלו, כך שההשוואה נשארת יחסית.
+nqO = isNQc ? open  : rNqO
+nqH = isNQc ? high  : rNqH
+nqL = isNQc ? low   : rNqL
+nqC = isNQc ? close : rNqC
+esO = isESc ? open  : rEsO
+esH = isESc ? high  : rEsH
+esL = isESc ? low   : rEsL
+esC = isESc ? close : rEsC
 
 // ═══════════════════════════════════════════════════════════════════
 // טיפוס הגאפ הקולקטיבי
@@ -639,8 +655,8 @@ if showDebug and barstate.islast
     // הסדרות שמהן נקראים הנתונים. חייבות להתאים למשפחת החוזים של הגרף,
     // אחרת הגבולות לא יושבים על הנרות שרואים.
     table.cell(dbg, 0, 2, "מקור נתונים", bgcolor = hc, text_color = wc)
-    table.cell(dbg, 1, 2, useMicro ? "מיקרו" : "רגיל", bgcolor = wc)
-    table.cell(dbg, 2, 2, chartIsMicro ? "גרף מיקרו" : "גרף רגיל", bgcolor = wc)
+    table.cell(dbg, 1, 2, isNQc ? "מהגרף" : (useMicro ? "מיקרו" : "רגיל"), bgcolor = wc)
+    table.cell(dbg, 2, 2, isESc ? "מהגרף" : (useMicro ? "מיקרו" : "רגיל"), bgcolor = wc)
 
     table.cell(dbg, 0, 3, "שבירות פעילות", bgcolor = hc, text_color = wc)
     table.cell(dbg, 1, 3, str.tostring(tFrac), bgcolor = wc)
