@@ -92,12 +92,13 @@ qtWeekNum  = isDeadWeek ? 0 : math.floor((monDom - 1) / 7) + 1
 // ═══════════════════════════════════════════════════════════════════
 // שנת QT — מתחילה באפריל. Q1 = אפר/מאי/יונ, Q2 = יול/אוג/ספט,
 // Q3 = אוק/נוב/דצמ, Q4 = ינו/פבר/מרץ (של שנת הלוח הבאה).
+// מעל השנה: מחזור של 4 שנים, שנה שמתחלקת ב-4 (2024, 2028) היא שנה 1.
 // ═══════════════════════════════════════════════════════════════════
 
 qtMonIdx    = tdMon >= 4 ? tdMon - 4 : tdMon + 8   // 0 = אפריל ... 11 = מרץ
 qtYearNum   = tdMon >= 4 ? tdYear : tdYear - 1     // תווית שנת QT (אפריל–מרץ)
 qtQtrNum    = math.floor(qtMonIdx / 3) + 1         // 1..4 בתוך שנת QT
-monInQtr    = qtMonIdx % 3                         // 0..2 — מקום החודש בתוך הרבעון
+yearInCyc   = qtYearNum % 4                        // 0..3 — מקום השנה במחזור ה-4
 
 // ═══════════════════════════════════════════════════════════════════
 // מזהי מחזורים
@@ -111,17 +112,17 @@ monthId    = monYear * 100 + monMonth
 sessionId  = tradeDayId * 10 + sessionIdx
 microId    = sessionId * 10 + microIdx
 quarterId  = microId * 10 + quarterIdx
-// בגרף היומי החודש נקבע לפי חודש יום-המסחר עצמו (גבול החודש נופל על גבול יום)
-dayMonthId = tdYear * 100 + tdMon
-// בגרף השבועי הרבעון/שנה נקבעים לפי יום-שני של השבוע — כמו שהחודש נקבע ב-4H
+// ביומי הרבעון נקבע לפי חודש יום-המסחר; בשבועי הרבעון/שנה נקבעים לפי יום-שני
+// של השבוע — אותו כלל שמשייך שבוע לחודש ב-4H, כך שהגבול נופל תמיד בתחילת שבוע.
 qtrId      = qtYearNum * 10 + qtQtrNum
 qtYearId   = qtYearNum
+cyc4Id     = math.floor(qtYearNum / 4)
 
 refCycleId = 0
 if tfClass == 7
-    refCycleId := qtrId
+    refCycleId := qtYearId
 else if tfClass == 6
-    refCycleId := dayMonthId
+    refCycleId := qtrId
 else if tfClass == 5
     refCycleId := weekId
 else if tfClass == 4
@@ -135,9 +136,9 @@ else if tfClass == 1
 
 lifeCycleId = 0
 if tfClass == 7
-    lifeCycleId := qtYearId
+    lifeCycleId := cyc4Id
 else if tfClass == 6
-    lifeCycleId := qtrId
+    lifeCycleId := qtYearId
 else if tfClass == 5
     lifeCycleId := monthId
 else if tfClass == 4
@@ -155,24 +156,24 @@ newLifeCycle = ta.change(lifeCycleId) != 0
 // ב-1H תת-המחזור הראשון (יום שני) משווה לתת-המחזור האחרון של השבוע הקודם (שישי),
 // אבל אותו "זרע" נמחק אחרי היום הראשון — שישי משווה רק לשני, לא לשאר השבוע.
 // ב-4H המחזור החודשי עומד בפני עצמו: השבועות משווים רק בתוך אותו חודש (בלי חודש קודם).
-// ביומי ובשבועי אותו עיקרון כמו 1H: החודש/הרבעון הראשון של המיכל משווה גם ליחידה
-// האחרונה של המיכל הקודם (יולי מול יוני), והזרע הזה נמחק אחרי היחידה הראשונה.
+// ביומי ובשבועי אותו עיקרון כמו 1H: הרבעון/השנה הראשונים של המיכל משווים גם ליחידה
+// האחרונה של המיכל הקודם (Q1 מול Q4 הקודם), והזרע הזה נמחק אחרי היחידה הראשונה.
 keepLast = tfClass == 4 or tfClass == 6 or tfClass == 7
 
 // ═══════════════════════════════════════════════════════════════════
 // True Open
 // ═══════════════════════════════════════════════════════════════════
 
+inCyc4Q2    = yearInCyc == 1         // השנה השנייה במחזור ה-4 (2025, 2029)
 inYearlyQ2  = qtQtrNum == 2          // Q2 של שנת QT = יול/אוג/ספט
-inQtrQ2     = monInQtr == 1          // החודש השני של הרבעון (מאי/אוג/נוב/פבר)
 inMonthlyQ2 = qtWeekNum == 2
 inWeeklyQ2  = tdDow == dayofweek.tuesday
 inDailyQ2   = minsFromDayStart >= 360 and minsFromDayStart < 720
 inSessionQ2 = microIdx == 1
 inMicroQ2   = quarterIdx == 1
 
+var bool pCycQ2 = false
 var bool pYrQ2  = false
-var bool pQtrQ2 = false
 var bool pMonQ2 = false
 var bool pWkQ2  = false
 var bool pDayQ2 = false
@@ -181,9 +182,9 @@ var bool pMicQ2 = false
 
 isTrueOpenBar = false
 if tfClass == 7
-    isTrueOpenBar := inYearlyQ2 and not pYrQ2
+    isTrueOpenBar := inCyc4Q2 and not pCycQ2
 else if tfClass == 6
-    isTrueOpenBar := inQtrQ2 and not pQtrQ2
+    isTrueOpenBar := inYearlyQ2 and not pYrQ2
 else if tfClass == 5
     isTrueOpenBar := inMonthlyQ2 and not pMonQ2
 else if tfClass == 4
@@ -195,8 +196,8 @@ else if tfClass == 2
 else if tfClass == 1
     isTrueOpenBar := inMicroQ2 and not pMicQ2
 
+pCycQ2 := inCyc4Q2
 pYrQ2  := inYearlyQ2
-pQtrQ2 := inQtrQ2
 pMonQ2 := inMonthlyQ2
 pWkQ2  := inWeeklyQ2
 pDayQ2 := inDailyQ2
