@@ -1,0 +1,792 @@
+//@version=5
+indicator("MTF Radar | Quarterly Theory", shorttitle = "MTF Radar", overlay = true)
+
+// ═══════════════════════════════════════════════════════════════════
+// MTF Radar — מודעות רב-טיימפריימית בלי עומס על הגרף
+//
+// הבעיה: כל אחד משלושת האינדיקטורים (SSMT+HSSMT, SSMT Fill, ADI PCP/PSP)
+// מראה רק את מסגרת הזמן של הגרף שפתוח. כדי לדעת אם יש שבירה ב-1H או ב-4H,
+// או אם נולדה שבירה דקתית שעלולה להביא תיקון נגד עסקה פתוחה, צריך להחליף
+// גרף — ובדיוק אז מפספסים את מה שקורה.
+//
+// הפתרון: הסקריפט הזה מחשב את כל מסגרות הזמן בו-זמנית ולא מצייר כלום על
+// פאנל המחיר — רק טבלה זעירה בפינה והתראה דינמית. שלושת האינדיקטורים
+// הקיימים ממשיכים לעבוד לצידו בלי שינוי.
+//
+// ── התובנה שמאפשרת את זה ──
+// הלוגיקה לא תלויה באגרגציה של נרות אלא ב-refCycleId/lifeCycleId, שמחושבים
+// מזמן (EST, עוגן 18:00). לכן על גרף 15 דקות אפשר להריץ במקביל את התצוגה
+// של 1H, 4H, 1D ו-1W מאותם נרות בדיוק, בלי אף request.security נוסף.
+//
+// ── המגבלה שמכתיבה את המבנה ──
+// אי אפשר לעטוף את הלוגיקה ב-request.security על TF אחר, כי בפנים כבר יש
+// request.security ל-NQ/ES/YM ו-Pine אוסר קינון. לכן ירידה מתחת ל-TF של
+// הגרף תחייב request.security_lower_tf (שלב ב').
+//
+// ── רשת המחזורים ──
+//   class 1 = 1m   ref רבע 22.5m   life מיקרו 90m
+//   class 2 = 5m   ref מיקרו 90m   life סשן 6h
+//   class 3 = 15m  ref סשן 6h      life יום מסחר
+//   class 4 = 1H   ref יום מסחר    life שבוע
+//   class 5 = 4H   ref שבוע        life חודש
+//   class 6 = 1D   ref רבעון QT    life שנת QT
+//   class 7 = 1W   ref שנת QT      life מחזור 4 שנים
+//
+// מחזורי-העל לפי QT (שנה מאפריל), כמו ב-SSMT+HSSMT — ולא לפי ההגדרה
+// הקלנדרית שב-SSMT Fill.
+// ═══════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════
+// הגדרות משתמש
+// ═══════════════════════════════════════════════════════════════════
+
+grpSym = "סימבולים"
+contractSet = input.string("אוטומטי", "סט חוזים", options = ["אוטומטי", "רגיל", "מיקרו"], group = grpSym)
+symNQ_std = input.symbol("CME_MINI:NQ1!",  "NQ רגיל", group = grpSym)
+symES_std = input.symbol("CME_MINI:ES1!",  "ES רגיל", group = grpSym)
+symYM_std = input.symbol("CBOT_MINI:YM1!", "YM רגיל", group = grpSym)
+symNQ_mic = input.symbol("CME_MINI:MNQ1!",  "NQ מיקרו", group = grpSym)
+symES_mic = input.symbol("CME_MINI:MES1!",  "ES מיקרו", group = grpSym)
+symYM_mic = input.symbol("CBOT_MINI:MYM1!", "YM מיקרו", group = grpSym)
+
+grpTF = "מסגרות זמן ברדאר"
+useC1 = input.bool(true, "1m",  group = grpTF, inline = "tfa")
+useC2 = input.bool(true, "5m",  group = grpTF, inline = "tfa")
+useC3 = input.bool(true, "15m", group = grpTF, inline = "tfa")
+useC4 = input.bool(true, "1H",  group = grpTF, inline = "tfb")
+useC5 = input.bool(true, "4H",  group = grpTF, inline = "tfb")
+useC6 = input.bool(true, "1D",  group = grpTF, inline = "tfb")
+useC7 = input.bool(true, "1W",  group = grpTF, inline = "tfb")
+
+grpVis = "תצוגה"
+tblPos    = input.string("ימין־תחתון", "מיקום הטבלה", options = ["ימין־תחתון", "ימין־עליון", "ימין־אמצע", "שמאל־תחתון", "שמאל־עליון"], group = grpVis)
+txtSize   = input.string("small", "גודל טקסט", options = ["tiny", "small", "normal"], group = grpVis)
+colBull   = input.color(#26a69a, "צבע שורי", group = grpVis)
+colBear   = input.color(#ef5350, "צבע דובי", group = grpVis)
+hideEmpty = input.bool(false, "הסתר מסגרות בלי סיגנל", group = grpVis, tooltip = "מצב מינימלי — הרדאר מציג רק מסגרות זמן שיש בהן סטייה חיה כרגע.")
+
+grpLogic = "לוגיקה"
+blockDeadWeek   = input.bool(true, "חסום שבירות בשבוע מת (מחלקת 4H)", group = grpLogic)
+requireTrueOpen = input.bool(false, "סנן לפי True Open (פרימיום/דיסקאונט)", group = grpLogic)
+
+grpAlert = "התראות"
+alertOn    = input.bool(true, "הפעל התראות", group = grpAlert)
+alertScope = input.string("הגרף ומדרגה אחת מתחת", "אילו מסגרות יורות התראה", options = ["הכל", "הגרף ומעלה", "הגרף ומדרגה אחת מתחת"], group = grpAlert, tooltip = "מגביל את ההצפה ממסגרות זמן נמוכות. ההתראה עצמה היא קריאה אחת עם טקסט דינמי, כך שמספיק להגדיר אותה פעם אחת.")
+
+// ═══════════════════════════════════════════════════════════════════
+// בחירת סימבולים
+// ═══════════════════════════════════════════════════════════════════
+
+cs           = syminfo.tickerid
+isNQc        = str.contains(cs, "NQ")
+isESc        = str.contains(cs, "ES")
+isYMc        = str.contains(cs, "YM")
+chartIsMicro = str.contains(cs, "MNQ") or str.contains(cs, "MES") or str.contains(cs, "MYM")
+useMicro     = contractSet == "מיקרו" or (contractSet == "אוטומטי" and chartIsMicro)
+
+sNQ = useMicro ? symNQ_mic : symNQ_std
+sES = useMicro ? symES_mic : symES_std
+sYM = useMicro ? symYM_mic : symYM_std
+
+// ═══════════════════════════════════════════════════════════════════
+// משיכת נתוני שלושת הנכסים
+//
+// לנכס שהגרף מציג לוקחים את נתוני הגרף עצמם ולא את request.security:
+// ההגדרה "Adjust for contract changes" מתקנת אחורה את היסטוריית החוזה
+// הרציף, אבל request.security לא מקבל אותה ומחזיר סדרה גולמית. בלי זה
+// הרמות מחושבות בעולם אחד ומושוות לנרות מעולם אחר.
+// ═══════════════════════════════════════════════════════════════════
+
+[rNqO, rNqH, rNqL, rNqC] = request.security(sNQ, timeframe.period, [open, high, low, close], lookahead = barmerge.lookahead_off)
+[rEsO, rEsH, rEsL, rEsC] = request.security(sES, timeframe.period, [open, high, low, close], lookahead = barmerge.lookahead_off)
+[rYmO, rYmH, rYmL, rYmC] = request.security(sYM, timeframe.period, [open, high, low, close], lookahead = barmerge.lookahead_off)
+
+nqO = isNQc ? open  : rNqO
+nqH = isNQc ? high  : rNqH
+nqL = isNQc ? low   : rNqL
+nqC = isNQc ? close : rNqC
+esO = isESc ? open  : rEsO
+esH = isESc ? high  : rEsH
+esL = isESc ? low   : rEsL
+esC = isESc ? close : rEsC
+ymO = isYMc ? open  : rYmO
+ymH = isYMc ? high  : rYmH
+ymL = isYMc ? low   : rYmL
+ymC = isYMc ? close : rYmC
+
+// ═══════════════════════════════════════════════════════════════════
+// רשת זמן EST
+// ═══════════════════════════════════════════════════════════════════
+
+TZ = "America/New_York"
+
+// מזהי הנר הסינתטי של שבע המחלקות, עבור חותמת זמן נתונה.
+// מחושב פעמיים בכל בר — ל-time (תחילת הבר) ול-time_close (סופו) — כדי לזהות
+// בדיוק באיזה בר נסגר נר של כל מחלקה, בלי פיגור של בר.
+f_barIds(t) =>
+    int  md   = hour(t, TZ) * 60 + minute(t, TZ)
+    bool post = md >= 1080
+    int  mfd  = post ? md - 1080 : md + 360
+    int  tdt  = post ? t + 86400000 : t
+    int  tday = year(tdt, TZ) * 10000 + month(tdt, TZ) * 100 + dayofmonth(tdt, TZ)
+    int  tdw  = dayofweek(tdt, TZ)
+    int  dsm  = tdw == dayofweek.sunday ? 6 : tdw - 2
+    int  mont = tdt - dsm * 86400000
+    int  wid  = year(mont, TZ) * 10000 + month(mont, TZ) * 100 + dayofmonth(mont, TZ)
+    [tday * 10000 + mfd, tday * 10000 + mfd / 5, tday * 10000 + mfd / 15, tday * 10000 + mfd / 60, tday * 10000 + mfd / 240, tday, wid]
+
+[ob1, ob2, ob3, ob4, ob5, ob6, ob7] = f_barIds(time)
+[cb1, cb2, cb3, cb4, cb5, cb6, cb7] = f_barIds(time_close)
+
+estHour      = hour(time, TZ)
+estMin       = minute(time, TZ)
+minutesOfDay = estHour * 60 + estMin
+
+isPostOpen       = minutesOfDay >= 1080
+minsFromDayStart = isPostOpen ? minutesOfDay - 1080 : minutesOfDay + 360
+
+tradeDayTime = isPostOpen ? time + 86400000 : time
+tdYear = year(tradeDayTime, TZ)
+tdMon  = month(tradeDayTime, TZ)
+tdDom  = dayofmonth(tradeDayTime, TZ)
+tdDow  = dayofweek(tradeDayTime, TZ)
+
+sessionIdx    = math.floor(minsFromDayStart / 360)
+minsInSession = minsFromDayStart % 360
+microIdx      = math.floor(minsInSession / 90)
+minsInMicro   = minsInSession % 90
+quarterIdx    = math.floor(minsInMicro / 22.5)
+
+// ── מספור שבועות לפי QT ──
+daysSinceMonday = tdDow == dayofweek.sunday ? 6 : tdDow - 2
+mondayTime      = tradeDayTime - daysSinceMonday * 86400000
+thursdayTime    = mondayTime + 3 * 86400000
+
+monMonth = month(mondayTime, TZ)
+monDom   = dayofmonth(mondayTime, TZ)
+monYear  = year(mondayTime, TZ)
+thuMonth = month(thursdayTime, TZ)
+
+// שבוע מת = יום שני עד יום חמישי אינם באותו חודש.
+isDeadWeek = monMonth != thuMonth
+qtWeekNum  = isDeadWeek ? 0 : math.floor((monDom - 1) / 7) + 1
+
+// ── שנת QT — מתחילה באפריל ──
+qtMonIdx  = tdMon >= 4 ? tdMon - 4 : tdMon + 8   // 0 = אפריל ... 11 = מרץ
+qtYearNum = tdMon >= 4 ? tdYear : tdYear - 1
+qtQtrNum  = math.floor(qtMonIdx / 3) + 1
+yearInCyc = qtYearNum % 4
+
+// ── מזהי מחזורים ──
+tradeDayId = tdYear * 10000 + tdMon * 100 + tdDom
+weekId     = monYear * 10000 + monMonth * 100 + monDom
+monthId    = monYear * 100 + monMonth
+sessionId  = tradeDayId * 10 + sessionIdx
+microId    = sessionId * 10 + microIdx
+quarterId  = microId * 10 + quarterIdx
+qtrId      = qtYearNum * 10 + qtQtrNum
+qtYearId   = qtYearNum
+cyc4Id     = math.floor(qtYearNum / 4)
+
+// ═══════════════════════════════════════════════════════════════════
+// טבלאות עזר פר-מחלקה (אינדקס 0..6 = מחלקות 1..7)
+// ═══════════════════════════════════════════════════════════════════
+
+var array<int>  refA  = array.new_int(7, 0)
+var array<int>  lifeA = array.new_int(7, 0)
+var array<int>  obA   = array.new_int(7, 0)
+var array<int>  cbA   = array.new_int(7, 0)
+var array<bool> q2A   = array.new_bool(7, false)
+
+array.set(refA, 0, quarterId)
+array.set(refA, 1, microId)
+array.set(refA, 2, sessionId)
+array.set(refA, 3, tradeDayId)
+array.set(refA, 4, weekId)
+array.set(refA, 5, qtrId)
+array.set(refA, 6, qtYearId)
+
+array.set(lifeA, 0, microId)
+array.set(lifeA, 1, sessionId)
+array.set(lifeA, 2, tradeDayId)
+array.set(lifeA, 3, weekId)
+array.set(lifeA, 4, monthId)
+array.set(lifeA, 5, qtYearId)
+array.set(lifeA, 6, cyc4Id)
+
+array.set(obA, 0, ob1)
+array.set(obA, 1, ob2)
+array.set(obA, 2, ob3)
+array.set(obA, 3, ob4)
+array.set(obA, 4, ob5)
+array.set(obA, 5, ob6)
+array.set(obA, 6, ob7)
+
+array.set(cbA, 0, cb1)
+array.set(cbA, 1, cb2)
+array.set(cbA, 2, cb3)
+array.set(cbA, 3, cb4)
+array.set(cbA, 4, cb5)
+array.set(cbA, 5, cb6)
+array.set(cbA, 6, cb7)
+
+// True Open של מחלקה = הפתיחה של Q2 של המיכל שלה.
+array.set(q2A, 0, quarterIdx == 1)
+array.set(q2A, 1, microIdx == 1)
+array.set(q2A, 2, minsFromDayStart >= 360 and minsFromDayStart < 720)
+array.set(q2A, 3, tdDow == dayofweek.tuesday)
+array.set(q2A, 4, qtWeekNum == 2)
+array.set(q2A, 5, qtQtrNum == 2)
+array.set(q2A, 6, yearInCyc == 1)
+
+// ═══════════════════════════════════════════════════════════════════
+// טיפוס המחלקה — נר סינתטי + מנוע SSMT/HSSMT + מצב תצוגה
+// ═══════════════════════════════════════════════════════════════════
+
+type Cls
+    int    idx      = 0
+    string nm       = ""
+    int    tf       = 0
+    bool   on       = false     // מחושבת בגרף הנוכחי?
+    bool   keepLast = false     // המיכל שומר את התת-מחזור האחרון של הקודם ("זרע")
+    // ── הנר הסינתטי המתגבש ──
+    int    barId    = na
+    bool   emitted  = false     // הנר הנוכחי כבר עובד (נסגר בדיוק בסוף בר של הגרף)
+    float  bNqO = na
+    float  bNqH = na
+    float  bNqL = na
+    float  bNqC = na
+    float  bEsO = na
+    float  bEsH = na
+    float  bEsL = na
+    float  bEsC = na
+    float  bYmO = na
+    float  bYmH = na
+    float  bYmL = na
+    float  bYmC = na
+    // הקשר הנר — נתפס בפתיחתו, וקבוע לאורכו בהגדרה
+    int    bRef  = 0
+    int    bLife = 0
+    int    bDow  = 0
+    bool   bDead = false
+    bool   bQ2   = false
+    // ── מנוע SSMT/HSSMT ──
+    bool   started  = false
+    int    eRef     = 0
+    int    eLife    = 0
+    bool   warm     = false     // נצפה גבול מיכל → יש מספיק היסטוריה לתשובה אמיתית
+    bool   seedOn   = false
+    bool   pQ2      = false
+    float  trueOpen = na
+    float  nqCH  = na
+    float  nqCL  = na
+    float  nqCHC = na
+    float  nqCLC = na
+    float  esCH  = na
+    float  esCL  = na
+    float  esCHC = na
+    float  esCLC = na
+    float  ymCH  = na
+    float  ymCL  = na
+    float  ymCHC = na
+    float  ymCLC = na
+    array<float> nqHiA  = na
+    array<float> nqLoA  = na
+    array<float> nqHiCA = na
+    array<float> nqLoCA = na
+    array<float> esHiA  = na
+    array<float> esLoA  = na
+    array<float> esHiCA = na
+    array<float> esLoCA = na
+    array<float> ymHiA  = na
+    array<float> ymLoA  = na
+    array<float> ymHiCA = na
+    array<float> ymLoCA = na
+    // ── מצב התצוגה ──
+    int    bearT    = 0
+    string bearS    = ""
+    int    bearRefI = -1
+    int    bearSeq  = 0
+    int    bearBar  = 0
+    int    bullT    = 0
+    string bullS    = ""
+    int    bullRefI = -1
+    int    bullSeq  = 0
+    int    bullBar  = 0
+
+// ═══════════════════════════════════════════════════════════════════
+// זיהוי הסטייה — מועבר מ-SSMT+HSSMT ללא שינוי לוגי.
+// HSSMT = סגירה מעבר · SSMT = פתיל מעבר. לקיחה מצטברת: הסריקה מתחילה
+// מהתת-מחזור הקרוב-ביותר ומצטברת אחורה, כך שרמה שכבר נלקחה לא מחייה
+// סטייה ישנה.
+//
+// האסימטריה מכוונת ונשמרת: בדובי הגרעין הוא NQ+ES (הסכמה שלהם מבטלת),
+// בשורי צריך ששלושתם יסכימו כדי לבטל, ו-YM מושמט מתווית שורית.
+//
+// ההבדל היחיד מהמקור: הושמטו מערכי אינדקסי-הנרות, כי הרדאר לא מצייר
+// קווים ולא צריך לדעת באיזה נר נוצרה הרמה.
+// ═══════════════════════════════════════════════════════════════════
+
+f_str(bNQ, bES, bYM, isBull) =>
+    s = ""
+    s := bNQ ? s + "NQ " : s
+    s := bES ? s + "ES " : s
+    s := (bYM and not isBull) ? s + "YM " : s
+    str.trim(s)
+
+f_findBear(nqHiA, esHiA, ymHiA, nqHiCA, esHiCA, ymHiCA, nqCH, esCH, ymCH, nqCHC, esCHC, ymCHC) =>
+    bT = 0
+    bI = -1
+    bS = ""
+    n = array.size(nqHiA)
+    if n > 0
+        float nqMH  = nqCH
+        float esMH  = esCH
+        float ymMH  = ymCH
+        float nqMHc = nqCHC
+        float esMHc = esCHC
+        float ymMHc = ymCHC
+        bool stopped = false
+        for i = n - 1 to 0
+            if bT == 0 and not stopped
+                nw = nqMH > array.get(nqHiA, i)
+                ew = esMH > array.get(esHiA, i)
+                yw = ymMH > array.get(ymHiA, i)
+                nc = nqMHc > array.get(nqHiCA, i)
+                ec = esMHc > array.get(esHiCA, i)
+                yc = ymMHc > array.get(ymHiCA, i)
+                hValid = (nc or ec or yc) and not (nc and ec)
+                wValid = (nw or ew or yw) and not (nw and ew)
+                if hValid or wValid
+                    hN = hValid and nc
+                    hE = hValid and ec
+                    hY = hValid and yc
+                    hs = f_str(hN, hE, hY, false)
+                    ss = f_str(nw and not hN, ew and not hE, yw and not hY, false)
+                    ss := wValid ? ss : ""
+                    lbl = hs != "" ? "H " + hs : ""
+                    lbl := ss != "" ? (lbl != "" ? lbl + " S " + ss : "S " + ss) : lbl
+                    if not hValid and nc and ec
+                        lbl := lbl + (yc ? " (all closed)" : " (core closed)")
+                    bT := hs != "" ? 2 : 1
+                    bI := i
+                    bS := lbl
+                else if (nw and ew) or (nc and ec)
+                    stopped := true
+            nqMH  := math.max(nqMH,  array.get(nqHiA, i))
+            esMH  := math.max(esMH,  array.get(esHiA, i))
+            ymMH  := math.max(ymMH,  array.get(ymHiA, i))
+            nqMHc := math.max(nqMHc, array.get(nqHiCA, i))
+            esMHc := math.max(esMHc, array.get(esHiCA, i))
+            ymMHc := math.max(ymMHc, array.get(ymHiCA, i))
+    [bT, bI, bS]
+
+f_findBull(nqLoA, esLoA, ymLoA, nqLoCA, esLoCA, ymLoCA, nqCL, esCL, ymCL, nqCLC, esCLC, ymCLC) =>
+    bT = 0
+    bI = -1
+    bS = ""
+    n = array.size(nqLoA)
+    if n > 0
+        float nqML  = nqCL
+        float esML  = esCL
+        float ymML  = ymCL
+        float nqMLc = nqCLC
+        float esMLc = esCLC
+        float ymMLc = ymCLC
+        bool stopped = false
+        for i = n - 1 to 0
+            if bT == 0 and not stopped
+                nw = nqML < array.get(nqLoA, i)
+                ew = esML < array.get(esLoA, i)
+                yw = ymML < array.get(ymLoA, i)
+                nc = nqMLc < array.get(nqLoCA, i)
+                ec = esMLc < array.get(esLoCA, i)
+                yc = ymMLc < array.get(ymLoCA, i)
+                hValid = (nc or ec) and not (nc and ec and yc)
+                wValid = (nw or ew) and not (nw and ew and yw)
+                if hValid or wValid
+                    hN = hValid and nc
+                    hE = hValid and ec
+                    hY = hValid and yc
+                    hs = f_str(hN, hE, hY, true)
+                    ss = f_str(nw and not hN, ew and not hE, yw and not hY, true)
+                    ss := wValid ? ss : ""
+                    lbl = hs != "" ? "H " + hs : ""
+                    lbl := ss != "" ? (lbl != "" ? lbl + " S " + ss : "S " + ss) : lbl
+                    if not hValid and nc and ec and yc
+                        lbl := lbl + " (all closed)"
+                    bT := hs != "" ? 2 : 1
+                    bI := i
+                    bS := lbl
+                else if (nw and ew and yw) or (nc and ec and yc)
+                    stopped := true
+            nqML  := math.min(nqML,  array.get(nqLoA, i))
+            esML  := math.min(esML,  array.get(esLoA, i))
+            ymML  := math.min(ymML,  array.get(ymLoA, i))
+            nqMLc := math.min(nqMLc, array.get(nqLoCA, i))
+            esMLc := math.min(esMLc, array.get(esLoCA, i))
+            ymMLc := math.min(ymMLc, array.get(ymLoCA, i))
+    [bT, bI, bS]
+
+// ═══════════════════════════════════════════════════════════════════
+// צעד המנוע — נקרא בדיוק פעם אחת לכל נר סינתטי שנסגר.
+//
+// זהו אותו רצף פעולות של הסקריפט המקורי בכל בר מאושר: קודם דגלי הזרע
+// (בעוד המצברים מחזיקים את התת-מחזור הקודם), אחר כך דחיפה/ניקוי, אחר כך
+// עדכון המצברים, ורק בסוף הזיהוי.
+//
+// מונה הסדר יושב במערך ולא במשתנה גלובלי, כי Pine אוסר על פונקציה לשנות
+// משתנה גלובלי — אבל תוכן של מערך כן ניתן לשינוי דרך ההפניה.
+// ═══════════════════════════════════════════════════════════════════
+
+var array<int> seqBox = array.new_int(1, 0)
+
+method step(Cls c) =>
+    bool newRef  = not c.started or c.bRef  != c.eRef
+    bool newLife = not c.started or c.bLife != c.eLife
+
+    // גבול מיכל שנצפה בפועל = מכאן והלאה יש היסטוריה מלאה למחלקה הזו
+    if newLife and c.started
+        c.warm := true
+
+    bool seedPush = newRef and newLife and c.keepLast and not na(c.nqCH)
+    bool dropSeed = newRef and (not newLife) and c.seedOn
+
+    if newRef
+        if newLife
+            array.clear(c.nqHiA)
+            array.clear(c.nqLoA)
+            array.clear(c.nqHiCA)
+            array.clear(c.nqLoCA)
+            array.clear(c.esHiA)
+            array.clear(c.esLoA)
+            array.clear(c.esHiCA)
+            array.clear(c.esLoCA)
+            array.clear(c.ymHiA)
+            array.clear(c.ymLoA)
+            array.clear(c.ymHiCA)
+            array.clear(c.ymLoCA)
+        if ((not newLife) or c.keepLast) and not na(c.nqCH)
+            array.push(c.nqHiA,  c.nqCH)
+            array.push(c.nqLoA,  c.nqCL)
+            array.push(c.nqHiCA, c.nqCHC)
+            array.push(c.nqLoCA, c.nqCLC)
+            array.push(c.esHiA,  c.esCH)
+            array.push(c.esLoA,  c.esCL)
+            array.push(c.esHiCA, c.esCHC)
+            array.push(c.esLoCA, c.esCLC)
+            array.push(c.ymHiA,  c.ymCH)
+            array.push(c.ymLoA,  c.ymCL)
+            array.push(c.ymHiCA, c.ymCHC)
+            array.push(c.ymLoCA, c.ymCLC)
+        if dropSeed and array.size(c.nqHiA) > 0
+            array.remove(c.nqHiA,  0)
+            array.remove(c.nqLoA,  0)
+            array.remove(c.nqHiCA, 0)
+            array.remove(c.nqLoCA, 0)
+            array.remove(c.esHiA,  0)
+            array.remove(c.esLoA,  0)
+            array.remove(c.esHiCA, 0)
+            array.remove(c.esLoCA, 0)
+            array.remove(c.ymHiA,  0)
+            array.remove(c.ymLoA,  0)
+            array.remove(c.ymHiCA, 0)
+            array.remove(c.ymLoCA, 0)
+        c.nqCH  := c.bNqH
+        c.nqCL  := c.bNqL
+        c.nqCHC := c.bNqC
+        c.nqCLC := c.bNqC
+        c.esCH  := c.bEsH
+        c.esCL  := c.bEsL
+        c.esCHC := c.bEsC
+        c.esCLC := c.bEsC
+        c.ymCH  := c.bYmH
+        c.ymCL  := c.bYmL
+        c.ymCHC := c.bYmC
+        c.ymCLC := c.bYmC
+    else
+        c.nqCH  := na(c.nqCH)  ? c.bNqH : math.max(c.nqCH,  c.bNqH)
+        c.nqCL  := na(c.nqCL)  ? c.bNqL : math.min(c.nqCL,  c.bNqL)
+        c.nqCHC := na(c.nqCHC) ? c.bNqC : math.max(c.nqCHC, c.bNqC)
+        c.nqCLC := na(c.nqCLC) ? c.bNqC : math.min(c.nqCLC, c.bNqC)
+        c.esCH  := na(c.esCH)  ? c.bEsH : math.max(c.esCH,  c.bEsH)
+        c.esCL  := na(c.esCL)  ? c.bEsL : math.min(c.esCL,  c.bEsL)
+        c.esCHC := na(c.esCHC) ? c.bEsC : math.max(c.esCHC, c.bEsC)
+        c.esCLC := na(c.esCLC) ? c.bEsC : math.min(c.esCLC, c.bEsC)
+        c.ymCH  := na(c.ymCH)  ? c.bYmH : math.max(c.ymCH,  c.bYmH)
+        c.ymCL  := na(c.ymCL)  ? c.bYmL : math.min(c.ymCL,  c.bYmL)
+        c.ymCHC := na(c.ymCHC) ? c.bYmC : math.max(c.ymCHC, c.bYmC)
+        c.ymCLC := na(c.ymCLC) ? c.bYmC : math.min(c.ymCLC, c.bYmC)
+
+    if newRef and newLife
+        c.seedOn := seedPush
+    else if newRef
+        c.seedOn := false
+
+    // מחיקת הזרע מזיזה את כל האינדקסים ב-1 — יישור כדי שלא ייחשב ייחוס חדש
+    if dropSeed
+        c.bearRefI := c.bearRefI > 0 ? c.bearRefI - 1 : -1
+        c.bullRefI := c.bullRefI > 0 ? c.bullRefI - 1 : -1
+
+    // פקיעת מיכל מאפסת את מצב התצוגה
+    if newLife
+        c.bearT    := 0
+        c.bullT    := 0
+        c.bearRefI := -1
+        c.bullRefI := -1
+
+    // ── True Open של המחלקה ──
+    if c.bQ2 and not c.pQ2
+        c.trueOpen := isESc ? c.bEsO : isYMc ? c.bYmO : c.bNqO
+    c.pQ2 := c.bQ2
+
+    float chartClose = isESc ? c.bEsC : isYMc ? c.bYmC : c.bNqC
+    bool  bearOK = not requireTrueOpen or (not na(c.trueOpen) and chartClose > c.trueOpen)
+    bool  bullOK = not requireTrueOpen or (not na(c.trueOpen) and chartClose < c.trueOpen)
+
+    // ── חסימות פר-מחלקה, כמו במקור ──
+    // שבוע מת חוסם את מחלקת 4H; שישי חוסם את 1H ו-4H, כי שבירה שעתית
+    // מייצגת את השבוע (שני–חמישי) וביום שישי היא כבר לא רלוונטית.
+    bool cycleOK  = not (c.idx == 5 and blockDeadWeek and c.bDead)
+    bool friBlock = (c.idx == 4 or c.idx == 5) and c.bDow == dayofweek.friday
+
+    c.started := true
+    c.eRef    := c.bRef
+    c.eLife   := c.bLife
+
+    bool fired = false
+
+    // ── זיהוי ──
+    if not friBlock and cycleOK and array.size(c.nqHiA) > 0
+        [nbT, nbI, nbS] = f_findBear(c.nqHiA, c.esHiA, c.ymHiA, c.nqHiCA, c.esHiCA, c.ymHiCA, c.nqCH, c.esCH, c.ymCH, c.nqCHC, c.esCHC, c.ymCHC)
+        if nbT != 0 and bearOK
+            // שבירה חדשה = כיוון שהיה כבוי, או התעגנות לתת-מחזור ייחוס אחר
+            if c.bearT == 0 or nbI != c.bearRefI
+                array.set(seqBox, 0, array.get(seqBox, 0) + 1)
+                c.bearSeq := array.get(seqBox, 0)
+                c.bearBar := bar_index
+                fired     := true
+            c.bearRefI := nbI
+            c.bearT    := nbT
+            c.bearS    := nbS
+        else
+            c.bearT    := 0
+            c.bearRefI := -1
+
+        [nuT, nuI, nuS] = f_findBull(c.nqLoA, c.esLoA, c.ymLoA, c.nqLoCA, c.esLoCA, c.ymLoCA, c.nqCL, c.esCL, c.ymCL, c.nqCLC, c.esCLC, c.ymCLC)
+        if nuT != 0 and bullOK
+            if c.bullT == 0 or nuI != c.bullRefI
+                array.set(seqBox, 0, array.get(seqBox, 0) + 1)
+                c.bullSeq := array.get(seqBox, 0)
+                c.bullBar := bar_index
+                fired     := true
+            c.bullRefI := nuI
+            c.bullT    := nuT
+            c.bullS    := nuS
+        else
+            c.bullT    := 0
+            c.bullRefI := -1
+    else
+        c.bearT    := 0
+        c.bullT    := 0
+        c.bearRefI := -1
+        c.bullRefI := -1
+
+    fired
+
+// כיוון מוצג = הסטייה שנרשמה אחרונה. מחזיר [dir, type, str, bar, refI]
+f_show(Cls c) =>
+    int    d = 0
+    if c.bearT != 0 and c.bullT != 0
+        d := c.bearSeq > c.bullSeq ? -1 : 1
+    else if c.bearT != 0
+        d := -1
+    else if c.bullT != 0
+        d := 1
+    int    t = d == -1 ? c.bearT    : d == 1 ? c.bullT    : 0
+    string s = d == -1 ? c.bearS    : d == 1 ? c.bullS    : ""
+    int    b = d == -1 ? c.bearBar  : d == 1 ? c.bullBar  : 0
+    int    r = d == -1 ? c.bearRefI : d == 1 ? c.bullRefI : -1
+    [d, t, s, b, r]
+
+// ═══════════════════════════════════════════════════════════════════
+// אתחול שבע המחלקות
+//
+// מחלקה פעילה אם הנר שלה שווה או ארוך מנר הגרף ומתחלק בו בלי שארית —
+// אחרת הנר הסינתטי לא יושב על רשת הגרף והתשובה תהיה קירוב. מחלקה שאינה
+// פעילה מסומנת בטבלה ולא מנחשת.
+// (מחלקות מתחת ל-TF של הגרף מטופלות בשלב ב'.)
+// ═══════════════════════════════════════════════════════════════════
+
+chartTf = math.floor(timeframe.in_seconds() / 60)
+
+// אינדקס המחלקה שמתאימה לגרף הנוכחי (0..6). משמש לסימון השורה בטבלה
+// ולתיחום ההתראות. המרווח בין מחלקות סמוכות אינו קבוע (5→15 פי 3,
+// 15→60 פי 4), ולכן "מדרגה אחת מתחת" נמדד באינדקס ולא ביחס דקות.
+chartIdx = chartTf <= 1 ? 0 : chartTf <= 5 ? 1 : chartTf <= 15 ? 2 : chartTf <= 60 ? 3 : chartTf <= 240 ? 4 : chartTf <= 1440 ? 5 : 6
+
+f_clsOn(idx, cTf, userOn) =>
+    bool r = false
+    if userOn and chartTf >= 1
+        r := idx <= 5 ? (cTf >= chartTf and cTf % chartTf == 0) : chartTf <= cTf
+    r
+
+var array<Cls> CLS = array.new<Cls>()
+if barstate.isfirst
+    array.push(CLS, Cls.new(1, "1m",  1,     f_clsOn(1, 1,     useC1), false))
+    array.push(CLS, Cls.new(2, "5m",  5,     f_clsOn(2, 5,     useC2), false))
+    array.push(CLS, Cls.new(3, "15m", 15,    f_clsOn(3, 15,    useC3), false))
+    array.push(CLS, Cls.new(4, "1H",  60,    f_clsOn(4, 60,    useC4), true))
+    array.push(CLS, Cls.new(5, "4H",  240,   f_clsOn(5, 240,   useC5), false))
+    array.push(CLS, Cls.new(6, "1D",  1440,  f_clsOn(6, 1440,  useC6), true))
+    array.push(CLS, Cls.new(7, "1W",  10080, f_clsOn(7, 10080, useC7), true))
+    for i = 0 to 6
+        Cls ci = array.get(CLS, i)
+        ci.nqHiA  := array.new_float()
+        ci.nqLoA  := array.new_float()
+        ci.nqHiCA := array.new_float()
+        ci.nqLoCA := array.new_float()
+        ci.esHiA  := array.new_float()
+        ci.esLoA  := array.new_float()
+        ci.esHiCA := array.new_float()
+        ci.esLoCA := array.new_float()
+        ci.ymHiA  := array.new_float()
+        ci.ymLoA  := array.new_float()
+        ci.ymHiCA := array.new_float()
+        ci.ymLoCA := array.new_float()
+
+// ═══════════════════════════════════════════════════════════════════
+// בונה הנרות הסינתטיים + הרצת המנועים
+//
+// נר נסגר באחד משני אופנים, וזה שקורה ראשון קובע:
+//   (א) המזהה בסוף הבר הנוכחי שונה מזה שבתחילתו — הבר הזה סוגר את הנר.
+//       זה המקרה הרגיל, בלי פיגור של אף בר.
+//   (ב) המזהה של הבר החדש שונה מזה של הנר השמור — קורה כשיש פער בנתונים
+//       (הפסקת 17:00–18:00, סופ"ש), ואז הנר נסגר רטרואקטיבית.
+// דגל emitted מונע עיבוד כפול של אותו נר.
+// ═══════════════════════════════════════════════════════════════════
+
+var array<bool> firedA = array.new_bool(7, false)
+
+if array.size(CLS) == 7
+    for i = 0 to 6
+        array.set(firedA, i, false)
+
+if barstate.isconfirmed and array.size(CLS) == 7
+    for i = 0 to 6
+        Cls c = array.get(CLS, i)
+        if c.on
+            int idNow  = array.get(obA, i)
+            int idNext = array.get(cbA, i)
+
+            if na(c.barId) or idNow != c.barId
+                // (ב) נר שמור שעדיין לא עובד — סוגרים אותו עכשיו
+                if not na(c.barId) and not c.emitted
+                    if c.step()
+                        array.set(firedA, i, true)
+                // פתיחת נר חדש
+                c.barId   := idNow
+                c.emitted := false
+                c.bNqO := nqO
+                c.bNqH := nqH
+                c.bNqL := nqL
+                c.bNqC := nqC
+                c.bEsO := esO
+                c.bEsH := esH
+                c.bEsL := esL
+                c.bEsC := esC
+                c.bYmO := ymO
+                c.bYmH := ymH
+                c.bYmL := ymL
+                c.bYmC := ymC
+                c.bRef  := array.get(refA, i)
+                c.bLife := array.get(lifeA, i)
+                c.bDow  := tdDow
+                c.bDead := isDeadWeek
+                c.bQ2   := array.get(q2A, i)
+            else
+                c.bNqH := math.max(c.bNqH, nqH)
+                c.bNqL := math.min(c.bNqL, nqL)
+                c.bNqC := nqC
+                c.bEsH := math.max(c.bEsH, esH)
+                c.bEsL := math.min(c.bEsL, esL)
+                c.bEsC := esC
+                c.bYmH := math.max(c.bYmH, ymH)
+                c.bYmL := math.min(c.bYmL, ymL)
+                c.bYmC := ymC
+
+            // (א) הבר הזה סוגר את הנר
+            if idNext != idNow and not c.emitted
+                if c.step()
+                    array.set(firedA, i, true)
+                c.emitted := true
+
+// ═══════════════════════════════════════════════════════════════════
+// הרדאר — טבלה זעירה בפינה. שום ציור על פאנל המחיר.
+// ═══════════════════════════════════════════════════════════════════
+
+f_tblPos() =>
+    tblPos == "ימין־עליון" ? position.top_right : tblPos == "ימין־אמצע" ? position.middle_right : tblPos == "שמאל־תחתון" ? position.bottom_left : tblPos == "שמאל־עליון" ? position.top_left : position.bottom_right
+
+var table rad = table.new(f_tblPos(), 2, 9, border_width = 1, border_color = color.new(color.gray, 60))
+
+if barstate.islast and array.size(CLS) == 7
+    table.clear(rad, 0, 0, 1, 8)
+
+    color hdrBg  = color.new(color.gray, 30)
+    color cellBg = color.new(#0d1117, 20)
+    color dimTxt = color.new(color.gray, 30)
+
+    table.cell(rad, 0, 0, "MTF", bgcolor = hdrBg, text_color = color.white, text_size = txtSize)
+    table.cell(rad, 1, 0, "SSMT", bgcolor = hdrBg, text_color = color.white, text_size = txtSize)
+
+    int row = 1
+    for i = 0 to 6
+        Cls c = array.get(CLS, i)
+        [d, t, s, b, r] = f_show(c)
+
+        bool   isChartTf = i == chartIdx
+        string txt  = "·"
+        string tip  = ""
+        color  txtC = dimTxt
+        color  bg   = cellBg
+
+        if not c.on
+            txt := "n/a"
+            tip := c.nm + " — לא מחושבת בגרף הנוכחי.\nהנר שלה קצר מנר הגרף, או לא מתחלק בו בלי שארית.\n(תמיכה במסגרות נמוכות מהגרף מגיעה בשלב ב')"
+        else if not c.warm
+            txt := "?"
+            tip := c.nm + " — אין עדיין מספיק היסטוריה בגרף הזה.\nהמיכל של המחלקה ארוך ממה שנטען, ולכן אין תשובה אמיתית להציג.\nעבור לגרף גבוה יותר כדי לקרוא את השורה הזו."
+        else if d == 0
+            txt := "·"
+            tip := c.nm + " — אין סטייה תקפה כרגע."
+        else
+            color dc = d == 1 ? colBull : colBear
+            // H = סטיית סגירה (חזקה) · S = סטיית פתיל בלבד
+            txtC := t == 2 ? dc : color.new(dc, 35)
+            bg   := color.new(dc, 88)
+            txt  := (d == 1 ? "▲ " : "▼ ") + s
+            tip  := c.nm + " · " + (d == 1 ? "שורי" : "דובי") + " · " + (t == 2 ? "HSSMT — סטיית סגירה" : "SSMT — סטיית פתיל") + "\nנכסים: " + s + "\nנרשם לפני " + str.tostring(bar_index - b) + " נרות של הגרף\nתת-מחזור ייחוס #" + str.tostring(r)
+
+        if not (hideEmpty and c.on and c.warm and d == 0)
+            table.cell(rad, 0, row, (isChartTf ? "▸ " : "") + c.nm, bgcolor = isChartTf ? color.new(color.gray, 55) : cellBg, text_color = isChartTf ? color.white : color.new(color.silver, 20), text_size = txtSize, tooltip = tip)
+            table.cell(rad, 1, row, txt, bgcolor = bg, text_color = txtC, text_size = txtSize, tooltip = tip)
+            row += 1
+
+// ═══════════════════════════════════════════════════════════════════
+// התראה — קריאה אחת עם טקסט דינמי, כדי שמספיק להגדיר אותה פעם אחת
+// ═══════════════════════════════════════════════════════════════════
+
+f_alertOK(i) =>
+    alertScope == "הכל" ? true : alertScope == "הגרף ומעלה" ? i >= chartIdx : i >= chartIdx - 1
+
+if alertOn and barstate.isconfirmed and array.size(CLS) == 7
+    string body = ""
+    for i = 0 to 6
+        Cls c = array.get(CLS, i)
+        if array.get(firedA, i) and f_alertOK(i)
+            [ad, at, astr, abar, aref] = f_show(c)
+            if ad != 0
+                body := body + (body != "" ? " | " : "") + c.nm + " " + (ad == 1 ? "שורי" : "דובי") + " " + (at == 2 ? "HSSMT" : "SSMT") + " · " + astr
+    if body != ""
+        alert(syminfo.ticker + " · " + body, alert.freq_once_per_bar_close)
