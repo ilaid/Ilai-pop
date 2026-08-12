@@ -67,6 +67,12 @@ showDebug   = input.bool(false, "הצג טבלת בדיקה", group = grpVis)
 grpLogic = "לוגיקה"
 blockDeadWeek = input.bool(true, "חסום שבירות בשבוע מת (4H בלבד)", group = grpLogic)
 
+grpAlert = "התראות"
+// ההתראה רצה בשרתי TradingView, לא בדפדפן — אפשר להקים אותה על גרף 15 דקות
+// והיא תקפוץ גם כשיושבים על 5 דקות או כשהגרף סגור.
+alertOn     = input.bool(true, "שלח התראה על שבירה חדשה", group = grpAlert)
+alertMinDeg = input.int(1, "דרגה מינימלית להתראה", minval = 1, maxval = 3, group = grpAlert)
+
 // ═══════════════════════════════════════════════════════════════════
 // בחירת סימבולים
 // ═══════════════════════════════════════════════════════════════════
@@ -444,6 +450,10 @@ atr = ta.atr(14)
 
 var int seqCounter = 0
 
+// נאסף במהלך הסריקה ונשלח פעם אחת בסוף הנר, כדי שכמה שבירות באותו נר
+// יגיעו כהתראה אחת ולא כמה נפרדות.
+string alertMsg = ""
+
 if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK and array.size(gaps) > 0
     for i = 0 to array.size(gaps) - 1
         Gap gr = array.get(gaps, i)
@@ -460,6 +470,14 @@ if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK and array.
                 gr.fYPos  := gr.dir == 1 ? low - atr * offsetMlt : high + atr * offsetMlt
                 gr.fDeg   := deg
                 gr.fLead  := dN > dE ? "NQ" : "ES"
+                if alertOn and deg >= alertMinDeg
+                    float aTop = isESc ? gr.esTop : gr.nqTop
+                    float aBot = isESc ? gr.esBot : gr.nqBot
+                    string one = syminfo.ticker + " " + timeframe.period + " · שבירה " + (gr.dir == 1 ? "שורית" : "דובית") + " F" + str.tostring(deg) + " · מוביל " + gr.fLead + " · גאפ " + str.tostring(aBot, format.mintick) + "-" + str.tostring(aTop, format.mintick)
+                    alertMsg := alertMsg == "" ? one : alertMsg + "\n" + one
+
+if alertMsg != ""
+    alert(alertMsg, alert.freq_once_per_bar_close)
 
 // ═══════════════════════════════════════════════════════════════════
 // בחירת מה מוצג — השבירה החיה העדכנית ביותר
