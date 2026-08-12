@@ -21,7 +21,7 @@ indicator("MTF Radar | Quarterly Theory", shorttitle = "MTF Radar", overlay = tr
 // ── המגבלה שמכתיבה את המבנה ──
 // אי אפשר לעטוף את הלוגיקה ב-request.security על TF אחר, כי בפנים כבר יש
 // request.security ל-NQ/ES/YM ו-Pine אוסר קינון. לכן ירידה מתחת ל-TF של
-// הגרף תחייב request.security_lower_tf (שלב ב').
+// הגרף עוברת דרך request.security_lower_tf ומעבדת אינטרה-בארים אחד-אחד.
 //
 // ── רשת המחזורים ──
 //   class 1 = 1m   ref רבע 22.5m   life מיקרו 90m
@@ -123,7 +123,10 @@ TZ = "America/New_York"
 // מזהי הנר הסינתטי של שבע המחלקות, עבור חותמת זמן נתונה.
 // מחושב פעמיים בכל בר — ל-time (תחילת הבר) ול-time_close (סופו) — כדי לזהות
 // בדיוק באיזה בר נסגר נר של כל מחלקה, בלי פיגור של בר.
-f_barIds(t) =>
+var array<int> cxBarO = array.new_int(7, 0)   // מזהה הנר בתחילת הבר
+var array<int> cxBarC = array.new_int(7, 0)   // מזהה הנר בסופו
+
+f_fillBarIds(t, dst) =>
     int  md   = hour(t, TZ) * 60 + minute(t, TZ)
     bool post = md >= 1080
     int  mfd  = post ? md - 1080 : md + 360
@@ -132,112 +135,92 @@ f_barIds(t) =>
     int  tdw  = dayofweek(tdt, TZ)
     int  dsm  = tdw == dayofweek.sunday ? 6 : tdw - 2
     int  mont = tdt - dsm * 86400000
-    int  wid  = year(mont, TZ) * 10000 + month(mont, TZ) * 100 + dayofmonth(mont, TZ)
-    [tday * 10000 + mfd, tday * 10000 + mfd / 5, tday * 10000 + mfd / 15, tday * 10000 + mfd / 60, tday * 10000 + mfd / 240, tday, wid]
+    array.set(dst, 0, tday * 10000 + mfd)
+    array.set(dst, 1, tday * 10000 + mfd / 5)
+    array.set(dst, 2, tday * 10000 + mfd / 15)
+    array.set(dst, 3, tday * 10000 + mfd / 60)
+    array.set(dst, 4, tday * 10000 + mfd / 240)
+    array.set(dst, 5, tday)
+    array.set(dst, 6, year(mont, TZ) * 10000 + month(mont, TZ) * 100 + dayofmonth(mont, TZ))
+    0
 
-[ob1, ob2, ob3, ob4, ob5, ob6, ob7] = f_barIds(time)
-[cb1, cb2, cb3, cb4, cb5, cb6, cb7] = f_barIds(time_close)
+// כל הרשת התלויה בזמן — מזהי תת-מחזור, מיכל, Q2, יום בשבוע ושבוע מת —
+// מחושבת לחותמת זמן נתונה ונכתבת למערכים גלובליים.
+//
+// למה מערכים ולא ערכי החזרה: Pine אוסר על פונקציה לשנות משתנה גלובלי, אבל
+// תוכן של מערך כן ניתן לשינוי דרך ההפניה — וכך אפשר להחזיר עשרות ערכים בלי
+// טאפל ענק. אותה פונקציה משרתת גם את נרות הגרף וגם כל אינטרה-בר בשלב ב',
+// כך שיש הגדרה אחת בלבד לרשת הזמן ואי אפשר שהשתיים יסטו זו מזו.
+var array<int>  cxRef  = array.new_int(7, 0)
+var array<int>  cxLife = array.new_int(7, 0)
+var array<bool> cxQ2   = array.new_bool(7, false)
+var array<int>  cxMisc = array.new_int(2, 0)   // 0 = dayofweek · 1 = שבוע מת (0/1)
 
-estHour      = hour(time, TZ)
-estMin       = minute(time, TZ)
-minutesOfDay = estHour * 60 + estMin
+f_ctx(t) =>
+    int  md   = hour(t, TZ) * 60 + minute(t, TZ)
+    bool post = md >= 1080
+    int  mfd  = post ? md - 1080 : md + 360
+    int  tdt  = post ? t + 86400000 : t
+    int  tdY  = year(tdt, TZ)
+    int  tdM  = month(tdt, TZ)
+    int  tdD  = dayofmonth(tdt, TZ)
+    int  tdW  = dayofweek(tdt, TZ)
 
-isPostOpen       = minutesOfDay >= 1080
-minsFromDayStart = isPostOpen ? minutesOfDay - 1080 : minutesOfDay + 360
+    int sIdx = mfd / 360
+    int mIdx = (mfd % 360) / 90
+    int qIdx = math.floor((mfd % 90) / 22.5)
 
-tradeDayTime = isPostOpen ? time + 86400000 : time
-tdYear = year(tradeDayTime, TZ)
-tdMon  = month(tradeDayTime, TZ)
-tdDom  = dayofmonth(tradeDayTime, TZ)
-tdDow  = dayofweek(tradeDayTime, TZ)
+    int  dsm  = tdW == dayofweek.sunday ? 6 : tdW - 2
+    int  mont = tdt - dsm * 86400000
+    int  monY = year(mont, TZ)
+    int  monM = month(mont, TZ)
+    int  monD = dayofmonth(mont, TZ)
+    int  thuM = month(mont + 3 * 86400000, TZ)
 
-sessionIdx    = math.floor(minsFromDayStart / 360)
-minsInSession = minsFromDayStart % 360
-microIdx      = math.floor(minsInSession / 90)
-minsInMicro   = minsInSession % 90
-quarterIdx    = math.floor(minsInMicro / 22.5)
+    // שבוע מת = יום שני עד יום חמישי אינם באותו חודש. שבוע נספר לחודש רק
+    // אם שני–חמישי שלו באותו חודש.
+    bool dead = monM != thuM
+    int  wkNo = dead ? 0 : (monD - 1) / 7 + 1
 
-// ── מספור שבועות לפי QT ──
-daysSinceMonday = tdDow == dayofweek.sunday ? 6 : tdDow - 2
-mondayTime      = tradeDayTime - daysSinceMonday * 86400000
-thursdayTime    = mondayTime + 3 * 86400000
+    // שנת QT מתחילה באפריל: Q1 = אפר/מאי/יונ ... Q4 = ינו/פבר/מרץ
+    int qMon = tdM >= 4 ? tdM - 4 : tdM + 8
+    int qYr  = tdM >= 4 ? tdY : tdY - 1
+    int qQtr = qMon / 3 + 1
 
-monMonth = month(mondayTime, TZ)
-monDom   = dayofmonth(mondayTime, TZ)
-monYear  = year(mondayTime, TZ)
-thuMonth = month(thursdayTime, TZ)
+    int tday = tdY * 10000 + tdM * 100 + tdD
+    int wid  = monY * 10000 + monM * 100 + monD
+    int mid  = monY * 100 + monM
+    int sid  = tday * 10 + sIdx
+    int miid = sid * 10 + mIdx
 
-// שבוע מת = יום שני עד יום חמישי אינם באותו חודש.
-isDeadWeek = monMonth != thuMonth
-qtWeekNum  = isDeadWeek ? 0 : math.floor((monDom - 1) / 7) + 1
+    array.set(cxRef, 0, miid * 10 + qIdx)
+    array.set(cxRef, 1, miid)
+    array.set(cxRef, 2, sid)
+    array.set(cxRef, 3, tday)
+    array.set(cxRef, 4, wid)
+    array.set(cxRef, 5, qYr * 10 + qQtr)
+    array.set(cxRef, 6, qYr)
 
-// ── שנת QT — מתחילה באפריל ──
-qtMonIdx  = tdMon >= 4 ? tdMon - 4 : tdMon + 8   // 0 = אפריל ... 11 = מרץ
-qtYearNum = tdMon >= 4 ? tdYear : tdYear - 1
-qtQtrNum  = math.floor(qtMonIdx / 3) + 1
-yearInCyc = qtYearNum % 4
+    array.set(cxLife, 0, miid)
+    array.set(cxLife, 1, sid)
+    array.set(cxLife, 2, tday)
+    array.set(cxLife, 3, wid)
+    array.set(cxLife, 4, mid)
+    array.set(cxLife, 5, qYr)
+    array.set(cxLife, 6, math.floor(qYr / 4))
 
-// ── מזהי מחזורים ──
-tradeDayId = tdYear * 10000 + tdMon * 100 + tdDom
-weekId     = monYear * 10000 + monMonth * 100 + monDom
-monthId    = monYear * 100 + monMonth
-sessionId  = tradeDayId * 10 + sessionIdx
-microId    = sessionId * 10 + microIdx
-quarterId  = microId * 10 + quarterIdx
-qtrId      = qtYearNum * 10 + qtQtrNum
-qtYearId   = qtYearNum
-cyc4Id     = math.floor(qtYearNum / 4)
+    // True Open של מחלקה = הפתיחה של Q2 של המיכל שלה
+    array.set(cxQ2, 0, qIdx == 1)
+    array.set(cxQ2, 1, mIdx == 1)
+    array.set(cxQ2, 2, mfd >= 360 and mfd < 720)
+    array.set(cxQ2, 3, tdW == dayofweek.tuesday)
+    array.set(cxQ2, 4, wkNo == 2)
+    array.set(cxQ2, 5, qQtr == 2)
+    array.set(cxQ2, 6, qYr % 4 == 1)
 
-// ═══════════════════════════════════════════════════════════════════
-// טבלאות עזר פר-מחלקה (אינדקס 0..6 = מחלקות 1..7)
-// ═══════════════════════════════════════════════════════════════════
-
-var array<int>  refA  = array.new_int(7, 0)
-var array<int>  lifeA = array.new_int(7, 0)
-var array<int>  obA   = array.new_int(7, 0)
-var array<int>  cbA   = array.new_int(7, 0)
-var array<bool> q2A   = array.new_bool(7, false)
-
-array.set(refA, 0, quarterId)
-array.set(refA, 1, microId)
-array.set(refA, 2, sessionId)
-array.set(refA, 3, tradeDayId)
-array.set(refA, 4, weekId)
-array.set(refA, 5, qtrId)
-array.set(refA, 6, qtYearId)
-
-array.set(lifeA, 0, microId)
-array.set(lifeA, 1, sessionId)
-array.set(lifeA, 2, tradeDayId)
-array.set(lifeA, 3, weekId)
-array.set(lifeA, 4, monthId)
-array.set(lifeA, 5, qtYearId)
-array.set(lifeA, 6, cyc4Id)
-
-array.set(obA, 0, ob1)
-array.set(obA, 1, ob2)
-array.set(obA, 2, ob3)
-array.set(obA, 3, ob4)
-array.set(obA, 4, ob5)
-array.set(obA, 5, ob6)
-array.set(obA, 6, ob7)
-
-array.set(cbA, 0, cb1)
-array.set(cbA, 1, cb2)
-array.set(cbA, 2, cb3)
-array.set(cbA, 3, cb4)
-array.set(cbA, 4, cb5)
-array.set(cbA, 5, cb6)
-array.set(cbA, 6, cb7)
-
-// True Open של מחלקה = הפתיחה של Q2 של המיכל שלה.
-array.set(q2A, 0, quarterIdx == 1)
-array.set(q2A, 1, microIdx == 1)
-array.set(q2A, 2, minsFromDayStart >= 360 and minsFromDayStart < 720)
-array.set(q2A, 3, tdDow == dayofweek.tuesday)
-array.set(q2A, 4, qtWeekNum == 2)
-array.set(q2A, 5, qtQtrNum == 2)
-array.set(q2A, 6, yearInCyc == 1)
+    array.set(cxMisc, 0, tdW)
+    array.set(cxMisc, 1, dead ? 1 : 0)
+    0
 
 // ═══════════════════════════════════════════════════════════════════
 // טיפוס המחלקה — נר סינתטי + מנוע SSMT/HSSMT + מצב תצוגה
@@ -449,7 +432,11 @@ method step(Cls c) =>
     if newLife and c.started
         c.warm := true
 
-    bool seedPush = newRef and newLife and c.keepLast and not na(c.nqCH)
+    // רמת ייחוס נדחפת רק אם היא שלמה בשלושת הנכסים. אם לנכס אחד חסרו נתונים
+    // בתת-המחזור הזה, המערכים חייבים לדלג עליו יחד — הם מיושרים באינדקס,
+    // ורמת na אחת הייתה מרעילה את המקסימום הרץ ומשתיקה את הנכס בשקט.
+    bool pushOK   = not na(c.nqCH) and not na(c.esCH) and not na(c.ymCH)
+    bool seedPush = newRef and newLife and c.keepLast and pushOK
     bool dropSeed = newRef and (not newLife) and c.seedOn
 
     if newRef
@@ -466,7 +453,7 @@ method step(Cls c) =>
             array.clear(c.ymLoA)
             array.clear(c.ymHiCA)
             array.clear(c.ymLoCA)
-        if ((not newLife) or c.keepLast) and not na(c.nqCH)
+        if ((not newLife) or c.keepLast) and pushOK
             array.push(c.nqHiA,  c.nqCH)
             array.push(c.nqLoA,  c.nqCL)
             array.push(c.nqHiCA, c.nqCHC)
@@ -505,18 +492,23 @@ method step(Cls c) =>
         c.ymCHC := c.bYmC
         c.ymCLC := c.bYmC
     else
-        c.nqCH  := na(c.nqCH)  ? c.bNqH : math.max(c.nqCH,  c.bNqH)
-        c.nqCL  := na(c.nqCL)  ? c.bNqL : math.min(c.nqCL,  c.bNqL)
-        c.nqCHC := na(c.nqCHC) ? c.bNqC : math.max(c.nqCHC, c.bNqC)
-        c.nqCLC := na(c.nqCLC) ? c.bNqC : math.min(c.nqCLC, c.bNqC)
-        c.esCH  := na(c.esCH)  ? c.bEsH : math.max(c.esCH,  c.bEsH)
-        c.esCL  := na(c.esCL)  ? c.bEsL : math.min(c.esCL,  c.bEsL)
-        c.esCHC := na(c.esCHC) ? c.bEsC : math.max(c.esCHC, c.bEsC)
-        c.esCLC := na(c.esCLC) ? c.bEsC : math.min(c.esCLC, c.bEsC)
-        c.ymCH  := na(c.ymCH)  ? c.bYmH : math.max(c.ymCH,  c.bYmH)
-        c.ymCL  := na(c.ymCL)  ? c.bYmL : math.min(c.ymCL,  c.bYmL)
-        c.ymCHC := na(c.ymCHC) ? c.bYmC : math.max(c.ymCHC, c.bYmC)
-        c.ymCLC := na(c.ymCLC) ? c.bYmC : math.min(c.ymCLC, c.bYmC)
+        // נר סינתטי ריק בנכס מסוים לא דורס מצבר תקין — math.max מול na
+        // מחזיר na, וזה היה מוחק את הרמה שכבר נצברה.
+        if not na(c.bNqH)
+            c.nqCH  := na(c.nqCH)  ? c.bNqH : math.max(c.nqCH,  c.bNqH)
+            c.nqCL  := na(c.nqCL)  ? c.bNqL : math.min(c.nqCL,  c.bNqL)
+            c.nqCHC := na(c.nqCHC) ? c.bNqC : math.max(c.nqCHC, c.bNqC)
+            c.nqCLC := na(c.nqCLC) ? c.bNqC : math.min(c.nqCLC, c.bNqC)
+        if not na(c.bEsH)
+            c.esCH  := na(c.esCH)  ? c.bEsH : math.max(c.esCH,  c.bEsH)
+            c.esCL  := na(c.esCL)  ? c.bEsL : math.min(c.esCL,  c.bEsL)
+            c.esCHC := na(c.esCHC) ? c.bEsC : math.max(c.esCHC, c.bEsC)
+            c.esCLC := na(c.esCLC) ? c.bEsC : math.min(c.esCLC, c.bEsC)
+        if not na(c.bYmH)
+            c.ymCH  := na(c.ymCH)  ? c.bYmH : math.max(c.ymCH,  c.bYmH)
+            c.ymCL  := na(c.ymCL)  ? c.bYmL : math.min(c.ymCL,  c.bYmL)
+            c.ymCHC := na(c.ymCHC) ? c.bYmC : math.max(c.ymCHC, c.bYmC)
+            c.ymCLC := na(c.ymCLC) ? c.bYmC : math.min(c.ymCLC, c.bYmC)
 
     if newRef and newLife
         c.seedOn := seedPush
@@ -594,6 +586,74 @@ method step(Cls c) =>
 
     fired
 
+// ═══════════════════════════════════════════════════════════════════
+// בונה הנר הסינתטי של מחלקה אחת, ומריץ את המנוע ברגע שהנר נסגר.
+//
+// נר נסגר באחד משני אופנים, וזה שקורה ראשון קובע:
+//   (א) המזהה בסוף הבר הנוכחי שונה מזה שבתחילתו — הבר הזה סוגר את הנר.
+//       זה המקרה הרגיל, בלי פיגור של אף בר.
+//   (ב) המזהה של הבר החדש שונה מזה של הנר השמור — קורה כשיש פער בנתונים
+//       (הפסקת 17:00–18:00, סופ"ש), ואז הנר נסגר רטרואקטיבית.
+// דגל emitted מונע עיבוד כפול של אותו נר.
+//
+// המחירים מגיעים דרך pxA ולא כפרמטרים, כדי לא להעביר עשרים ארגומנטים.
+// אותו בונה משרת גם את נרות הגרף וגם את האינטרה-בארים של שלב ב'.
+// ═══════════════════════════════════════════════════════════════════
+
+var array<float> pxA = array.new_float(12, na)   // 0-3 NQ · 4-7 ES · 8-11 YM (OHLC)
+
+method feed(Cls c, idNow, idNext, i) =>
+    bool fired = false
+
+    if na(c.barId) or idNow != c.barId
+        if not na(c.barId) and not c.emitted
+            fired := c.step()
+        c.barId   := idNow
+        c.emitted := false
+        c.bNqO := array.get(pxA, 0)
+        c.bNqH := array.get(pxA, 1)
+        c.bNqL := array.get(pxA, 2)
+        c.bNqC := array.get(pxA, 3)
+        c.bEsO := array.get(pxA, 4)
+        c.bEsH := array.get(pxA, 5)
+        c.bEsL := array.get(pxA, 6)
+        c.bEsC := array.get(pxA, 7)
+        c.bYmO := array.get(pxA, 8)
+        c.bYmH := array.get(pxA, 9)
+        c.bYmL := array.get(pxA, 10)
+        c.bYmC := array.get(pxA, 11)
+        c.bRef  := array.get(cxRef, i)
+        c.bLife := array.get(cxLife, i)
+        c.bDow  := array.get(cxMisc, 0)
+        c.bDead := array.get(cxMisc, 1) == 1
+        c.bQ2   := array.get(cxQ2, i)
+    else
+        // נכס בלי נתון באינטרה-בר הזה פשוט לא מתעדכן, ונר שנפתח בלי נתון
+        // מאותחל בהזדמנות הראשונה שבה הנתון מופיע. בלי זה דקה חסרה בנכס
+        // אחד הייתה מרעילה את כל הנר הסינתטי שלו ב-na.
+        if not na(array.get(pxA, 0))
+            c.bNqO := na(c.bNqO) ? array.get(pxA, 0) : c.bNqO
+            c.bNqH := na(c.bNqH) ? array.get(pxA, 1) : math.max(c.bNqH, array.get(pxA, 1))
+            c.bNqL := na(c.bNqL) ? array.get(pxA, 2) : math.min(c.bNqL, array.get(pxA, 2))
+            c.bNqC := array.get(pxA, 3)
+        if not na(array.get(pxA, 4))
+            c.bEsO := na(c.bEsO) ? array.get(pxA, 4) : c.bEsO
+            c.bEsH := na(c.bEsH) ? array.get(pxA, 5) : math.max(c.bEsH, array.get(pxA, 5))
+            c.bEsL := na(c.bEsL) ? array.get(pxA, 6) : math.min(c.bEsL, array.get(pxA, 6))
+            c.bEsC := array.get(pxA, 7)
+        if not na(array.get(pxA, 8))
+            c.bYmO := na(c.bYmO) ? array.get(pxA, 8) : c.bYmO
+            c.bYmH := na(c.bYmH) ? array.get(pxA, 9) : math.max(c.bYmH, array.get(pxA, 9))
+            c.bYmL := na(c.bYmL) ? array.get(pxA, 10) : math.min(c.bYmL, array.get(pxA, 10))
+            c.bYmC := array.get(pxA, 11)
+
+    if idNext != idNow and not c.emitted
+        bool f2 = c.step()
+        c.emitted := true
+        fired := fired or f2
+
+    fired
+
 // כיוון מוצג = הסטייה שנרשמה אחרונה. מחזיר [dir, type, str, bar, refI]
 f_show(Cls c) =>
     int    d = 0
@@ -612,10 +672,10 @@ f_show(Cls c) =>
 // ═══════════════════════════════════════════════════════════════════
 // אתחול שבע המחלקות
 //
-// מחלקה פעילה אם הנר שלה שווה או ארוך מנר הגרף ומתחלק בו בלי שארית —
-// אחרת הנר הסינתטי לא יושב על רשת הגרף והתשובה תהיה קירוב. מחלקה שאינה
-// פעילה מסומנת בטבלה ולא מנחשת.
-// (מחלקות מתחת ל-TF של הגרף מטופלות בשלב ב'.)
+// מחלקה שהנר שלה ≥ נר הגרף נבנית מנרות הגרף עצמם, בתנאי שהיא מתחלקת בו
+// בלי שארית — אחרת הנר הסינתטי לא יושב על רשת הגרף והתשובה תהיה קירוב.
+// מחלקה שמתחת ל-TF של הגרף נבנית מאינטרה-בארים (ראה למטה).
+// מחלקה שאי אפשר לחשב מסומנת בטבלה ולא מנחשת.
 // ═══════════════════════════════════════════════════════════════════
 
 chartTf = math.floor(timeframe.in_seconds() / 60)
@@ -625,10 +685,47 @@ chartTf = math.floor(timeframe.in_seconds() / 60)
 // 15→60 פי 4), ולכן "מדרגה אחת מתחת" נמדד באינדקס ולא ביחס דקות.
 chartIdx = chartTf <= 1 ? 0 : chartTf <= 5 ? 1 : chartTf <= 15 ? 2 : chartTf <= 60 ? 3 : chartTf <= 240 ? 4 : chartTf <= 1440 ? 5 : 6
 
+// ═══════════════════════════════════════════════════════════════════
+// מסגרות זמן נמוכות מהגרף
+//
+// זה התרחיש שבשבילו נבנה הרדאר: אתה בעסקה על 15 דקות, ופתאום נולדת שבירה
+// דקתית שעלולה להביא תיקון נגדך. request.security רגיל לא יכול לשרת את זה
+// (בפנים כבר יש request.security ל-NQ/ES/YM, ו-Pine אוסר קינון), ולכן
+// המסלול היחיד הוא request.security_lower_tf — שמחזיר מערך אינטרה-בארים
+// לכל בר של הגרף.
+//
+// נמשכת מסגרת אחת בלבד — העדינה ביותר שנדרשת בפועל — וכל המחלקות שמתחת
+// לגרף נבנות ממנה באגרגציה. על גרף 15 דקות עם הכל דלוק זו משיכת 1m אחת
+// לכל נכס, ומחלקת 5m נבנית מאותו זרם. סה"כ שש קריאות request בסקריפט.
+//
+// מעל 4H המשיכה מושבתת: מספר האינטרה-בארים לבר הופך בלתי-סביר, והמחלקות
+// הנמוכות מסומנות n/a במקום להציג מצב שגוי.
+//
+// הערה על עומק: TradingView מגביל את סך האינטרה-בארים לפי סוג המנוי, ומעבר
+// לתקרה הוא מחזיר מערכים ריקים לברים ישנים. זה בסדר כאן — המנועים פשוט
+// מתחממים מהנקודה שבה יש נתונים, ומחלקת 1m צריכה 90 דקות היסטוריה בלבד.
+// ═══════════════════════════════════════════════════════════════════
+
+lowerCap = chartTf >= 5 and chartTf <= 240
+fineIdx  = not lowerCap ? -1 : (chartIdx > 0 and useC1) ? 0 : (chartIdx > 1 and useC2) ? 1 : (chartIdx > 2 and useC3) ? 2 : (chartIdx > 3 and useC4) ? 3 : (chartIdx > 4 and useC5) ? 4 : -1
+lowerOn  = fineIdx >= 0
+
+// Pine דורש שקריאת request תופיע בסקופ הגלובלי בלי תנאי, ולכן כשאין צורך
+// במסגרת נמוכה מבקשים את מסגרת הגרף עצמה — קריאה זולה שתוצאתה לא נצרכת.
+fineTf = fineIdx == 0 ? "1" : fineIdx == 1 ? "5" : fineIdx == 2 ? "15" : fineIdx == 3 ? "60" : fineIdx == 4 ? "240" : timeframe.period
+fineMs = (fineIdx == 0 ? 1 : fineIdx == 1 ? 5 : fineIdx == 2 ? 15 : fineIdx == 3 ? 60 : fineIdx == 4 ? 240 : chartTf) * 60000
+
+[nqTa, nqOa, nqHa, nqLa, nqCa] = request.security_lower_tf(sNQ, fineTf, [time, open, high, low, close])
+[esTa, esOa, esHa, esLa, esCa] = request.security_lower_tf(sES, fineTf, [time, open, high, low, close])
+[ymTa, ymOa, ymHa, ymLa, ymCa] = request.security_lower_tf(sYM, fineTf, [time, open, high, low, close])
+
 f_clsOn(idx, cTf, userOn) =>
     bool r = false
     if userOn and chartTf >= 1
-        r := idx <= 5 ? (cTf >= chartTf and cTf % chartTf == 0) : chartTf <= cTf
+        if idx - 1 >= chartIdx
+            r := idx <= 5 ? (cTf >= chartTf and cTf % chartTf == 0) : chartTf <= cTf
+        else
+            r := lowerOn and idx - 1 >= fineIdx
     r
 
 var array<Cls> CLS = array.new<Cls>()
@@ -656,14 +753,10 @@ if barstate.isfirst
         ci.ymLoCA := array.new_float()
 
 // ═══════════════════════════════════════════════════════════════════
-// בונה הנרות הסינתטיים + הרצת המנועים
+// הרצת שני המסלולים
 //
-// נר נסגר באחד משני אופנים, וזה שקורה ראשון קובע:
-//   (א) המזהה בסוף הבר הנוכחי שונה מזה שבתחילתו — הבר הזה סוגר את הנר.
-//       זה המקרה הרגיל, בלי פיגור של אף בר.
-//   (ב) המזהה של הבר החדש שונה מזה של הנר השמור — קורה כשיש פער בנתונים
-//       (הפסקת 17:00–18:00, סופ"ש), ואז הנר נסגר רטרואקטיבית.
-// דגל emitted מונע עיבוד כפול של אותו נר.
+// חשוב שהסדר יישמר: מסלול ב' דורס את מערכי ההקשר (cxRef/cxLife/cxBarO...)
+// עם הזמן של כל אינטרה-בר, ולכן מסלול א' ממלא אותם מחדש לפני שהוא רץ.
 // ═══════════════════════════════════════════════════════════════════
 
 var array<bool> firedA = array.new_bool(7, false)
@@ -672,54 +765,99 @@ if array.size(CLS) == 7
     for i = 0 to 6
         array.set(firedA, i, false)
 
-if barstate.isconfirmed and array.size(CLS) == 7
-    for i = 0 to 6
-        Cls c = array.get(CLS, i)
-        if c.on
-            int idNow  = array.get(obA, i)
-            int idNext = array.get(cbA, i)
+// ── מסלול ב': מחלקות מתחת ל-TF של הגרף, מוזנות מאינטרה-בארים ──
+//
+// שלושת הנכסים לא בהכרח מחזירים אותו מספר אינטרה-בארים — דקה בלי עסקאות
+// פשוט חסרה מהמערך — ולכן הזיווג הוא לפי חותמת זמן ולא לפי אינדקס. זיווג
+// לפי אינדקס היה מחליק נכס שלם בדקה ומייצר סטיות מדומות. NQ משמש כשעון,
+// והנכסים האחרים מסונכרנים אליו בהליכת מיזוג.
+if barstate.isconfirmed and lowerOn and array.size(CLS) == 7 and array.size(nqTa) > 0
+    int esN   = array.size(esTa)
+    int ymN   = array.size(ymTa)
+    int esCur = 0
+    int ymCur = 0
 
-            if na(c.barId) or idNow != c.barId
-                // (ב) נר שמור שעדיין לא עובד — סוגרים אותו עכשיו
-                if not na(c.barId) and not c.emitted
-                    if c.step()
+    for k = 0 to array.size(nqTa) - 1
+        int t = array.get(nqTa, k)
+
+        while esCur < esN - 1 and array.get(esTa, esCur) < t
+            esCur += 1
+        while ymCur < ymN - 1 and array.get(ymTa, ymCur) < t
+            ymCur += 1
+
+        // הבדיקות מפורשות ולא בתוך and/טרנרי: Pine לא מבטיח short-circuit,
+        // ו-array.get על מערך ריק הוא שגיאת זמן-ריצה שמפילה את הסקריפט.
+        bool esHit = false
+        bool ymHit = false
+        if esN > 0
+            esHit := array.get(esTa, esCur) == t
+        if ymN > 0
+            ymHit := array.get(ymTa, ymCur) == t
+
+        array.set(pxA, 0, array.get(nqOa, k))
+        array.set(pxA, 1, array.get(nqHa, k))
+        array.set(pxA, 2, array.get(nqLa, k))
+        array.set(pxA, 3, array.get(nqCa, k))
+
+        if esHit
+            array.set(pxA, 4, array.get(esOa, esCur))
+            array.set(pxA, 5, array.get(esHa, esCur))
+            array.set(pxA, 6, array.get(esLa, esCur))
+            array.set(pxA, 7, array.get(esCa, esCur))
+        else
+            array.set(pxA, 4, na)
+            array.set(pxA, 5, na)
+            array.set(pxA, 6, na)
+            array.set(pxA, 7, na)
+
+        if ymHit
+            array.set(pxA, 8,  array.get(ymOa, ymCur))
+            array.set(pxA, 9,  array.get(ymHa, ymCur))
+            array.set(pxA, 10, array.get(ymLa, ymCur))
+            array.set(pxA, 11, array.get(ymCa, ymCur))
+        else
+            array.set(pxA, 8,  na)
+            array.set(pxA, 9,  na)
+            array.set(pxA, 10, na)
+            array.set(pxA, 11, na)
+
+        f_ctx(t)
+        f_fillBarIds(t, cxBarO)
+        f_fillBarIds(t + fineMs, cxBarC)
+
+        // ‏for מ-0 עד chartIdx-1 היה רץ אחורה כש-chartIdx הוא 0, ולכן התנאי בפנים
+        for i = 0 to 6
+            if i < chartIdx
+                Cls c = array.get(CLS, i)
+                if c.on
+                    if c.feed(array.get(cxBarO, i), array.get(cxBarC, i), i)
                         array.set(firedA, i, true)
-                // פתיחת נר חדש
-                c.barId   := idNow
-                c.emitted := false
-                c.bNqO := nqO
-                c.bNqH := nqH
-                c.bNqL := nqL
-                c.bNqC := nqC
-                c.bEsO := esO
-                c.bEsH := esH
-                c.bEsL := esL
-                c.bEsC := esC
-                c.bYmO := ymO
-                c.bYmH := ymH
-                c.bYmL := ymL
-                c.bYmC := ymC
-                c.bRef  := array.get(refA, i)
-                c.bLife := array.get(lifeA, i)
-                c.bDow  := tdDow
-                c.bDead := isDeadWeek
-                c.bQ2   := array.get(q2A, i)
-            else
-                c.bNqH := math.max(c.bNqH, nqH)
-                c.bNqL := math.min(c.bNqL, nqL)
-                c.bNqC := nqC
-                c.bEsH := math.max(c.bEsH, esH)
-                c.bEsL := math.min(c.bEsL, esL)
-                c.bEsC := esC
-                c.bYmH := math.max(c.bYmH, ymH)
-                c.bYmL := math.min(c.bYmL, ymL)
-                c.bYmC := ymC
 
-            // (א) הבר הזה סוגר את הנר
-            if idNext != idNow and not c.emitted
-                if c.step()
+// ── מסלול א': מחלקות שהנר שלהן ≥ נר הגרף, מוזנות מנרות הגרף עצמם ──
+if barstate.isconfirmed and array.size(CLS) == 7
+    f_ctx(time)
+    f_fillBarIds(time, cxBarO)
+    f_fillBarIds(time_close, cxBarC)
+
+    array.set(pxA, 0,  nqO)
+    array.set(pxA, 1,  nqH)
+    array.set(pxA, 2,  nqL)
+    array.set(pxA, 3,  nqC)
+    array.set(pxA, 4,  esO)
+    array.set(pxA, 5,  esH)
+    array.set(pxA, 6,  esL)
+    array.set(pxA, 7,  esC)
+    array.set(pxA, 8,  ymO)
+    array.set(pxA, 9,  ymH)
+    array.set(pxA, 10, ymL)
+    array.set(pxA, 11, ymC)
+
+    for i = 0 to 6
+        if i >= chartIdx
+            Cls c = array.get(CLS, i)
+            if c.on
+                if c.feed(array.get(cxBarO, i), array.get(cxBarC, i), i)
                     array.set(firedA, i, true)
-                c.emitted := true
 
 // ═══════════════════════════════════════════════════════════════════
 // הרדאר — טבלה זעירה בפינה. שום ציור על פאנל המחיר.
@@ -753,7 +891,7 @@ if barstate.islast and array.size(CLS) == 7
 
         if not c.on
             txt := "n/a"
-            tip := c.nm + " — לא מחושבת בגרף הנוכחי.\nהנר שלה קצר מנר הגרף, או לא מתחלק בו בלי שארית.\n(תמיכה במסגרות נמוכות מהגרף מגיעה בשלב ב')"
+            tip := c.nm + " — לא מחושבת בגרף הנוכחי.\n" + (i < chartIdx ? (lowerCap ? "המסגרת כבויה בהגדרות, או נמוכה מזו שנמשכת בפועל." : "מעל 4H משיכת נתוני אינטרה-בר מושבתת — מספר האינטרה-בארים לבר בלתי-סביר.") : "הנר שלה לא מתחלק בנר הגרף בלי שארית, ולכן הוא לא יושב על הרשת שלו.")
         else if not c.warm
             txt := "?"
             tip := c.nm + " — אין עדיין מספיק היסטוריה בגרף הזה.\nהמיכל של המחלקה ארוך ממה שנטען, ולכן אין תשובה אמיתית להציג.\nעבור לגרף גבוה יותר כדי לקרוא את השורה הזו."
