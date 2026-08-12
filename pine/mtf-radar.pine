@@ -64,6 +64,8 @@ txtSize   = input.string("small", "גודל טקסט", options = ["tiny", "small
 colBull   = input.color(#26a69a, "צבע שורי", group = grpVis)
 colBear   = input.color(#ef5350, "צבע דובי", group = grpVis)
 hideEmpty = input.bool(false, "הסתר מסגרות בלי סיגנל", group = grpVis, tooltip = "מצב מינימלי — הרדאר מציג רק מסגרות זמן שיש בהן סטייה חיה כרגע.")
+showConf  = input.bool(true, "הצג שורת קונפליקט", group = grpVis, tooltip = "מופיעה רק כשמסגרת זמן נמוכה מצביעה לכיוון ההפוך מגבוהה שמעליה — בדיוק המצב שבו אתה בעסקה ומגיע תיקון נגדך.")
+myBias    = input.string("אין", "כיוון הפוזיציה שלי", options = ["אין", "לונג", "שורט"], group = grpVis, tooltip = "כשמוגדר, כל מסגרת זמן שהסיגנל שלה מנוגד לפוזיציה מסומנת ב-⚠.")
 
 grpFam = "משפחות סיגנל"
 useSSMT = input.bool(true, "SSMT / HSSMT — סטיית פתיל וסגירה", group = grpFam)
@@ -83,6 +85,9 @@ requireTrueOpen = input.bool(false, "סנן לפי True Open (פרימיום/ד�
 
 grpAlert = "התראות"
 alertOn    = input.bool(true, "הפעל התראות", group = grpAlert)
+alertS     = input.bool(true, "SSMT", group = grpAlert, inline = "af")
+alertF     = input.bool(true, "Fill", group = grpAlert, inline = "af")
+alertP     = input.bool(false, "PSP", group = grpAlert, inline = "af")
 alertScope = input.string("הגרף ומדרגה אחת מתחת", "אילו מסגרות יורות התראה", options = ["הכל", "הגרף ומעלה", "הגרף ומדרגה אחת מתחת"], group = grpAlert, tooltip = "מגביל את ההצפה ממסגרות זמן נמוכות. ההתראה עצמה היא קריאה אחת עם טקסט דינמי, כך שמספיק להגדיר אותה פעם אחת.")
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1221,10 +1226,38 @@ f_showPsp(Cls c) =>
     bool live = c.pspDir != 0 and c.pspRef == c.eRef
     [live ? c.pspDir : 0, c.pspBar]
 
-var table rad = table.new(f_tblPos(), 4, 9, border_width = 1, border_color = color.new(color.gray, 60))
+// הכיוון שהמחלקה "אומרת" כרגע — הסיגנל החי שנרשם אחרון מבין שלוש המשפחות.
+// זה מה שמזין את שורת הקונפליקט ואת סימון הפוזיציה.
+f_netDir(Cls c) =>
+    [d, t, s, b, r]       = f_show(c)
+    [fd, fdeg, flead, fb] = f_showFill(c)
+    [pd, pb]              = f_showPsp(c)
+    int best = -1
+    int nd   = 0
+    if d != 0 and useSSMT
+        int sq = d == -1 ? c.bearSeq : c.bullSeq
+        if sq > best
+            best := sq
+            nd   := d
+    if fd != 0 and useFill and c.fillSeq > best
+        best := c.fillSeq
+        nd   := fd
+    if pd != 0 and usePSP and c.pspSeq > best
+        best := c.pspSeq
+        nd   := pd
+    nd
+
+// סיגנל "טרי" = נרשם בתוך נר אחד של המחלקה שלו. מסגרות נמוכות מהגרף
+// נמדדות בנר אחד של הגרף, כי שם נרשם המידע.
+f_fresh(Cls c, b) =>
+    b > 0 and bar_index - b <= math.max(1, c.tf / chartTf)
+
+biasDir = myBias == "לונג" ? 1 : myBias == "שורט" ? -1 : 0
+
+var table rad = table.new(f_tblPos(), 4, 10, border_width = 1, border_color = color.new(color.gray, 60))
 
 if barstate.islast and array.size(CLS) == 7
-    table.clear(rad, 0, 0, 3, 8)
+    table.clear(rad, 0, 0, 3, 9)
 
     color hdrBg  = color.new(color.gray, 30)
     color cellBg = color.new(#0d1117, 20)
@@ -1312,13 +1345,56 @@ if barstate.islast and array.size(CLS) == 7
             pTxt  := pd == 1 ? "▲" : "▼"
             pTip  := c.nm + " · " + (pd == 1 ? "שורי — סווינג נמוך מאושר" : "דובי — סווינג גבוה מאושר") + "\nנרשם לפני " + str.tostring(bar_index - pb) + " נרות של הגרף"
 
+        // ── תווית ה-TF: נושאת טריות, סימון הגרף הנוכחי, וקונפליקט עם הפוזיציה ──
+        int  nd    = f_netDir(c)
+        bool fresh = (d != 0 and f_fresh(c, b)) or (fd != 0 and f_fresh(c, fb)) or (pd != 0 and f_fresh(c, pb))
+        bool vsMe  = biasDir != 0 and nd != 0 and nd != biasDir
+
+        string nmTxt = (isChartTf ? "▸ " : "") + (fresh ? "• " : "") + c.nm + (vsMe ? " ⚠" : "")
+        color  nmBg  = isChartTf ? color.new(color.gray, 55) : cellBg
+        color  nmTxtC = isChartTf ? color.white : color.new(color.silver, 20)
+        if fresh and nd != 0
+            nmBg := color.new(nd == 1 ? colBull : colBear, 75)
+            nmTxtC := color.white
+        string nmTip = sTip + (vsMe ? "\n\n⚠ הכיוון כאן מנוגד לפוזיציה שהגדרת." : "") + (fresh ? "\n\n• נרשם עכשיו — בתוך נר אחד של המסגרת הזו." : "")
+
         bool quiet = c.on and c.warm and d == 0 and fd == 0 and pd == 0
         if not (hideEmpty and quiet)
-            table.cell(rad, 0, row, (isChartTf ? "▸ " : "") + c.nm, bgcolor = isChartTf ? color.new(color.gray, 55) : cellBg, text_color = isChartTf ? color.white : color.new(color.silver, 20), text_size = txtSize, tooltip = sTip)
+            table.cell(rad, 0, row, nmTxt, bgcolor = nmBg, text_color = nmTxtC, text_size = txtSize, tooltip = nmTip)
             table.cell(rad, 1, row, sTxt, bgcolor = sBg, text_color = sTxtC, text_size = txtSize, tooltip = sTip)
             table.cell(rad, 2, row, fTxt, bgcolor = fBg, text_color = fTxtC, text_size = txtSize, tooltip = fTip)
             table.cell(rad, 3, row, pTxt, bgcolor = pBg, text_color = pTxtC, text_size = txtSize, tooltip = pTip)
             row += 1
+
+    // ── שורת קונפליקט ──
+    // מופיעה רק כשהמסגרת המהירה ביותר שיש בה סיגנל מצביעה הפוך מהאיטית
+    // ביותר שיש בה סיגנל. זה התרחיש של עסקה פתוחה שמגיע אליה תיקון:
+    // אין צורך לפרש את הטבלה, השורה אומרת את זה במפורש.
+    if showConf and row <= 8
+        int fastI = -1
+        int slowI = -1
+        int fastD = 0
+        int slowD = 0
+        for i = 0 to 6
+            Cls c = array.get(CLS, i)
+            if c.on and c.warm
+                int cnd = f_netDir(c)
+                if cnd != 0
+                    if fastI == -1
+                        fastI := i
+                        fastD := cnd
+                    slowI := i
+                    slowD := cnd
+
+        if fastI != -1 and slowI != fastI and fastD != slowD
+            Cls cf = array.get(CLS, fastI)
+            Cls cs2 = array.get(CLS, slowI)
+            string ct = "⚠ " + cf.nm + (fastD == 1 ? " ▲" : " ▼") + " מול " + cs2.nm + (slowD == 1 ? " ▲" : " ▼")
+            color  cc = color.new(#f9a825, 0)
+            table.cell(rad, 0, row, ct, bgcolor = color.new(#f9a825, 82), text_color = cc, text_size = txtSize, tooltip = "המסגרת המהירה מצביעה הפוך מהאיטית.\nאם אתה בפוזיציה לכיוון האיטית, זה בדיוק המצב שבו יכול לבוא תיקון נגדך.")
+            table.cell(rad, 1, row, "", bgcolor = color.new(#f9a825, 82))
+            table.cell(rad, 2, row, "", bgcolor = color.new(#f9a825, 82))
+            table.cell(rad, 3, row, "", bgcolor = color.new(#f9a825, 82))
 
 // ═══════════════════════════════════════════════════════════════════
 // התראה — קריאה אחת עם טקסט דינמי, כדי שמספיק להגדיר אותה פעם אחת
@@ -1332,17 +1408,27 @@ if alertOn and barstate.isconfirmed and array.size(CLS) == 7
     for i = 0 to 6
         Cls c = array.get(CLS, i)
         if f_alertOK(i)
-            if array.get(firedS, i)
+            if alertS and array.get(firedS, i)
                 [ad, at, astr, abar, aref] = f_show(c)
                 if ad != 0
                     body := body + (body != "" ? " | " : "") + c.nm + " " + (ad == 1 ? "שורי" : "דובי") + " " + (at == 2 ? "HSSMT" : "SSMT") + " · " + astr
-            if array.get(firedF, i)
+            if alertF and array.get(firedF, i)
                 [fad, fadeg, falead, fabar] = f_showFill(c)
                 if fad != 0
                     body := body + (body != "" ? " | " : "") + c.nm + " " + (fad == 1 ? "שורי" : "דובי") + " Fill F" + str.tostring(fadeg) + " · " + falead
-            if array.get(firedP, i)
+            if alertP and array.get(firedP, i)
                 [pad, pabar] = f_showPsp(c)
                 if pad != 0
                     body := body + (body != "" ? " | " : "") + c.nm + " " + (pad == 1 ? "שורי" : "דובי") + " PSP"
+
     if body != ""
-        alert(syminfo.ticker + " · " + body, alert.freq_once_per_bar_close)
+        // אם הוגדרה פוזיציה, ההתראה אומרת מיד אם הסיגנל נגדה — זה ההבדל
+        // בין "קרה משהו" לבין "קרה משהו שנוגע לך".
+        string tail = ""
+        if biasDir != 0
+            for i = 0 to 6
+                Cls c = array.get(CLS, i)
+                bool anyFired = array.get(firedS, i) or array.get(firedF, i) or array.get(firedP, i)
+                if anyFired and f_alertOK(i) and f_netDir(c) != 0 and f_netDir(c) != biasDir
+                    tail := "  ⚠ נגד הפוזיציה"
+        alert(syminfo.ticker + " · " + body + tail, alert.freq_once_per_bar_close)
