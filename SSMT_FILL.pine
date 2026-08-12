@@ -448,6 +448,10 @@ friBlock = (tfClass == 5 or tfClass == 4) and tdDow == dayofweek.friday
 
 atr = ta.atr(14)
 
+// שם קריא למסגרת הזמן — כדי שבהתראה בנייד יהיה ברור מיד מאיפה היא הגיעה
+f_tfName() =>
+    tfClass == 7 ? "1W" : tfClass == 6 ? "1D" : tfClass == 5 ? "4H" : tfClass == 4 ? "1H" : tfClass == 3 ? "15m" : tfClass == 2 ? "5m" : "1m"
+
 var int seqCounter = 0
 
 // נאסף במהלך הסריקה ונשלח פעם אחת בסוף הנר, כדי שכמה שבירות באותו נר
@@ -473,7 +477,7 @@ if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK and array.
                 if alertOn and deg >= alertMinDeg
                     float aTop = isESc ? gr.esTop : gr.nqTop
                     float aBot = isESc ? gr.esBot : gr.nqBot
-                    string one = syminfo.ticker + " " + timeframe.period + " · שבירה " + (gr.dir == 1 ? "שורית" : "דובית") + " F" + str.tostring(deg) + " · מוביל " + gr.fLead + " · גאפ " + str.tostring(aBot, format.mintick) + "-" + str.tostring(aTop, format.mintick)
+                    string one = "[" + f_tfName() + "] " + syminfo.ticker + " · שבירה " + (gr.dir == 1 ? "שורית" : "דובית") + " F" + str.tostring(deg) + " · מוביל " + gr.fLead + " · גאפ " + str.tostring(aBot, format.mintick) + "-" + str.tostring(aTop, format.mintick)
                     alertMsg := alertMsg == "" ? one : alertMsg + "\n" + one
 
 if alertMsg != ""
