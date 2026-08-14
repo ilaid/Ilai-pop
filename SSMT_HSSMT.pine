@@ -20,9 +20,9 @@ colBear    = input.color(#ef5350, "צבע דובי", group = grpVis)
 labelSize  = input.string("small", "גודל תווית", options = ["tiny", "small", "normal"], group = grpVis)
 offsetMlt  = input.float(1.5, "מרחק התווית מהנר (ATR)", minval = 0.1, maxval = 6.0, step = 0.1, group = grpVis)
 showLine   = input.bool(true, "הצג קו שבירה", group = grpVis)
-lineMode   = input.string("אלכסוני", "סגנון קו", options = ["אלכסוני", "אופקי"], group = grpVis)
-lineWidth  = input.int(1, "עובי קו", minval = 1, maxval = 4, group = grpVis)
-showDots   = input.bool(true, "נקודות בקצות הקו", group = grpVis)
+lineMode   = input.string("אופקי", "סגנון קו", options = ["אופקי", "אלכסוני"], group = grpVis)
+lineWidth  = input.int(2, "עובי קו", minval = 1, maxval = 4, group = grpVis)
+showDots   = input.bool(false, "נקודות בקצות הקו", group = grpVis)
 showDebug  = input.bool(false, "הצג טבלת בדיקה", group = grpVis)
 
 grpLogic = "לוגיקה"
