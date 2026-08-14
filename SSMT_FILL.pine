@@ -59,8 +59,8 @@ showBox   = input.bool(true, "הצג קופסת גאפ", group = grpVis)
 boxTransp = input.int(90, "שקיפות המילוי", minval = 50, maxval = 98, group = grpVis)
 boxBorder = input.int(45, "שקיפות המסגרת", minval = 0, maxval = 95, group = grpVis)
 boxLen    = input.string("עד הנר הנוכחי", "אורך הקופסה", options = ["עד הנר הנוכחי", "עד נר השבירה", "קצר (12 נרות)"], group = grpVis)
-// כיתוב אחד בלבד. תג בקצה הקופסה נקרא גם כשהקופסה צרה, ולא מתנגש בנרות.
-labelMode = input.string("תג בקצה הקופסה", "סגנון הכיתוב", options = ["תג בקצה הקופסה", "תווית ליד הנר", "בלי כיתוב"], group = grpVis)
+// כיתוב אחד בלבד, לא שניים. "בתוך הקופסה" דורש שהקופסה עצמה תהיה דלוקה.
+labelMode = input.string("בתוך הקופסה", "סגנון הכיתוב", options = ["בתוך הקופסה", "תג בקצה הקופסה", "תווית ליד הנר", "בלי כיתוב"], group = grpVis)
 showCE    = input.bool(false, "הצג קו CE (חצי גאפ)", group = grpVis)
 // מצייר כל גאפ קולקטיבי חי, לא רק את זה שנושא את השבירה. מסומן #id,
 // ו-✕ מסמן גאפ שעדיין לא נדרך. שימושי לבדוק מה בדיוק הזיהוי מצא.
@@ -80,14 +80,18 @@ grpMtf = "מסגרות זמן"
 // המנוע רץ שוב, בנפרד לגמרי, על כל מסגרת זמן אחרת — עם אותם חוקים בדיוק.
 // כך אפשר לשבת על 5 דקות ולראות שנסגר נר 15 דקות שיצר שבירה, בלי להחליף
 // גרף ובלי להקים התראה נפרדת לכל מסגרת.
-showMtf      = input.bool(true, "הצג פאנל מסגרות זמן", group = grpMtf)
+// הפאנל כבוי כברירת מחדל — הוא נותן תמונה מלאה של כל המסגרות, אבל תופס
+// מקום על המסך. הדלק אותו כשאתה רוצה להיכנס לפרטים.
+showMtf      = input.bool(false, "הצג פאנל מסגרות זמן", group = grpMtf)
 // מסגרות נמוכות נמשכות כתת-נרות (request.security_lower_tf). טריידינגויו מגביל
 // את כמות תת-הנרות, ולכן ככל שיורדים יותר מדרגות ההיסטוריה מתקצרת והחישוב כבד
 // יותר. 2 מדרגות זו נקודת האיזון; 0 מכבה את זה לגמרי.
 lowerLevels  = input.int(2, "כמה מדרגות מתחת לגרף", minval = 0, maxval = 3, group = grpMtf)
 mtfPos       = input.string("ימין למטה", "מיקום הפאנל", options = ["ימין למטה", "ימין למעלה", "ימין באמצע", "שמאל למטה", "שמאל למעלה"], group = grpMtf)
-mtfFlash     = input.bool(true, "הבלט שבירה חדשה + סימון זעיר על הגרף", group = grpMtf)
-mtfFlashBars = input.int(6, "כמה נרות להשאיר את ההבלטה", minval = 1, maxval = 200, group = grpMtf)
+// זה מה שרץ כשהפאנל כבוי: טקסט זעיר מעל הנר האחרון שאומר שנסגרה שבירה
+// במסגרת אחרת, נעלם מעצמו אחרי כמה דקות.
+mtfFlash     = input.bool(true, "סימון זעיר כששבירה נולדת במסגרת אחרת", group = grpMtf)
+mtfFlashMin  = input.int(10, "כמה דקות להשאיר את הסימון", minval = 1, maxval = 240, group = grpMtf)
 mtfAlert     = input.bool(true, "כלול שבירות ממסגרות אחרות בהתראה", group = grpMtf)
 
 // ═══════════════════════════════════════════════════════════════════
@@ -339,7 +343,7 @@ type Engine
     int          fDeg
     string       fLead
     int          fSeq
-    int          fBar       // נר הגרף שבו נרשמה — לחישוב "טרייה"
+    int          fTime      // זמן הסגירה שבו נרשמה — לחישוב "טרייה"
     bool         justFired
 
 // כל מזהי המחזורים מתוך חותמת זמן של נר, לפי מחלקת מסגרת הזמן.
@@ -534,7 +538,7 @@ f_step(Engine e, int tOpen, float no0, float nh0, float nl0, float nc0, float no
             e.fLead    := gd.fLead
             if gd.fSeq > e.fSeq
                 e.fSeq      := gd.fSeq
-                e.fBar      := bar_index
+                e.fTime     := time_close
                 e.justFired := true
     e.fDeg
 
@@ -804,7 +808,7 @@ if selIdx != -1
 // ולכן ההיסטוריה שם קצרה יותר — המצב מתייצב אחרי שהמיכל הראשון מתחלף.
 // ═══════════════════════════════════════════════════════════════════
 
-mtfOn = (showMtf or mtfAlert) and tfClass != 0
+mtfOn = (showMtf or mtfAlert or mtfFlash) and tfClass != 0
 
 c1 = math.min(tfClass + 1, 7)
 c2 = math.min(tfClass + 2, 7)
@@ -852,16 +856,16 @@ tfl3 = cL3 == 1 ? "1" : cL3 == 2 ? "5" : cL3 == 3 ? "15" : cL3 == 4 ? "60" : cL3
 [q2eo, q2eh, q2el, q2ec] = request.security_lower_tf(sES, tfl2, [open, high, low, close], ignore_invalid_timeframe = true)
 [q3eo, q3eh, q3el, q3ec] = request.security_lower_tf(sES, tfl3, [open, high, low, close], ignore_invalid_timeframe = true)
 
-var Engine eg1 = Engine.new(c1, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, -99999, false)
-var Engine eg2 = Engine.new(c2, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, -99999, false)
-var Engine eg3 = Engine.new(c3, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, -99999, false)
-var Engine eg4 = Engine.new(c4, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, -99999, false)
-var Engine eg5 = Engine.new(c5, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, -99999, false)
-var Engine eg6 = Engine.new(c6, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, -99999, false)
+var Engine eg1 = Engine.new(c1, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, false)
+var Engine eg2 = Engine.new(c2, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, false)
+var Engine eg3 = Engine.new(c3, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, false)
+var Engine eg4 = Engine.new(c4, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, false)
+var Engine eg5 = Engine.new(c5, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, false)
+var Engine eg6 = Engine.new(c6, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, false)
 
-var Engine el1 = Engine.new(cL1, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, -99999, false)
-var Engine el2 = Engine.new(cL2, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, -99999, false)
-var Engine el3 = Engine.new(cL3, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, -99999, false)
+var Engine el1 = Engine.new(cL1, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, false)
+var Engine el2 = Engine.new(cL2, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, false)
+var Engine el3 = Engine.new(cL3, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, false)
 
 // אילו מדרגות באמת קיימות ונצעדות
 useH1 = tfClass + 1 <= 7
@@ -925,23 +929,23 @@ if mtfOn and barstate.isconfirmed
 var array<int>    pDir  = array.new_int(7, -9)   // -9 = אין נתונים למסגרת הזאת
 var array<int>    pDeg  = array.new_int(7, 0)
 var array<string> pLead = array.new_string(7, "")
-var array<int>    pBar  = array.new_int(7, -99999)
+var array<int>    pTime = array.new_int(7, 0)
 
 // טריות השבירה של מסגרת הגרף עצמה
-var int chartFSeq = 0
-var int chartFBar = -99999
+var int chartFSeq  = 0
+var int chartFTime = 0
 if selIdx != -1
     Gap gfr = array.get(gaps, selIdx)
     if gfr.fSeq > chartFSeq
-        chartFSeq := gfr.fSeq
-        chartFBar := bar_index
+        chartFSeq  := gfr.fSeq
+        chartFTime := time_close
 
 f_fill(array<int> ad, array<int> ag, array<string> al, array<int> ab, Engine e) =>
     int ix = e.cls - 1
     array.set(ad, ix, e.fDir)
     array.set(ag, ix, e.fDeg)
     array.set(al, ix, e.fLead)
-    array.set(ab, ix, e.fBar)
+    array.set(ab, ix, e.fTime)
 
 if barstate.islast and tfClass != 0
     for ix = 0 to 6
@@ -950,16 +954,16 @@ if barstate.islast and tfClass != 0
     array.set(pDir,  tfClass - 1, selIdx == -1 ? 0 : array.get(gaps, selIdx).dir)
     array.set(pDeg,  tfClass - 1, selIdx == -1 ? 0 : array.get(gaps, selIdx).fDeg)
     array.set(pLead, tfClass - 1, selIdx == -1 ? "" : array.get(gaps, selIdx).fLead)
-    array.set(pBar,  tfClass - 1, chartFBar)
+    array.set(pTime, tfClass - 1, chartFTime)
     if mtfOn and array.size(allEng) > 0
         for k = 0 to array.size(allEng) - 1
             if f_useSlot(k)
-                f_fill(pDir, pDeg, pLead, pBar, array.get(allEng, k))
+                f_fill(pDir, pDeg, pLead, pTime, array.get(allEng, k))
 
 // ── שבירה טרייה במסגרת אחרת: סימון זעיר על הגרף + שורה בהתראה ──
-var string flashTxt = ""
-var int    flashDir = 0
-var int    flashBar = -99999
+var string flashTxt  = ""
+var int    flashDir  = 0
+var int    flashTime = 0
 
 // כל מנוע שנשבר בנר הזה נכנס להתראה. הסימון הקטן על הגרף מציג את האחרון
 // שנמצא — הפרטים המלאים ממילא יושבים בפאנל.
@@ -968,8 +972,8 @@ if mtfOn and barstate.isconfirmed and array.size(allEng) > 0
         Engine ek = array.get(allEng, k)
         if f_useSlot(k) and ek.justFired
             flashTxt := f_clsName(ek.cls) + " " + (ek.fDir == 1 ? "▲" : "▼") + str.tostring(ek.fDeg)
-            flashDir := ek.fDir
-            flashBar := bar_index
+            flashDir  := ek.fDir
+            flashTime := time_close
             if mtfAlert and alertOn and ek.fDeg >= alertMinDeg
                 string one = "[" + f_clsName(ek.cls) + "] " + syminfo.ticker + " · שבירה " + (ek.fDir == 1 ? "שורית" : "דובית") + " F" + str.tostring(ek.fDeg) + " · מוביל " + ek.fLead
                 alertMsg := alertMsg == "" ? one : alertMsg + "\n" + one
@@ -1002,12 +1006,13 @@ if showMtf and barstate.islast and tfClass != 0
     for cc = 7 to 1
         if array.get(pDir, cc - 1) != -9
             rowN := rowN + 1
-            f_mtfRow(mtfT, rowN, f_clsName(cc), array.get(pDir, cc - 1), array.get(pDeg, cc - 1), array.get(pLead, cc - 1), mtfFlash and bar_index - array.get(pBar, cc - 1) <= mtfFlashBars, cc == tfClass)
+            f_mtfRow(mtfT, rowN, f_clsName(cc), array.get(pDir, cc - 1), array.get(pDeg, cc - 1), array.get(pLead, cc - 1), timenow - array.get(pTime, cc - 1) <= mtfFlashMin * 60000, cc == tfClass)
 
 // ── סימון זעיר על הגרף כששבירה נולדה במסגרת אחרת ──
 //
-// בכוונה טקסט קטן בלי בועה ובלי קופסה: המטרה היא לדעת שקרה משהו במקום אחר,
-// לא לצייר אותו. הפרטים המלאים יושבים בפאנל.
+// זה הדבר היחיד שרואים על המסך כשהפאנל כבוי: טקסט קטן בלי בועה ובלי קופסה,
+// שנעלם מעצמו אחרי כמה דקות. המטרה היא לדעת שקרה משהו במקום אחר — לא לצייר
+// אותו. מי שרוצה את התמונה המלאה מדליק את הפאנל.
 
 var label mtfLbl = na
 
@@ -1015,7 +1020,7 @@ if barstate.islast
     if not na(mtfLbl)
         label.delete(mtfLbl)
         mtfLbl := na
-    if mtfFlash and mtfOn and flashTxt != "" and bar_index - flashBar <= mtfFlashBars
+    if mtfFlash and mtfOn and flashTxt != "" and timenow - flashTime <= mtfFlashMin * 60000
         mtfLbl := label.new(bar_index, high + atr * offsetMlt * 1.6, flashTxt, style = label.style_none, textcolor = flashDir == 1 ? colBull : colBear, size = size.tiny, textalign = text.align_center)
 
 
@@ -1048,21 +1053,24 @@ if shownSeq != drawnSeq or shownDeg != drawnDeg
         // הדרגה משנה רק את עוצמת המסגרת. המילוי נשאר שקוף באותה מידה כדי
         // שהנרות מתחתיו יישארו קריאים.
         color  cEdge = color.new(col, gd.fDeg == 3 ? boxBorder : gd.fDeg == 2 ? math.min(boxBorder + 20, 95) : math.min(boxBorder + 35, 95))
+        // הטקסט לא הולך אחרי שקיפות המסגרת — הוא חייב להישאר קריא גם ב-F1.
+        color  cTxt  = color.new(col, gd.fDeg == 3 ? 0 : gd.fDeg == 2 ? 15 : 30)
         float  gTop = isESc ? gd.esTop : gd.nqTop
         float  gBot = isESc ? gd.esBot : gd.nqBot
         float  gMid = (gTop + gBot) / 2
         string txt  = "F" + str.tostring(gd.fDeg) + " " + gd.fLead
         int    xEnd = boxLen == "עד נר השבירה" ? gd.fSigB : boxLen == "קצר (12 נרות)" ? gd.fSigB + 12 : bar_index
         xEnd := math.max(xEnd, gd.origin + 1)
+        bool inBox = labelMode == "בתוך הקופסה"
         if showBox
             // הקופסה מתחילה מהנר הראשון של ה-FVG כדי שתשב על התבנית שיצרה
-            // את הגאפ. בלי טקסט בפנים — הכיתוב יושב במקום אחד בלבד.
-            aBox := box.new(gd.origin, gTop, xEnd, gBot, border_color = cEdge, border_width = 1, bgcolor = color.new(col, boxTransp))
+            // את הגאפ, והכיתוב יושב בתוכה — צמוד לימין, בגובה האמצע.
+            aBox := box.new(gd.origin, gTop, xEnd, gBot, border_color = cEdge, border_width = 1, bgcolor = color.new(col, boxTransp), text = inBox ? txt : "", text_color = cTxt, text_size = labelSize, text_halign = text.align_right, text_valign = text.align_center)
         if labelMode == "תג בקצה הקופסה"
             // תג צמוד לקצה הימני, בגובה אמצע הגאפ — נקרא גם כשהקופסה דקה מאוד.
             aLbl := label.new(xEnd, gMid, txt, style = label.style_label_left, color = color.new(col, 20), textcolor = color.white, size = labelSize)
         else if labelMode == "תווית ליד הנר"
-            aLbl := label.new(gd.fSigB, gd.fYPos, txt, style = label.style_none, textcolor = col, size = labelSize, textalign = text.align_center)
+            aLbl := label.new(gd.fSigB, gd.fYPos, txt, style = label.style_none, textcolor = cTxt, size = labelSize, textalign = text.align_center)
         if showCE
             aCE := line.new(gd.origin, gMid, xEnd, gMid, color = color.new(col, 40), style = line.style_dashed, width = 1)
     drawnSeq := shownSeq
@@ -1241,8 +1249,8 @@ if showDebug and barstate.islast
 // ═══════════════════════════════════════════════════════════════════
 // שליחת ההתראה — פעם אחת בסוף הנר
 //
-// ההודעה נאספה משבירות של מסגרת הגרף וגם של המסגרות שמעליה, ולכן
-// התראה אחת שמוקמת על גרף 5 דקות מכסה גם את 15m/1H/4H/1D/1W.
+// ההודעה נאספה משבירות של מסגרת הגרף וגם של כל המסגרות האחרות, ולכן
+// התראה אחת שמוקמת על גרף אחד מכסה את כולן.
 // ═══════════════════════════════════════════════════════════════════
 
 if alertMsg != ""
