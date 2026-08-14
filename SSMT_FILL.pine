@@ -981,7 +981,7 @@ f_time(int b) =>
     int off = bar_index - b
     b <= 0 or off < 0 ? "-" : str.format_time(time[off], "HH:mm", TZ)
 // תת-מחזור ומיכל בשמות, לאימות שהמיפוי נכון למסגרת הזמן שנבחרה
-f_cycles() =>
+f_cycleNames() =>
     tfClass == 7 ? "שנה>4 שנים" : tfClass == 6 ? "רבעון>שנה" : tfClass == 5 ? "שבוע>חודש" : tfClass == 4 ? "יום>שבוע" : tfClass == 3 ? "סשן>יום" : tfClass == 2 ? "מיקרו>סשן" : tfClass == 1 ? "רבע>מיקרו" : "לא נתמך"
 
 var table dbg = table.new(position.top_right, 3, 13, border_width = 1)
@@ -1054,7 +1054,7 @@ if showDebug and barstate.islast
     table.cell(dbg, 2, 0, "ES", bgcolor = hc, text_color = wc)
 
     table.cell(dbg, 0, 1, "סייקל/גאפים", bgcolor = hc, text_color = wc)
-    table.cell(dbg, 1, 1, f_cycles(), bgcolor = wc)
+    table.cell(dbg, 1, 1, f_cycleNames(), bgcolor = wc)
     table.cell(dbg, 2, 1, str.tostring(tArmed) + " arm/" + str.tostring(tLive) + " live", bgcolor = wc)
 
     // הסדרות שמהן נקראים הנתונים. חייבות להתאים למשפחת החוזים של הגרף,
