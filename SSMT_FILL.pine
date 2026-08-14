@@ -56,8 +56,11 @@ colBear   = input.color(#ef5350, "צבע דובי", group = grpVis)
 labelSize = input.string("small", "גודל תווית", options = ["tiny", "small", "normal"], group = grpVis)
 offsetMlt = input.float(1.5, "מרחק התווית מהנר (ATR)", minval = 0.1, maxval = 6.0, step = 0.1, group = grpVis)
 showBox   = input.bool(true, "הצג קופסת גאפ", group = grpVis)
-boxTransp = input.int(85, "שקיפות הקופסה", minval = 50, maxval = 98, group = grpVis)
-showLabel = input.bool(true, "הצג תווית מרחפת בנר השבירה", group = grpVis)
+boxTransp = input.int(90, "שקיפות המילוי", minval = 50, maxval = 98, group = grpVis)
+boxBorder = input.int(45, "שקיפות המסגרת", minval = 0, maxval = 95, group = grpVis)
+boxLen    = input.string("עד הנר הנוכחי", "אורך הקופסה", options = ["עד הנר הנוכחי", "עד נר השבירה", "קצר (12 נרות)"], group = grpVis)
+// כיתוב אחד בלבד. תג בקצה הקופסה נקרא גם כשהקופסה צרה, ולא מתנגש בנרות.
+labelMode = input.string("תג בקצה הקופסה", "סגנון הכיתוב", options = ["תג בקצה הקופסה", "תווית ליד הנר", "בלי כיתוב"], group = grpVis)
 showCE    = input.bool(false, "הצג קו CE (חצי גאפ)", group = grpVis)
 // מצייר כל גאפ קולקטיבי חי, לא רק את זה שנושא את השבירה. מסומן #id,
 // ו-✕ מסמן גאפ שעדיין לא נדרך. שימושי לבדוק מה בדיוק הזיהוי מצא.
@@ -79,6 +82,10 @@ grpMtf = "מסגרות זמן גבוהות"
 // בלי להחליף גרף ובלי להקים התראה נפרדת לכל מסגרת.
 // מסגרות נמוכות מהגרף אינן מחושבות — אין להן נתונים אמינים מגרף גבוה יותר.
 showMtf      = input.bool(true, "הצג פאנל מסגרות זמן", group = grpMtf)
+// מסגרות נמוכות נמשכות כתת-נרות (request.security_lower_tf). טריידינגויו מגביל
+// את כמות תת-הנרות, ולכן ככל שיורדים יותר מדרגות ההיסטוריה מתקצרת והחישוב כבד
+// יותר. 2 מדרגות זו נקודת האיזון; 0 מכבה את זה לגמרי.
+lowerLevels  = input.int(2, "כמה מדרגות מתחת לגרף", minval = 0, maxval = 3, group = grpMtf)
 mtfPos       = input.string("ימין למטה", "מיקום הפאנל", options = ["ימין למטה", "ימין למעלה", "ימין באמצע", "שמאל למטה", "שמאל למעלה"], group = grpMtf)
 mtfFlash     = input.bool(true, "הבלט שבירה חדשה + תווית על הגרף", group = grpMtf)
 mtfFlashBars = input.int(6, "כמה נרות להשאיר את ההבלטה", minval = 1, maxval = 200, group = grpMtf)
@@ -312,27 +319,36 @@ f_clsName(int c) =>
 // ═══════════════════════════════════════════════════════════════════
 
 type Engine
-    int        cls        // מחלקת מסגרת הזמן (1..7)
-    array<Gap> gaps
-    int        gapCounter
-    int        seqCounter
-    bool       seedActive
-    int        seedRefId
-    int        refId      // תת-המחזור של הצעד הקודם
-    int        lifeId     // המיכל של הצעד הקודם
-    bool       started
-    int        lastT      // זמן הפתיחה של הנר שכבר עובד — מונע צעד כפול
-    int        shownDir
-    int        fDir       // השבירה המוצגת של המנוע
-    int        fDeg
-    string     fLead
-    int        fSeq
-    int        fBar       // נר הגרף שבו נרשמה — לחישוב "טרייה"
-    bool       justFired
+    int          cls        // מחלקת מסגרת הזמן (1..7)
+    array<Gap>   gaps
+    array<float> hN         // שני הנרות הקודמים של NQ: [o1,h1,l1,c1,o2,h2,l2,c2]
+    array<float> hE         // אותו דבר ל-ES. משמש רק את מסלול המסגרות הנמוכות.
+    int          gapCounter
+    int          seqCounter
+    bool         seedActive
+    int          seedRefId
+    int          refId      // תת-המחזור של הצעד הקודם
+    int          lifeId     // המיכל של הצעד הקודם
+    bool         started
+    int          lastT      // זמן הפתיחה של הנר שכבר עובד — מונע צעד כפול
+    int          shownDir
+    int          curRef     // המחזורים של הנר הנוכחי, נכתבים ע"י f_setCycles
+    int          curLife
+    bool         curDead
+    int          curDow
+    int          fDir       // השבירה המוצגת של המנוע
+    int          fDeg
+    string       fLead
+    int          fSeq
+    int          fBar       // נר הגרף שבו נרשמה — לחישוב "טרייה"
+    bool         justFired
 
 // כל מזהי המחזורים מתוך חותמת זמן של נר, לפי מחלקת מסגרת הזמן.
 // זהה לחישוב שרץ למעלה על נרות הגרף, רק שהוא מקבל את הזמן כפרמטר.
-f_cycles(int t, int c) =>
+// התוצאה נכתבת לתוך המנוע ולא מוחזרת כטאפל, כדי שאפשר יהיה לקרוא לזה גם
+// מתוך לולאה על תת-נרות.
+f_setCycles(Engine e, int t) =>
+    int  c    = e.cls
     int  eh   = hour(t, TZ)
     int  em   = minute(t, TZ)
     int  mnd  = eh * 60 + em
@@ -365,13 +381,22 @@ f_cycles(int t, int c) =>
     int  qdId = int(math.floor(yy / 4.0))
     int  rf   = c == 7 ? yy   : c == 6 ? qtId : c == 5 ? wkId : c == 4 ? tdId : c == 3 ? ssId : c == 2 ? ucId : qrId
     int  lf   = c == 7 ? qdId : c == 6 ? yy   : c == 5 ? mnId : c == 4 ? wkId : c == 3 ? tdId : c == 2 ? ssId : ucId
-    [rf, lf, dead, dw]
+    e.curRef  := rf
+    e.curLife := lf
+    e.curDead := dead
+    e.curDow  := dw
+    rf
 
 // צעד אחד של המנוע. הנרות: 0 = הנר האחרון שנסגר · 1 · 2 = הקודמים לו.
-f_step(Engine e, int tOpen, int rf, int lf, bool deadW, int dow, float no0, float nh0, float nl0, float nc0, float no1, float nc1, float nh2, float nl2, float nc2, float eo0, float eh0, float el0, float ec0, float eo1, float ec1, float eh2, float el2, float ec2) =>
+f_step(Engine e, int tOpen, float no0, float nh0, float nl0, float nc0, float no1, float nc1, float nh2, float nl2, float nc2, float eo0, float eh0, float el0, float ec0, float eo1, float ec1, float eh2, float el2, float ec2) =>
     e.justFired := false
     if not na(tOpen) and tOpen != e.lastT and not na(nc0) and not na(ec0)
         e.lastT := tOpen
+        f_setCycles(e, tOpen)
+        int  rf    = e.curRef
+        int  lf    = e.curLife
+        bool deadW = e.curDead
+        int  dow   = e.curDow
 
         // ── החלפת מיכל + זרע ──
         bool keepLast = e.cls == 4 or e.cls == 6 or e.cls == 7
@@ -512,6 +537,24 @@ f_step(Engine e, int tOpen, int rf, int lf, bool deadW, int dow, float no0, floa
                 e.fSeq      := gd.fSeq
                 e.fBar      := bar_index
                 e.justFired := true
+    e.fDeg
+
+// הזנת נר בודד ממסגרת נמוכה מהגרף. שם אין דרך לבקש נרות מוסטים, ולכן המנוע
+// מחזיק בעצמו את שני הנרות הקודמים ומזיז אותם אחרי כל צעד.
+f_pushLtf(Engine e, int t, float no, float nh, float nl, float nc, float eo, float eh, float el, float ec) =>
+    if not na(t) and t != e.lastT and not na(nc) and not na(ec)
+        f_step(e, t, no, nh, nl, nc, array.get(e.hN, 0), array.get(e.hN, 3), array.get(e.hN, 5), array.get(e.hN, 6), array.get(e.hN, 7), eo, eh, el, ec, array.get(e.hE, 0), array.get(e.hE, 3), array.get(e.hE, 5), array.get(e.hE, 6), array.get(e.hE, 7))
+        for q = 0 to 3
+            array.set(e.hN, q + 4, array.get(e.hN, q))
+            array.set(e.hE, q + 4, array.get(e.hE, q))
+        array.set(e.hN, 0, no)
+        array.set(e.hN, 1, nh)
+        array.set(e.hN, 2, nl)
+        array.set(e.hN, 3, nc)
+        array.set(e.hE, 0, eo)
+        array.set(e.hE, 1, eh)
+        array.set(e.hE, 2, el)
+        array.set(e.hE, 3, ec)
     e.fDeg
 
 // ═══════════════════════════════════════════════════════════════════
@@ -747,13 +790,19 @@ if selIdx != -1
     shownDir := newDirShown
 
 // ═══════════════════════════════════════════════════════════════════
-// מסגרות זמן גבוהות — מנוע נפרד לכל אחת
+// מסגרות זמן אחרות — מנוע נפרד לכל אחת
 //
-// שישה מנועים, אחד לכל מדרגה מעל מסגרת הגרף (על 5 דקות: 15m/1H/4H/1D/1W).
-// מדרגות שלא קיימות מקבלות את אותה מסגרת של האחרונה ופשוט לא מוצגות.
-// כל מנוע מקבל את שלושת הנרות האחרונים שנסגרו במסגרת שלו — ההיסט נעשה
-// בתוך request.security, כלומר בזמן של אותה מסגרת, ולכן אין ריפיינט:
+// שישה מנועים מעל מסגרת הגרף ושלושה מתחתיה. מדרגה שלא קיימת פשוט לא נצעדת
+// ולא מוצגת.
+//
+// מעל הגרף: כל מנוע מקבל את שלושת הנרות האחרונים שנסגרו במסגרת שלו, כשההיסט
+// נעשה בתוך request.security — כלומר בזמן של אותה מסגרת. לכן אין ריפיינט:
 // נר 15 דקות נכנס לחישוב רק ברגע שהוא נסגר.
+//
+// מתחת לגרף: אין שם נרות מוסטים, ולכן מושכים את כל תת-הנרות של נר הגרף
+// (request.security_lower_tf) ומזינים אותם למנוע אחד-אחד, כשהוא מחזיק בעצמו
+// את שני הנרות הקודמים. טריידינגויו מגביל את כמות תת-הנרות שאפשר למשוך,
+// ולכן ההיסטוריה שם קצרה יותר — המצב מתייצב אחרי שהמיכל הראשון מתחלף.
 // ═══════════════════════════════════════════════════════════════════
 
 mtfOn = (showMtf or mtfAlert) and tfClass != 0
@@ -765,12 +814,20 @@ c4 = math.min(tfClass + 4, 7)
 c5 = math.min(tfClass + 5, 7)
 c6 = math.min(tfClass + 6, 7)
 
+cL1 = math.max(tfClass - 1, 1)
+cL2 = math.max(tfClass - 2, 1)
+cL3 = math.max(tfClass - 3, 1)
+
 tfs1 = c1 == 2 ? "5" : c1 == 3 ? "15" : c1 == 4 ? "60" : c1 == 5 ? "240" : c1 == 6 ? "D" : "W"
 tfs2 = c2 == 2 ? "5" : c2 == 3 ? "15" : c2 == 4 ? "60" : c2 == 5 ? "240" : c2 == 6 ? "D" : "W"
 tfs3 = c3 == 2 ? "5" : c3 == 3 ? "15" : c3 == 4 ? "60" : c3 == 5 ? "240" : c3 == 6 ? "D" : "W"
 tfs4 = c4 == 2 ? "5" : c4 == 3 ? "15" : c4 == 4 ? "60" : c4 == 5 ? "240" : c4 == 6 ? "D" : "W"
 tfs5 = c5 == 2 ? "5" : c5 == 3 ? "15" : c5 == 4 ? "60" : c5 == 5 ? "240" : c5 == 6 ? "D" : "W"
 tfs6 = c6 == 2 ? "5" : c6 == 3 ? "15" : c6 == 4 ? "60" : c6 == 5 ? "240" : c6 == 6 ? "D" : "W"
+
+tfl1 = cL1 == 1 ? "1" : cL1 == 2 ? "5" : cL1 == 3 ? "15" : cL1 == 4 ? "60" : cL1 == 5 ? "240" : "D"
+tfl2 = cL2 == 1 ? "1" : cL2 == 2 ? "5" : cL2 == 3 ? "15" : cL2 == 4 ? "60" : cL2 == 5 ? "240" : "D"
+tfl3 = cL3 == 1 ? "1" : cL3 == 2 ? "5" : cL3 == 3 ? "15" : cL3 == 4 ? "60" : cL3 == 5 ? "240" : "D"
 
 [t1, n1o0, n1h0, n1l0, n1c0, n1o1, n1c1, n1h2, n1l2, n1c2] = request.security(sNQ, tfs1, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
 [t2, n2o0, n2h0, n2l0, n2c0, n2o1, n2c1, n2h2, n2l2, n2c2] = request.security(sNQ, tfs2, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
@@ -786,62 +843,141 @@ tfs6 = c6 == 2 ? "5" : c6 == 3 ? "15" : c6 == 4 ? "60" : c6 == 5 ? "240" : c6 ==
 [s5o0, s5h0, s5l0, s5c0, s5o1, s5c1, s5h2, s5l2, s5c2] = request.security(sES, tfs5, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
 [s6o0, s6h0, s6l0, s6c0, s6o1, s6c1, s6h2, s6l2, s6c2] = request.security(sES, tfs6, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
 
-[r1, l1, d1, w1] = f_cycles(t1, c1)
-[r2, l2, d2, w2] = f_cycles(t2, c2)
-[r3, l3, d3, w3] = f_cycles(t3, c3)
-[r4, l4, d4, w4] = f_cycles(t4, c4)
-[r5, l5, d5, w5] = f_cycles(t5, c5)
-[r6, l6, d6, w6] = f_cycles(t6, c6)
+// ignore_invalid_timeframe מחזיר na במקום לעצור את הסקריפט כשהמדרגה הזאת
+// לא באמת מתחת לגרף (למשל גרף דקה, שאין מתחתיו כלום).
+[q1nt, q1no, q1nh, q1nl, q1nc] = request.security_lower_tf(sNQ, tfl1, [time, open, high, low, close], ignore_invalid_timeframe = true)
+[q2nt, q2no, q2nh, q2nl, q2nc] = request.security_lower_tf(sNQ, tfl2, [time, open, high, low, close], ignore_invalid_timeframe = true)
+[q3nt, q3no, q3nh, q3nl, q3nc] = request.security_lower_tf(sNQ, tfl3, [time, open, high, low, close], ignore_invalid_timeframe = true)
 
-var Engine eg1 = Engine.new(c1, array.new<Gap>(), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, "", 0, -99999, false)
-var Engine eg2 = Engine.new(c2, array.new<Gap>(), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, "", 0, -99999, false)
-var Engine eg3 = Engine.new(c3, array.new<Gap>(), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, "", 0, -99999, false)
-var Engine eg4 = Engine.new(c4, array.new<Gap>(), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, "", 0, -99999, false)
-var Engine eg5 = Engine.new(c5, array.new<Gap>(), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, "", 0, -99999, false)
-var Engine eg6 = Engine.new(c6, array.new<Gap>(), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, "", 0, -99999, false)
+[q1eo, q1eh, q1el, q1ec] = request.security_lower_tf(sES, tfl1, [open, high, low, close], ignore_invalid_timeframe = true)
+[q2eo, q2eh, q2el, q2ec] = request.security_lower_tf(sES, tfl2, [open, high, low, close], ignore_invalid_timeframe = true)
+[q3eo, q3eh, q3el, q3ec] = request.security_lower_tf(sES, tfl3, [open, high, low, close], ignore_invalid_timeframe = true)
 
-var array<Engine> engines = array.new<Engine>()
+var Engine eg1 = Engine.new(c1, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, -99999, false)
+var Engine eg2 = Engine.new(c2, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, -99999, false)
+var Engine eg3 = Engine.new(c3, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, -99999, false)
+var Engine eg4 = Engine.new(c4, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, -99999, false)
+var Engine eg5 = Engine.new(c5, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, -99999, false)
+var Engine eg6 = Engine.new(c6, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, -99999, false)
+
+var Engine el1 = Engine.new(cL1, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, -99999, false)
+var Engine el2 = Engine.new(cL2, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, -99999, false)
+var Engine el3 = Engine.new(cL3, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, -99999, false)
+
+// אילו מדרגות באמת קיימות ונצעדות
+useH1 = tfClass + 1 <= 7
+useH2 = tfClass + 2 <= 7
+useH3 = tfClass + 3 <= 7
+useH4 = tfClass + 4 <= 7
+useH5 = tfClass + 5 <= 7
+useH6 = tfClass + 6 <= 7
+useL1 = lowerLevels >= 1 and tfClass >= 2
+useL2 = lowerLevels >= 2 and tfClass >= 3
+useL3 = lowerLevels >= 3 and tfClass >= 4
+
+// כל המנועים ברשימה אחת, באותו סדר של useH1..useL3, כדי שאפשר יהיה לעבור
+// עליהם בלולאה במקום לחזור על אותו קוד תשע פעמים.
+var array<Engine> allEng = array.new<Engine>()
 if barstate.isfirst
-    array.push(engines, eg1)
-    array.push(engines, eg2)
-    array.push(engines, eg3)
-    array.push(engines, eg4)
-    array.push(engines, eg5)
-    array.push(engines, eg6)
+    array.push(allEng, eg1)
+    array.push(allEng, eg2)
+    array.push(allEng, eg3)
+    array.push(allEng, eg4)
+    array.push(allEng, eg5)
+    array.push(allEng, eg6)
+    array.push(allEng, el1)
+    array.push(allEng, el2)
+    array.push(allEng, el3)
+
+f_useSlot(int k) =>
+    k == 0 ? useH1 : k == 1 ? useH2 : k == 2 ? useH3 : k == 3 ? useH4 : k == 4 ? useH5 : k == 5 ? useH6 : k == 6 ? useL1 : k == 7 ? useL2 : useL3
 
 // הצעד נעשה רק בסגירת נר של הגרף. הסיבה טכנית: בנר חי הסקריפט רץ מחדש בכל
 // טיק ומצב ה-var מוחזר אחורה, ולכן צעד שרץ באמצע הנר היה נספר פעמיים.
 if mtfOn and barstate.isconfirmed
-    if tfClass + 1 <= 7
-        f_step(eg1, t1, r1, l1, d1, w1, n1o0, n1h0, n1l0, n1c0, n1o1, n1c1, n1h2, n1l2, n1c2, s1o0, s1h0, s1l0, s1c0, s1o1, s1c1, s1h2, s1l2, s1c2)
-    if tfClass + 2 <= 7
-        f_step(eg2, t2, r2, l2, d2, w2, n2o0, n2h0, n2l0, n2c0, n2o1, n2c1, n2h2, n2l2, n2c2, s2o0, s2h0, s2l0, s2c0, s2o1, s2c1, s2h2, s2l2, s2c2)
-    if tfClass + 3 <= 7
-        f_step(eg3, t3, r3, l3, d3, w3, n3o0, n3h0, n3l0, n3c0, n3o1, n3c1, n3h2, n3l2, n3c2, s3o0, s3h0, s3l0, s3c0, s3o1, s3c1, s3h2, s3l2, s3c2)
-    if tfClass + 4 <= 7
-        f_step(eg4, t4, r4, l4, d4, w4, n4o0, n4h0, n4l0, n4c0, n4o1, n4c1, n4h2, n4l2, n4c2, s4o0, s4h0, s4l0, s4c0, s4o1, s4c1, s4h2, s4l2, s4c2)
-    if tfClass + 5 <= 7
-        f_step(eg5, t5, r5, l5, d5, w5, n5o0, n5h0, n5l0, n5c0, n5o1, n5c1, n5h2, n5l2, n5c2, s5o0, s5h0, s5l0, s5c0, s5o1, s5c1, s5h2, s5l2, s5c2)
-    if tfClass + 6 <= 7
-        f_step(eg6, t6, r6, l6, d6, w6, n6o0, n6h0, n6l0, n6c0, n6o1, n6c1, n6h2, n6l2, n6c2, s6o0, s6h0, s6l0, s6c0, s6o1, s6c1, s6h2, s6l2, s6c2)
+    if useH1
+        f_step(eg1, t1, n1o0, n1h0, n1l0, n1c0, n1o1, n1c1, n1h2, n1l2, n1c2, s1o0, s1h0, s1l0, s1c0, s1o1, s1c1, s1h2, s1l2, s1c2)
+    if useH2
+        f_step(eg2, t2, n2o0, n2h0, n2l0, n2c0, n2o1, n2c1, n2h2, n2l2, n2c2, s2o0, s2h0, s2l0, s2c0, s2o1, s2c1, s2h2, s2l2, s2c2)
+    if useH3
+        f_step(eg3, t3, n3o0, n3h0, n3l0, n3c0, n3o1, n3c1, n3h2, n3l2, n3c2, s3o0, s3h0, s3l0, s3c0, s3o1, s3c1, s3h2, s3l2, s3c2)
+    if useH4
+        f_step(eg4, t4, n4o0, n4h0, n4l0, n4c0, n4o1, n4c1, n4h2, n4l2, n4c2, s4o0, s4h0, s4l0, s4c0, s4o1, s4c1, s4h2, s4l2, s4c2)
+    if useH5
+        f_step(eg5, t5, n5o0, n5h0, n5l0, n5c0, n5o1, n5c1, n5h2, n5l2, n5c2, s5o0, s5h0, s5l0, s5c0, s5o1, s5c1, s5h2, s5l2, s5c2)
+    if useH6
+        f_step(eg6, t6, n6o0, n6h0, n6l0, n6c0, n6o1, n6c1, n6h2, n6l2, n6c2, s6o0, s6h0, s6l0, s6c0, s6o1, s6c1, s6h2, s6l2, s6c2)
 
-// ── שבירה טרייה במסגרת גבוהה: תווית על הגרף + שורה בהתראה ──
+    // תת-נרות: כל נר של המסגרת הנמוכה מוזן בנפרד, לפי הסדר.
+    if useL1 and array.size(q1nc) > 0 and array.size(q1ec) == array.size(q1nc)
+        for j = 0 to array.size(q1nc) - 1
+            f_pushLtf(el1, array.get(q1nt, j), array.get(q1no, j), array.get(q1nh, j), array.get(q1nl, j), array.get(q1nc, j), array.get(q1eo, j), array.get(q1eh, j), array.get(q1el, j), array.get(q1ec, j))
+    if useL2 and array.size(q2nc) > 0 and array.size(q2ec) == array.size(q2nc)
+        for j = 0 to array.size(q2nc) - 1
+            f_pushLtf(el2, array.get(q2nt, j), array.get(q2no, j), array.get(q2nh, j), array.get(q2nl, j), array.get(q2nc, j), array.get(q2eo, j), array.get(q2eh, j), array.get(q2el, j), array.get(q2ec, j))
+    if useL3 and array.size(q3nc) > 0 and array.size(q3ec) == array.size(q3nc)
+        for j = 0 to array.size(q3nc) - 1
+            f_pushLtf(el3, array.get(q3nt, j), array.get(q3no, j), array.get(q3nh, j), array.get(q3nl, j), array.get(q3nc, j), array.get(q3eo, j), array.get(q3eh, j), array.get(q3el, j), array.get(q3ec, j))
+
+// ═══════════════════════════════════════════════════════════════════
+// ריכוז המצב של כל המסגרות לפי מחלקה (אינדקס 0 = 1m ... אינדקס 6 = 1W)
+// ═══════════════════════════════════════════════════════════════════
+
+var array<int>    pDir  = array.new_int(7, -9)   // -9 = אין נתונים למסגרת הזאת
+var array<int>    pDeg  = array.new_int(7, 0)
+var array<string> pLead = array.new_string(7, "")
+var array<int>    pBar  = array.new_int(7, -99999)
+
+// טריות השבירה של מסגרת הגרף עצמה
+var int chartFSeq = 0
+var int chartFBar = -99999
+if selIdx != -1
+    Gap gfr = array.get(gaps, selIdx)
+    if gfr.fSeq > chartFSeq
+        chartFSeq := gfr.fSeq
+        chartFBar := bar_index
+
+f_fill(array<int> ad, array<int> ag, array<string> al, array<int> ab, Engine e) =>
+    int ix = e.cls - 1
+    array.set(ad, ix, e.fDir)
+    array.set(ag, ix, e.fDeg)
+    array.set(al, ix, e.fLead)
+    array.set(ab, ix, e.fBar)
+
+if barstate.islast and tfClass != 0
+    for ix = 0 to 6
+        array.set(pDir, ix, -9)
+    // מסגרת הגרף
+    array.set(pDir,  tfClass - 1, selIdx == -1 ? 0 : array.get(gaps, selIdx).dir)
+    array.set(pDeg,  tfClass - 1, selIdx == -1 ? 0 : array.get(gaps, selIdx).fDeg)
+    array.set(pLead, tfClass - 1, selIdx == -1 ? "" : array.get(gaps, selIdx).fLead)
+    array.set(pBar,  tfClass - 1, chartFBar)
+    if mtfOn and array.size(allEng) > 0
+        for k = 0 to array.size(allEng) - 1
+            if f_useSlot(k)
+                f_fill(pDir, pDeg, pLead, pBar, array.get(allEng, k))
+
+// ── שבירה טרייה במסגרת אחרת: סימון זעיר על הגרף + שורה בהתראה ──
 var string flashTxt = ""
 var int    flashDir = 0
 var int    flashBar = -99999
 
-if mtfOn and barstate.isconfirmed and array.size(engines) > 0
-    for k = 0 to array.size(engines) - 1
-        Engine ek = array.get(engines, k)
-        if tfClass + k + 1 <= 7 and ek.justFired
-            flashTxt := f_clsName(ek.cls) + " " + (ek.fDir == 1 ? "▲" : "▼") + " F" + str.tostring(ek.fDeg) + " " + ek.fLead
+// כל מנוע שנשבר בנר הזה נכנס להתראה. הסימון הקטן על הגרף מציג את האחרון
+// שנמצא — הפרטים המלאים ממילא יושבים בפאנל.
+if mtfOn and barstate.isconfirmed and array.size(allEng) > 0
+    for k = 0 to array.size(allEng) - 1
+        Engine ek = array.get(allEng, k)
+        if f_useSlot(k) and ek.justFired
+            flashTxt := f_clsName(ek.cls) + " " + (ek.fDir == 1 ? "▲" : "▼") + str.tostring(ek.fDeg)
             flashDir := ek.fDir
             flashBar := bar_index
             if mtfAlert and alertOn and ek.fDeg >= alertMinDeg
                 string one = "[" + f_clsName(ek.cls) + "] " + syminfo.ticker + " · שבירה " + (ek.fDir == 1 ? "שורית" : "דובית") + " F" + str.tostring(ek.fDeg) + " · מוביל " + ek.fLead
                 alertMsg := alertMsg == "" ? one : alertMsg + "\n" + one
 
-// ── פאנל מסגרות הזמן ──
+// ═══════════════════════════════════════════════════════════════════
+// פאנל מסגרות הזמן — מסודר מלמעלה למטה, 1W ועד 1m
+// ═══════════════════════════════════════════════════════════════════
 
 f_stTxt(int dir, int deg, string lead) =>
     dir == 0 ? "—" : (dir == 1 ? "▲" : "▼") + " F" + str.tostring(deg) + (lead == "" ? "" : " " + lead)
@@ -855,15 +991,6 @@ mtfPosition = mtfPos == "ימין למעלה" ? position.top_right : mtfPos == "
 
 var table mtfT = table.new(mtfPosition, 2, 8, border_width = 1)
 
-// טריות השבירה של מסגרת הגרף עצמה
-var int chartFSeq = 0
-var int chartFBar = -99999
-if selIdx != -1
-    Gap gfr = array.get(gaps, selIdx)
-    if gfr.fSeq > chartFSeq
-        chartFSeq := gfr.fSeq
-        chartFBar := bar_index
-
 if showMtf and barstate.islast and tfClass != 0
     for rr = 0 to 7
         table.cell(mtfT, 0, rr, "", bgcolor = color.new(color.black, 100))
@@ -872,20 +999,16 @@ if showMtf and barstate.islast and tfClass != 0
     table.cell(mtfT, 0, 0, "SSMT Fill", bgcolor = color.new(color.gray, 25), text_color = color.white, text_size = size.small)
     table.cell(mtfT, 1, 0, "שבירה", bgcolor = color.new(color.gray, 25), text_color = color.white, text_size = size.small)
 
-    int cDir  = selIdx == -1 ? 0 : array.get(gaps, selIdx).dir
-    int cDeg  = selIdx == -1 ? 0 : array.get(gaps, selIdx).fDeg
-    string cLd = selIdx == -1 ? "" : array.get(gaps, selIdx).fLead
-    f_mtfRow(mtfT, 1, f_clsName(tfClass), cDir, cDeg, cLd, mtfFlash and bar_index - chartFBar <= mtfFlashBars, true)
+    int rowN = 0
+    for cc = 7 to 1
+        if array.get(pDir, cc - 1) != -9
+            rowN := rowN + 1
+            f_mtfRow(mtfT, rowN, f_clsName(cc), array.get(pDir, cc - 1), array.get(pDeg, cc - 1), array.get(pLead, cc - 1), mtfFlash and bar_index - array.get(pBar, cc - 1) <= mtfFlashBars, cc == tfClass)
 
-    int rowN = 1
-    if array.size(engines) > 0
-        for k = 0 to array.size(engines) - 1
-            if tfClass + k + 1 <= 7
-                Engine ep = array.get(engines, k)
-                rowN := rowN + 1
-                f_mtfRow(mtfT, rowN, f_clsName(ep.cls), ep.fDir, ep.fDeg, ep.fLead, mtfFlash and bar_index - ep.fBar <= mtfFlashBars, false)
-
-// ── תווית קופצת על הגרף כששבירה נולדה במסגרת אחרת ──
+// ── סימון זעיר על הגרף כששבירה נולדה במסגרת אחרת ──
+//
+// בכוונה טקסט קטן בלי בועה ובלי קופסה: המטרה היא לדעת שקרה משהו במקום אחר,
+// לא לצייר אותו. הפרטים המלאים יושבים בפאנל.
 
 var label mtfLbl = na
 
@@ -894,7 +1017,8 @@ if barstate.islast
         label.delete(mtfLbl)
         mtfLbl := na
     if mtfFlash and mtfOn and flashTxt != "" and bar_index - flashBar <= mtfFlashBars
-        mtfLbl := label.new(bar_index, high + atr * offsetMlt * 1.8, "⚠ " + flashTxt, style = label.style_label_down, color = color.new(flashDir == 1 ? colBull : colBear, 10), textcolor = color.white, size = labelSize)
+        mtfLbl := label.new(bar_index, high + atr * offsetMlt * 1.6, flashTxt, style = label.style_none, textcolor = flashDir == 1 ? colBull : colBear, size = size.tiny, textalign = text.align_center)
+
 
 // ═══════════════════════════════════════════════════════════════════
 // ציור — תווית + קופסת הגאפ של נכס הגרף (רק השבירה המוצגת)
@@ -920,27 +1044,35 @@ if shownSeq != drawnSeq or shownDeg != drawnDeg
         line.delete(aCE)
         aCE := na
     if selIdx != -1
-        Gap   gd   = array.get(gaps, selIdx)
-        color col  = gd.dir == 1 ? colBull : colBear
-        // דרגה גבוהה = צבע חזק יותר
-        color cFin = gd.fDeg == 3 ? col : gd.fDeg == 2 ? color.new(col, 25) : color.new(col, 45)
+        Gap    gd   = array.get(gaps, selIdx)
+        color  col  = gd.dir == 1 ? colBull : colBear
+        // הדרגה משנה רק את עוצמת המסגרת. המילוי נשאר שקוף באותה מידה כדי
+        // שהנרות מתחתיו יישארו קריאים.
+        color  cEdge = color.new(col, gd.fDeg == 3 ? boxBorder : gd.fDeg == 2 ? math.min(boxBorder + 20, 95) : math.min(boxBorder + 35, 95))
         float  gTop = isESc ? gd.esTop : gd.nqTop
         float  gBot = isESc ? gd.esBot : gd.nqBot
+        float  gMid = (gTop + gBot) / 2
         string txt  = "F" + str.tostring(gd.fDeg) + " " + gd.fLead
-        if showLabel
-            aLbl := label.new(gd.fSigB, gd.fYPos, txt, style = label.style_none, textcolor = cFin, size = labelSize, textalign = text.align_center)
+        int    xEnd = boxLen == "עד נר השבירה" ? gd.fSigB : boxLen == "קצר (12 נרות)" ? gd.fSigB + 12 : bar_index
+        xEnd := math.max(xEnd, gd.origin + 1)
         if showBox
             // הקופסה מתחילה מהנר הראשון של ה-FVG כדי שתשב על התבנית שיצרה
-            // את הגאפ, והטקסט יושב בתוכה כדי שיהיה ברור שזו הקופסה של השבירה.
-            aBox := box.new(gd.origin, gTop, bar_index, gBot, border_color = cFin, border_width = 1, bgcolor = color.new(col, boxTransp), text = txt, text_color = cFin, text_size = labelSize, text_halign = text.align_right, text_valign = text.align_center)
+            // את הגאפ. בלי טקסט בפנים — הכיתוב יושב במקום אחד בלבד.
+            aBox := box.new(gd.origin, gTop, xEnd, gBot, border_color = cEdge, border_width = 1, bgcolor = color.new(col, boxTransp))
+        if labelMode == "תג בקצה הקופסה"
+            // תג צמוד לקצה הימני, בגובה אמצע הגאפ — נקרא גם כשהקופסה דקה מאוד.
+            aLbl := label.new(xEnd, gMid, txt, style = label.style_label_left, color = color.new(col, 20), textcolor = color.white, size = labelSize)
+        else if labelMode == "תווית ליד הנר"
+            aLbl := label.new(gd.fSigB, gd.fYPos, txt, style = label.style_none, textcolor = col, size = labelSize, textalign = text.align_center)
         if showCE
-            float ce = (gTop + gBot) / 2
-            aCE := line.new(gd.origin, ce, bar_index, ce, color = cFin, style = line.style_dashed, width = 1)
+            aCE := line.new(gd.origin, gMid, xEnd, gMid, color = color.new(col, 40), style = line.style_dashed, width = 1)
     drawnSeq := shownSeq
     drawnDeg := shownDeg
 
-// הקופסה והקו עוקבים אחרי הנר הנוכחי
-if selIdx != -1
+// הקופסה, הקו והתג עוקבים אחרי הנר הנוכחי — רק במצב "עד הנר הנוכחי"
+if selIdx != -1 and boxLen == "עד הנר הנוכחי"
+    if not na(aLbl) and labelMode == "תג בקצה הקופסה"
+        label.set_x(aLbl, bar_index)
     if not na(aBox)
         box.set_right(aBox, bar_index)
     if not na(aCE)
