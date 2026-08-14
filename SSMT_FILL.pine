@@ -88,10 +88,14 @@ showMtf      = input.bool(false, "הצג פאנל מסגרות זמן", group = 
 // יותר. 2 מדרגות זו נקודת האיזון; 0 מכבה את זה לגמרי.
 lowerLevels  = input.int(2, "כמה מדרגות מתחת לגרף", minval = 0, maxval = 3, group = grpMtf)
 mtfPos       = input.string("ימין למטה", "מיקום הפאנל", options = ["ימין למטה", "ימין למעלה", "ימין באמצע", "שמאל למטה", "שמאל למעלה"], group = grpMtf)
-// זה מה שרץ כשהפאנל כבוי: טקסט זעיר מעל הנר האחרון שאומר שנסגרה שבירה
-// במסגרת אחרת, נעלם מעצמו אחרי כמה דקות.
-mtfFlash     = input.bool(true, "סימון זעיר כששבירה נולדת במסגרת אחרת", group = grpMtf)
+// זה מה שרץ כשהפאנל כבוי: שורת טקסט זעירה בפינת המסך שאומרת שנסגרה שבירה
+// במסגרת אחרת. במצב "רק כששבירה נולדת" היא מופיעה ונעלמת אחרי כמה דקות;
+// במצב השני היא נשארת כל עוד יש שבירה חיה במסגרת אחרת — שימושי כדי לראות
+// שזה בכלל עובד, בלי לחכות לאירוע.
+mtfFlash     = input.bool(true, "הצג סימון זעיר משאר המסגרות", group = grpMtf)
+flashMode    = input.string("רק כששבירה נולדת", "מתי להציג", options = ["רק כששבירה נולדת", "כל עוד יש שבירה חיה"], group = grpMtf)
 mtfFlashMin  = input.int(10, "כמה דקות להשאיר את הסימון", minval = 1, maxval = 240, group = grpMtf)
+flashPos     = input.string("שמאל למטה", "מיקום הסימון", options = ["שמאל למטה", "שמאל למעלה", "ימין למטה", "ימין למעלה", "אמצע למטה"], group = grpMtf)
 mtfAlert     = input.bool(true, "כלול שבירות ממסגרות אחרות בהתראה", group = grpMtf)
 
 // ═══════════════════════════════════════════════════════════════════
@@ -392,7 +396,6 @@ f_setCycles(Engine e, int t) =>
 
 // צעד אחד של המנוע. הנרות: 0 = הנר האחרון שנסגר · 1 · 2 = הקודמים לו.
 f_step(Engine e, int tOpen, float no0, float nh0, float nl0, float nc0, float no1, float nc1, float nh2, float nl2, float nc2, float eo0, float eh0, float el0, float ec0, float eo1, float ec1, float eh2, float el2, float ec2) =>
-    e.justFired := false
     if not na(tOpen) and tOpen != e.lastT and not na(nc0) and not na(ec0)
         e.lastT := tOpen
         f_setCycles(e, tOpen)
@@ -898,6 +901,12 @@ f_useSlot(int k) =>
 // הצעד נעשה רק בסגירת נר של הגרף. הסיבה טכנית: בנר חי הסקריפט רץ מחדש בכל
 // טיק ומצב ה-var מוחזר אחורה, ולכן צעד שרץ באמצע הנר היה נספר פעמיים.
 if mtfOn and barstate.isconfirmed
+    // איפוס דגלי "נשברה עכשיו" פעם אחת לנר גרף. אסור לאפס בתוך f_step: במסגרת
+    // נמוכה הוא רץ פעם לכל תת-נר, ושבירה מתת-נר מוקדם הייתה נמחקת.
+    if array.size(allEng) > 0
+        for k = 0 to array.size(allEng) - 1
+            Engine er = array.get(allEng, k)
+            er.justFired := false
     if useH1
         f_step(eg1, t1, n1o0, n1h0, n1l0, n1c0, n1o1, n1c1, n1h2, n1l2, n1c2, s1o0, s1h0, s1l0, s1c0, s1o1, s1c1, s1h2, s1l2, s1c2)
     if useH2
@@ -1008,20 +1017,34 @@ if showMtf and barstate.islast and tfClass != 0
             rowN := rowN + 1
             f_mtfRow(mtfT, rowN, f_clsName(cc), array.get(pDir, cc - 1), array.get(pDeg, cc - 1), array.get(pLead, cc - 1), timenow - array.get(pTime, cc - 1) <= mtfFlashMin * 60000, cc == tfClass)
 
-// ── סימון זעיר על הגרף כששבירה נולדה במסגרת אחרת ──
+// ── סימון זעיר בפינת המסך כששבירה קרתה במסגרת אחרת ──
 //
-// זה הדבר היחיד שרואים על המסך כשהפאנל כבוי: טקסט קטן בלי בועה ובלי קופסה,
-// שנעלם מעצמו אחרי כמה דקות. המטרה היא לדעת שקרה משהו במקום אחר — לא לצייר
-// אותו. מי שרוצה את התמונה המלאה מדליק את הפאנל.
+// זה הדבר היחיד שרואים כשהפאנל כבוי. שורה אחת, רקע שקוף, מקום קבוע — לא
+// תווית שמרחפת מעל הנר ויכולה לצאת מהמסך. כשאין מה להגיד היא ריקה ולכן
+// בלתי נראית לגמרי.
 
-var label mtfLbl = na
+flashPosition = flashPos == "שמאל למעלה" ? position.top_left : flashPos == "ימין למטה" ? position.bottom_right : flashPos == "ימין למעלה" ? position.top_right : flashPos == "אמצע למטה" ? position.bottom_center : position.bottom_left
+
+var table flashT = table.new(flashPosition, 1, 1)
 
 if barstate.islast
-    if not na(mtfLbl)
-        label.delete(mtfLbl)
-        mtfLbl := na
-    if mtfFlash and mtfOn and flashTxt != "" and timenow - flashTime <= mtfFlashMin * 60000
-        mtfLbl := label.new(bar_index, high + atr * offsetMlt * 1.6, flashTxt, style = label.style_none, textcolor = flashDir == 1 ? colBull : colBear, size = size.tiny, textalign = text.align_center)
+    string fTxt = ""
+    color  fCol = color.gray
+    if mtfFlash and mtfOn and tfClass != 0
+        if flashMode == "כל עוד יש שבירה חיה"
+            // כל המסגרות האחרות שיש עליהן שבירה חיה, מהגבוהה לנמוכה
+            int newest = 0
+            for cc = 7 to 1
+                int cd = array.get(pDir, cc - 1)
+                if cc != tfClass and cd != -9 and cd != 0
+                    fTxt := fTxt + (fTxt == "" ? "" : "   ") + f_clsName(cc) + (cd == 1 ? " ▲" : " ▼") + str.tostring(array.get(pDeg, cc - 1))
+                    if array.get(pTime, cc - 1) >= newest
+                        newest := array.get(pTime, cc - 1)
+                        fCol   := cd == 1 ? colBull : colBear
+        else if flashTxt != "" and timenow - flashTime <= mtfFlashMin * 60000
+            fTxt := flashTxt
+            fCol := flashDir == 1 ? colBull : colBear
+    table.cell(flashT, 0, 0, fTxt, bgcolor = color.new(color.black, 100), text_color = fCol, text_size = size.small)
 
 
 // ═══════════════════════════════════════════════════════════════════
