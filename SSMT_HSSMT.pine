@@ -5,14 +5,13 @@ indicator("SSMT + HSSMT | Quarterly Theory", overlay = true, max_labels_count = 
 // הגדרות משתמש
 // ═══════════════════════════════════════════════════════════════════
 
+// סימבול אחד לכל נכס. אין מתג מיקרו/רגיל: מתג כזה גורם ל-TradingView לטעון
+// את שני הסטים במקביל (שישה סימבולים) ולפוצץ את מגבלת הזיכרון. להחליף ל-NQ1!/
+// ES1!/YM1! פשוט ע"י הקלדה כאן — הסטייה יחסית ולא תלויה בגודל החוזה.
 grpSym = "סימבולים"
-useMicro  = input.bool(false, "השתמש בחוזי מיקרו", group = grpSym)
-symNQ_std = input.symbol("CME_MINI:NQ1!",  "NQ רגיל", group = grpSym)
-symES_std = input.symbol("CME_MINI:ES1!",  "ES רגיל", group = grpSym)
-symYM_std = input.symbol("CBOT_MINI:YM1!", "YM רגיל", group = grpSym)
-symNQ_mic = input.symbol("CME_MINI:MNQ1!",  "NQ מיקרו", group = grpSym)
-symES_mic = input.symbol("CME_MINI:MES1!",  "ES מיקרו", group = grpSym)
-symYM_mic = input.symbol("CBOT_MINI:MYM1!", "YM מיקרו", group = grpSym)
+symNQ = input.symbol("CME_MINI:MNQ1!",  "NQ", group = grpSym)
+symES = input.symbol("CME_MINI:MES1!",  "ES", group = grpSym)
+symYM = input.symbol("CBOT_MINI:MYM1!", "YM", group = grpSym)
 
 grpVis = "תצוגה"
 colBull    = input.color(#26a69a, "צבע שורי", group = grpVis)
@@ -35,15 +34,15 @@ mtfPanel   = input.bool(false, "הצג פאנל מסגרות זמן", group = gr
 mtfPanPos  = input.string("ימין למטה", "מיקום הפאנל", options = ["ימין למטה", "ימין למעלה", "שמאל למטה", "שמאל למעלה"], group = grpMTF)
 mtfColor   = input.color(#787b86, "צבע הסימון והפאנל", group = grpMTF)
 mtfAlert   = input.bool(true,  "כלול שבירות ממסגרות אחרות בהתראה", group = grpMTF)
-mtfBars    = input.int(3000, "כמה נרות היסטוריה לכל מסגרת", minval = 500, maxval = 20000, step = 500, group = grpMTF, tooltip = "מגביל כמה נרות כל מנוע מחשב. אם האינדיקטור לא נטען — להוריד. אם מסגרת נשארת ריקה — להעלות.")
+mtfBars    = input.int(2000, "כמה נרות היסטוריה לכל מסגרת", minval = 500, maxval = 20000, step = 500, group = grpMTF, tooltip = "מגביל כמה נרות כל מנוע מחשב. אם האינדיקטור לא נטען — להוריד. אם מסגרת נשארת ריקה — להעלות.")
 
 // ═══════════════════════════════════════════════════════════════════
 // בחירת סימבולים
 // ═══════════════════════════════════════════════════════════════════
 
-sNQ = useMicro ? symNQ_mic : symNQ_std
-sES = useMicro ? symES_mic : symES_std
-sYM = useMicro ? symYM_mic : symYM_std
+sNQ = symNQ
+sES = symES
+sYM = symYM
 
 // ═══════════════════════════════════════════════════════════════════
 // זיהוי Timeframe
@@ -907,28 +906,32 @@ f_tfState(ASt nq, ASt es, ASt ym) =>
         s := sb != "" and su != "" ? sb + " " + su : sb + su
     s
 
+// חמש מסגרות סביב הגרף בלבד: שלוש מעל ושתיים מתחת. סריקה של כל שבע
+// הדרגות טוענת יותר מדי סדרות נתונים ומפילה את הסקריפט על מגבלת זיכרון.
+f_tfStr(int cls) => cls == 1 ? "1" : cls == 2 ? "5" : cls == 3 ? "15" : cls == 4 ? "60" : cls == 5 ? "240" : cls == 6 ? "1D" : "1W"
+
+cU1 = math.min(tfClass + 1, 7)
+cU2 = math.min(tfClass + 2, 7)
+cU3 = math.min(tfClass + 3, 7)
+cD1 = math.max(tfClass - 1, 1)
+cD2 = math.max(tfClass - 2, 1)
+
 lkh = barmerge.lookahead_off
-nqT1 = request.security(sNQ, "1",   f_stateOf(1), lookahead = lkh, calc_bars_count = mtfBars)
-esT1 = request.security(sES, "1",   f_stateOf(1), lookahead = lkh, calc_bars_count = mtfBars)
-ymT1 = request.security(sYM, "1",   f_stateOf(1), lookahead = lkh, calc_bars_count = mtfBars)
-nqT2 = request.security(sNQ, "5",   f_stateOf(2), lookahead = lkh, calc_bars_count = mtfBars)
-esT2 = request.security(sES, "5",   f_stateOf(2), lookahead = lkh, calc_bars_count = mtfBars)
-ymT2 = request.security(sYM, "5",   f_stateOf(2), lookahead = lkh, calc_bars_count = mtfBars)
-nqT3 = request.security(sNQ, "15",  f_stateOf(3), lookahead = lkh, calc_bars_count = mtfBars)
-esT3 = request.security(sES, "15",  f_stateOf(3), lookahead = lkh, calc_bars_count = mtfBars)
-ymT3 = request.security(sYM, "15",  f_stateOf(3), lookahead = lkh, calc_bars_count = mtfBars)
-nqT4 = request.security(sNQ, "60",  f_stateOf(4), lookahead = lkh, calc_bars_count = mtfBars)
-esT4 = request.security(sES, "60",  f_stateOf(4), lookahead = lkh, calc_bars_count = mtfBars)
-ymT4 = request.security(sYM, "60",  f_stateOf(4), lookahead = lkh, calc_bars_count = mtfBars)
-nqT5 = request.security(sNQ, "240", f_stateOf(5), lookahead = lkh, calc_bars_count = mtfBars)
-esT5 = request.security(sES, "240", f_stateOf(5), lookahead = lkh, calc_bars_count = mtfBars)
-ymT5 = request.security(sYM, "240", f_stateOf(5), lookahead = lkh, calc_bars_count = mtfBars)
-nqT6 = request.security(sNQ, "1D",  f_stateOf(6), lookahead = lkh, calc_bars_count = mtfBars)
-esT6 = request.security(sES, "1D",  f_stateOf(6), lookahead = lkh, calc_bars_count = mtfBars)
-ymT6 = request.security(sYM, "1D",  f_stateOf(6), lookahead = lkh, calc_bars_count = mtfBars)
-nqT7 = request.security(sNQ, "1W",  f_stateOf(7), lookahead = lkh, calc_bars_count = mtfBars)
-esT7 = request.security(sES, "1W",  f_stateOf(7), lookahead = lkh, calc_bars_count = mtfBars)
-ymT7 = request.security(sYM, "1W",  f_stateOf(7), lookahead = lkh, calc_bars_count = mtfBars)
+nqU1 = request.security(sNQ, f_tfStr(cU1), f_stateOf(cU1), lookahead = lkh, calc_bars_count = mtfBars)
+esU1 = request.security(sES, f_tfStr(cU1), f_stateOf(cU1), lookahead = lkh, calc_bars_count = mtfBars)
+ymU1 = request.security(sYM, f_tfStr(cU1), f_stateOf(cU1), lookahead = lkh, calc_bars_count = mtfBars)
+nqU2 = request.security(sNQ, f_tfStr(cU2), f_stateOf(cU2), lookahead = lkh, calc_bars_count = mtfBars)
+esU2 = request.security(sES, f_tfStr(cU2), f_stateOf(cU2), lookahead = lkh, calc_bars_count = mtfBars)
+ymU2 = request.security(sYM, f_tfStr(cU2), f_stateOf(cU2), lookahead = lkh, calc_bars_count = mtfBars)
+nqU3 = request.security(sNQ, f_tfStr(cU3), f_stateOf(cU3), lookahead = lkh, calc_bars_count = mtfBars)
+esU3 = request.security(sES, f_tfStr(cU3), f_stateOf(cU3), lookahead = lkh, calc_bars_count = mtfBars)
+ymU3 = request.security(sYM, f_tfStr(cU3), f_stateOf(cU3), lookahead = lkh, calc_bars_count = mtfBars)
+nqD1 = request.security(sNQ, f_tfStr(cD1), f_stateOf(cD1), lookahead = lkh, calc_bars_count = mtfBars)
+esD1 = request.security(sES, f_tfStr(cD1), f_stateOf(cD1), lookahead = lkh, calc_bars_count = mtfBars)
+ymD1 = request.security(sYM, f_tfStr(cD1), f_stateOf(cD1), lookahead = lkh, calc_bars_count = mtfBars)
+nqD2 = request.security(sNQ, f_tfStr(cD2), f_stateOf(cD2), lookahead = lkh, calc_bars_count = mtfBars)
+esD2 = request.security(sES, f_tfStr(cD2), f_stateOf(cD2), lookahead = lkh, calc_bars_count = mtfBars)
+ymD2 = request.security(sYM, f_tfStr(cD2), f_stateOf(cD2), lookahead = lkh, calc_bars_count = mtfBars)
 
 // הסריקה רצה רק על הנר האחרון — מציגים מצב נוכחי, לא היסטוריה
 panPos  = mtfPanPos == "ימין למטה" ? position.bottom_right : mtfPanPos == "ימין למעלה" ? position.top_right : mtfPanPos == "שמאל למטה" ? position.bottom_left : position.top_left
@@ -939,48 +942,45 @@ var table mtfTbl  = table.new(panPos,  2, 8, border_width = 0)
 var table markTbl = table.new(markPos, 1, 1, border_width = 0)
 
 if mtfOn and barstate.islast
-    s1 = f_tfState(nqT1, esT1, ymT1)
-    s2 = f_tfState(nqT2, esT2, ymT2)
-    s3 = f_tfState(nqT3, esT3, ymT3)
-    s4 = f_tfState(nqT4, esT4, ymT4)
-    s5 = f_tfState(nqT5, esT5, ymT5)
-    s6 = f_tfState(nqT6, esT6, ymT6)
-    s7 = f_tfState(nqT7, esT7, ymT7)
+    // מסגרת הגרף נלקחת מהמנוע המקומי — בדיוק מה שמצויר על הגרף
+    sbC = bearType != 0 ? "▼" + bearStr : ""
+    suC = bullType != 0 ? "▲" + bullStr : ""
+    sC  = sbC != "" and suC != "" ? sbC + " " + suC : sbC + suC
 
-    // שורת סימון מרוכזת — רק מסגרות שיש בהן שבירה חיה
-    line1 = ""
-    line1 := s7 != "" ? line1 + "1W " + s7 + "   " : line1
-    line1 := s6 != "" ? line1 + "1D " + s6 + "   " : line1
-    line1 := s5 != "" ? line1 + "4H " + s5 + "   " : line1
-    line1 := s4 != "" ? line1 + "1H " + s4 + "   " : line1
-    line1 := s3 != "" ? line1 + "15m " + s3 + "   " : line1
-    line1 := s2 != "" ? line1 + "5m " + s2 + "   " : line1
-    line1 := s1 != "" ? line1 + "1m " + s1 : line1
-    line1 := str.trim(line1)
+    clsArr = array.from(cU3, cU2, cU1, tfClass, cD1, cD2)
+    stArr  = array.from(f_tfState(nqU3, esU3, ymU3), f_tfState(nqU2, esU2, ymU2), f_tfState(nqU1, esU1, ymU1), sC, f_tfState(nqD1, esD1, ymD1), f_tfState(nqD2, esD2, ymD2))
+
+    // שורת סימון מרוכזת — רק מסגרות שיש בהן שבירה חיה, מהגבוהה לנמוכה
+    mark = ""
+    prevC = -1
+    row = 0
+    table.clear(mtfTbl, 0, 0, 1, 7)
+    for i = 0 to 5
+        c  = array.get(clsArr, i)
+        st = array.get(stArr, i)
+        if c != prevC              // הרשימה יורדת, אז די בהשוואה לקודם כדי לנקות כפילויות בקצוות
+            if st != ""
+                mark := mark + f_tfName(c) + " " + st + "   "
+            if mtfPanel
+                nm = (c == tfClass ? "▶ " : "   ") + f_tfName(c)
+                cl = str.startswith(st, "▼") ? colBear : str.startswith(st, "▲") ? colBull : mtfColor
+                table.cell(mtfTbl, 0, row, nm, text_color = mtfColor, text_size = size.tiny, bgcolor = color.new(color.black, 100))
+                table.cell(mtfTbl, 1, row, st == "" ? "—" : st, text_color = cl, text_size = size.tiny, bgcolor = color.new(color.black, 100))
+            row := row + 1
+            prevC := c
+    mark := str.trim(mark)
+    if mtfPanel
+        table.cell(mtfTbl, 0, row, "QT", text_color = mtfColor, text_size = size.tiny, bgcolor = color.new(color.black, 100))
+        table.cell(mtfTbl, 1, row, "", bgcolor = color.new(color.black, 100))
 
     table.clear(markTbl, 0, 0, 0, 0)
-    if mtfMark and line1 != ""
-        table.cell(markTbl, 0, 0, "QT  " + line1, text_color = mtfColor, text_size = size.tiny, bgcolor = color.new(color.black, 100))
-
-    // פאנל מלא — שורה לכל מסגרת, 1W למעלה
-    table.clear(mtfTbl, 0, 0, 1, 7)
-    if mtfPanel
-        rows = array.from(7, 6, 5, 4, 3, 2, 1)
-        txts = array.from(s7, s6, s5, s4, s3, s2, s1)
-        for r = 0 to 6
-            cls = array.get(rows, r)
-            st  = array.get(txts, r)
-            nm  = (cls == tfClass ? "▶ " : "   ") + f_tfName(cls)
-            cl  = str.startswith(st, "▼") ? colBear : str.startswith(st, "▲") ? colBull : mtfColor
-            table.cell(mtfTbl, 0, r, nm, text_color = mtfColor, text_size = size.tiny, bgcolor = color.new(color.black, 100))
-            table.cell(mtfTbl, 1, r, st == "" ? "—" : st, text_color = cl, text_size = size.tiny, bgcolor = color.new(color.black, 100))
-        table.cell(mtfTbl, 0, 7, "QT", text_color = mtfColor, text_size = size.tiny, bgcolor = color.new(color.black, 100))
-        table.cell(mtfTbl, 1, 7, "", bgcolor = color.new(color.black, 100))
+    if mtfMark and mark != ""
+        table.cell(markTbl, 0, 0, "QT  " + mark, text_color = mtfColor, text_size = size.tiny, bgcolor = color.new(color.black, 100))
 
     // התראה אחת לכל המסגרות — נורית בכל שינוי מצב
-    if mtfAlert and line1 != mtfPrev and line1 != ""
-        alert("QT SSMT: " + line1, alert.freq_once_per_bar)
-    mtfPrev := line1
+    if mtfAlert and mark != mtfPrev and mark != ""
+        alert("QT SSMT: " + mark, alert.freq_once_per_bar)
+    mtfPrev := mark
 
 // ═══════════════════════════════════════════════════════════════════
 // טבלת בדיקה (אבחון — כבויה כברירת מחדל)
