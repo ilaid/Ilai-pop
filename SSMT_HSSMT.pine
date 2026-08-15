@@ -913,10 +913,11 @@ f_engStep(Eng e, int t, float nh, float nl, float nc, float eh, float el, float 
 // שם המסגרת לתצוגה
 f_tfName(int cls) => cls == 1 ? "1m" : cls == 2 ? "5m" : cls == 3 ? "15m" : cls == 4 ? "1H" : cls == 5 ? "4H" : cls == 6 ? "1D" : "1W"
 
-// שלוש מסגרות מעל הגרף ושתיים מתחת
-cU1 = math.min(tfClass + 1, 7)
-cU2 = math.min(tfClass + 2, 7)
-cU3 = math.min(tfClass + 3, 7)
+// שלוש מסגרות מעל הגרף ושתיים מתחת, אבל **לא מעל 4H**: 1D ו-1W לא נסרקים
+// ולא מוצגים בפינה. מסגרת הגרף עצמה תמיד מוצגת, גם אם היא יומית או שבועית.
+cU1 = math.min(tfClass + 1, 5)
+cU2 = math.min(tfClass + 2, 5)
+cU3 = math.min(tfClass + 3, 5)
 cD1 = math.max(tfClass - 1, 1)
 cD2 = math.max(tfClass - 2, 1)
 
@@ -955,9 +956,9 @@ var Eng egU3 = f_newEng(cU3)
 var Eng egD1 = f_newEng(cD1)
 var Eng egD2 = f_newEng(cD2)
 
-useU1 = tfClass + 1 <= 7
-useU2 = tfClass + 2 <= 7
-useU3 = tfClass + 3 <= 7
+useU1 = tfClass + 1 <= 5
+useU2 = tfClass + 2 <= 5
+useU3 = tfClass + 3 <= 5
 useD1 = tfClass - 1 >= 1
 useD2 = tfClass - 2 >= 1
 
@@ -995,7 +996,9 @@ if mtfOn and barstate.islast and tfClass != 0
     sC  = sbC != "" and suC != "" ? sbC + " " + suC : sbC + suC
 
     clsArr = array.from(cU3, cU2, cU1, tfClass, cD1, cD2)
-    stArr  = array.from(useU3 ? egU3.txt : "", useU2 ? egU2.txt : "", useU1 ? egU1.txt : "", sC, useD1 ? egD1.txt : "", useD2 ? egD2.txt : "")
+    stArr  = array.from(egU3.txt, egU2.txt, egU1.txt, sC, egD1.txt, egD2.txt)
+    // מדרגה שלא נסרקת (מעל 4H, או מתחת לדקה) פשוט יוצאת מהרשימה
+    useArr = array.from(useU3, useU2, useU1, true, useD1, useD2)
 
     mark = ""
     prevC = -1
@@ -1004,7 +1007,7 @@ if mtfOn and barstate.islast and tfClass != 0
     for i = 0 to 5
         c  = array.get(clsArr, i)
         st = array.get(stArr, i)
-        if c != prevC              // הרשימה יורדת, אז די בהשוואה לקודם כדי לנקות כפילויות בקצוות
+        if array.get(useArr, i) and c != prevC   // הרשימה יורדת, אז די בהשוואה לקודם כדי לנקות כפילויות בקצוות
             if st != ""
                 mark := mark + f_tfName(c) + " " + st + "   "
             if mtfPanel
