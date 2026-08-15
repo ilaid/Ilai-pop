@@ -908,30 +908,36 @@ f_tfState(ASt nq, ASt es, ASt ym) =>
 
 // חמש מסגרות סביב הגרף בלבד: שלוש מעל ושתיים מתחת. סריקה של כל שבע
 // הדרגות טוענת יותר מדי סדרות נתונים ומפילה את הסקריפט על מגבלת זיכרון.
-f_tfStr(int cls) => cls == 1 ? "1" : cls == 2 ? "5" : cls == 3 ? "15" : cls == 4 ? "60" : cls == 5 ? "240" : cls == 6 ? "1D" : "1W"
-
 cU1 = math.min(tfClass + 1, 7)
 cU2 = math.min(tfClass + 2, 7)
 cU3 = math.min(tfClass + 3, 7)
 cD1 = math.max(tfClass - 1, 1)
 cD2 = math.max(tfClass - 2, 1)
 
+// המחרוזות חייבות להיות טרנרי ישיר ולא קריאה לפונקציה: פונקציה ב-Pine מחזירה
+// תמיד series string, ו-request.security דורש simple string בפרמטר הזמן.
+tU1 = cU1 == 1 ? "1" : cU1 == 2 ? "5" : cU1 == 3 ? "15" : cU1 == 4 ? "60" : cU1 == 5 ? "240" : cU1 == 6 ? "D" : "W"
+tU2 = cU2 == 1 ? "1" : cU2 == 2 ? "5" : cU2 == 3 ? "15" : cU2 == 4 ? "60" : cU2 == 5 ? "240" : cU2 == 6 ? "D" : "W"
+tU3 = cU3 == 1 ? "1" : cU3 == 2 ? "5" : cU3 == 3 ? "15" : cU3 == 4 ? "60" : cU3 == 5 ? "240" : cU3 == 6 ? "D" : "W"
+tD1 = cD1 == 1 ? "1" : cD1 == 2 ? "5" : cD1 == 3 ? "15" : cD1 == 4 ? "60" : cD1 == 5 ? "240" : cD1 == 6 ? "D" : "W"
+tD2 = cD2 == 1 ? "1" : cD2 == 2 ? "5" : cD2 == 3 ? "15" : cD2 == 4 ? "60" : cD2 == 5 ? "240" : cD2 == 6 ? "D" : "W"
+
 lkh = barmerge.lookahead_off
-nqU1 = request.security(sNQ, f_tfStr(cU1), f_stateOf(cU1), lookahead = lkh, calc_bars_count = mtfBars)
-esU1 = request.security(sES, f_tfStr(cU1), f_stateOf(cU1), lookahead = lkh, calc_bars_count = mtfBars)
-ymU1 = request.security(sYM, f_tfStr(cU1), f_stateOf(cU1), lookahead = lkh, calc_bars_count = mtfBars)
-nqU2 = request.security(sNQ, f_tfStr(cU2), f_stateOf(cU2), lookahead = lkh, calc_bars_count = mtfBars)
-esU2 = request.security(sES, f_tfStr(cU2), f_stateOf(cU2), lookahead = lkh, calc_bars_count = mtfBars)
-ymU2 = request.security(sYM, f_tfStr(cU2), f_stateOf(cU2), lookahead = lkh, calc_bars_count = mtfBars)
-nqU3 = request.security(sNQ, f_tfStr(cU3), f_stateOf(cU3), lookahead = lkh, calc_bars_count = mtfBars)
-esU3 = request.security(sES, f_tfStr(cU3), f_stateOf(cU3), lookahead = lkh, calc_bars_count = mtfBars)
-ymU3 = request.security(sYM, f_tfStr(cU3), f_stateOf(cU3), lookahead = lkh, calc_bars_count = mtfBars)
-nqD1 = request.security(sNQ, f_tfStr(cD1), f_stateOf(cD1), lookahead = lkh, calc_bars_count = mtfBars)
-esD1 = request.security(sES, f_tfStr(cD1), f_stateOf(cD1), lookahead = lkh, calc_bars_count = mtfBars)
-ymD1 = request.security(sYM, f_tfStr(cD1), f_stateOf(cD1), lookahead = lkh, calc_bars_count = mtfBars)
-nqD2 = request.security(sNQ, f_tfStr(cD2), f_stateOf(cD2), lookahead = lkh, calc_bars_count = mtfBars)
-esD2 = request.security(sES, f_tfStr(cD2), f_stateOf(cD2), lookahead = lkh, calc_bars_count = mtfBars)
-ymD2 = request.security(sYM, f_tfStr(cD2), f_stateOf(cD2), lookahead = lkh, calc_bars_count = mtfBars)
+nqU1 = request.security(sNQ, tU1, f_stateOf(cU1), lookahead = lkh, calc_bars_count = mtfBars)
+esU1 = request.security(sES, tU1, f_stateOf(cU1), lookahead = lkh, calc_bars_count = mtfBars)
+ymU1 = request.security(sYM, tU1, f_stateOf(cU1), lookahead = lkh, calc_bars_count = mtfBars)
+nqU2 = request.security(sNQ, tU2, f_stateOf(cU2), lookahead = lkh, calc_bars_count = mtfBars)
+esU2 = request.security(sES, tU2, f_stateOf(cU2), lookahead = lkh, calc_bars_count = mtfBars)
+ymU2 = request.security(sYM, tU2, f_stateOf(cU2), lookahead = lkh, calc_bars_count = mtfBars)
+nqU3 = request.security(sNQ, tU3, f_stateOf(cU3), lookahead = lkh, calc_bars_count = mtfBars)
+esU3 = request.security(sES, tU3, f_stateOf(cU3), lookahead = lkh, calc_bars_count = mtfBars)
+ymU3 = request.security(sYM, tU3, f_stateOf(cU3), lookahead = lkh, calc_bars_count = mtfBars)
+nqD1 = request.security(sNQ, tD1, f_stateOf(cD1), lookahead = lkh, calc_bars_count = mtfBars)
+esD1 = request.security(sES, tD1, f_stateOf(cD1), lookahead = lkh, calc_bars_count = mtfBars)
+ymD1 = request.security(sYM, tD1, f_stateOf(cD1), lookahead = lkh, calc_bars_count = mtfBars)
+nqD2 = request.security(sNQ, tD2, f_stateOf(cD2), lookahead = lkh, calc_bars_count = mtfBars)
+esD2 = request.security(sES, tD2, f_stateOf(cD2), lookahead = lkh, calc_bars_count = mtfBars)
+ymD2 = request.security(sYM, tD2, f_stateOf(cD2), lookahead = lkh, calc_bars_count = mtfBars)
 
 // הסריקה רצה רק על הנר האחרון — מציגים מצב נוכחי, לא היסטוריה
 panPos  = mtfPanPos == "ימין למטה" ? position.bottom_right : mtfPanPos == "ימין למעלה" ? position.top_right : mtfPanPos == "שמאל למטה" ? position.bottom_left : position.top_left
