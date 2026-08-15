@@ -27,6 +27,15 @@ grpLogic = "לוגיקה"
 requireTrueOpen = input.bool(false, "סנן לפי True Open (פרימיום/דיסקאונט)", group = grpLogic)
 blockDeadWeek   = input.bool(true, "חסום שבירות בשבוע מת (4H בלבד)", group = grpLogic)
 
+grpMTF = "מסגרות זמן"
+mtfOn      = input.bool(true,  "הצג מסגרות זמן אחרות", group = grpMTF)
+mtfMark    = input.bool(true,  "הצג סימון זעיר משאר המסגרות", group = grpMTF)
+mtfMarkPos = input.string("שמאל למטה", "מיקום הסימון", options = ["שמאל למטה", "שמאל למעלה", "אמצע למטה", "ימין למטה"], group = grpMTF)
+mtfPanel   = input.bool(false, "הצג פאנל מסגרות זמן", group = grpMTF)
+mtfPanPos  = input.string("ימין למטה", "מיקום הפאנל", options = ["ימין למטה", "ימין למעלה", "שמאל למטה", "שמאל למעלה"], group = grpMTF)
+mtfColor   = input.color(#787b86, "צבע הסימון והפאנל", group = grpMTF)
+mtfAlert   = input.bool(true,  "כלול שבירות ממסגרות אחרות בהתראה", group = grpMTF)
+
 // ═══════════════════════════════════════════════════════════════════
 // בחירת סימבולים
 // ═══════════════════════════════════════════════════════════════════
@@ -716,6 +725,207 @@ if not na(aLbl) and showDir != 0
     label.set_y(aLbl, dispYPos)
 if not na(aLine) and showDir != 0
     line.set_x2(aLine, bar_index)
+
+// ═══════════════════════════════════════════════════════════════════
+// סריקת מסגרות זמן אחרות
+// ═══════════════════════════════════════════════════════════════════
+// אותו מנוע בדיוק, אבל מורץ בתוך request.security — כך המצב שלו מצטבר
+// בהקשר של אותה מסגרת זמן. גם כשהמסגרת נמוכה מהגרף (5m מתוך 1H) אף
+// תת-נר לא מפוספס, כי הצבירה קורית בהקשר של 5m ואנחנו רק דוגמים תוצאה.
+// שים לב: לוגיקת המחזורים כאן משכפלת את החישוב הראשי שלמעלה. אם משנים
+// את מודל הסייקלים — חייבים לשנות בשני המקומות.
+
+f_cycIds(int cls) =>
+    eH   = hour(time, TZ)
+    eM   = minute(time, TZ)
+    mOD  = eH * 60 + eM
+    post = mOD >= 1080
+    mFD  = post ? mOD - 1080 : mOD + 360
+    tdt  = post ? time + 86400000 : time
+    yy = year(tdt, TZ)
+    mm = month(tdt, TZ)
+    dd = dayofmonth(tdt, TZ)
+    dw = dayofweek(tdt, TZ)
+    sIdx  = math.floor(mFD / 360)
+    mIS   = mFD % 360
+    miIdx = math.floor(mIS / 90)
+    mIM   = mIS % 90
+    qIdx  = math.floor(mIM / 22.5)
+    dsm = dw == dayofweek.sunday ? 6 : dw - 2
+    mon = tdt - dsm * 86400000
+    thu = mon + 3 * 86400000
+    moM = month(mon, TZ)
+    moD = dayofmonth(mon, TZ)
+    moY = year(mon, TZ)
+    dead = moM != month(thu, TZ)
+    qMonIdx = mm >= 4 ? mm - 4 : mm + 8
+    qYear   = mm >= 4 ? yy : yy - 1
+    qQtr    = math.floor(qMonIdx / 3) + 1
+    tdId = yy * 10000 + mm * 100 + dd
+    wkId = moY * 10000 + moM * 100 + moD
+    moId = moY * 100 + moM
+    seId = tdId * 10 + sIdx
+    miId = seId * 10 + miIdx
+    quId = miId * 10 + qIdx
+    qrId = qYear * 10 + qQtr
+    c4Id = math.floor(qYear / 4)
+    rId = cls == 7 ? qYear : cls == 6 ? qrId : cls == 5 ? wkId : cls == 4 ? tdId : cls == 3 ? seId : cls == 2 ? miId : quId
+    lId = cls == 7 ? c4Id  : cls == 6 ? qYear : cls == 5 ? moId : cls == 4 ? wkId : cls == 3 ? tdId : cls == 2 ? seId : miId
+    kL  = cls == 4 or cls == 6 or cls == 7
+    blk = ((cls == 5 or cls == 4) and dw == dayofweek.friday) or (cls == 5 and blockDeadWeek and dead)
+    [rId, lId, kL, blk]
+
+// מצב נכס אחד במסגרת זמן אחת
+type ASt
+    int    n
+    float  cH
+    float  cL
+    float  cHC
+    float  cLC
+    bool   blk
+    array<float> hiA
+    array<float> loA
+    array<float> hiCA
+    array<float> loCA
+
+f_stateOf(int cls) =>
+    [rId, lId, kL, blk] = f_cycIds(cls)
+    nR = ta.change(rId) != 0
+    nL = ta.change(lId) != 0
+    var float cH  = na
+    var float cL  = na
+    var float cHC = na
+    var float cLC = na
+    var hiA  = array.new_float()
+    var loA  = array.new_float()
+    var hiCA = array.new_float()
+    var loCA = array.new_float()
+    var bool sAct = false
+    sPush = nR and nL and kL and not na(cH)
+    sDrop = nR and (not nL) and sAct
+    if nR
+        if nL
+            array.clear(hiA)
+            array.clear(loA)
+            array.clear(hiCA)
+            array.clear(loCA)
+        if ((not nL) or kL) and not na(cH)
+            array.push(hiA,  cH)
+            array.push(loA,  cL)
+            array.push(hiCA, cHC)
+            array.push(loCA, cLC)
+        if sDrop and array.size(hiA) > 0
+            array.remove(hiA,  0)
+            array.remove(loA,  0)
+            array.remove(hiCA, 0)
+            array.remove(loCA, 0)
+        cH  := high
+        cL  := low
+        cHC := close
+        cLC := close
+    else
+        if na(cH) or high > cH
+            cH := high
+        if na(cL) or low < cL
+            cL := low
+        if na(cHC) or close > cHC
+            cHC := close
+        if na(cLC) or close < cLC
+            cLC := close
+    if nR and nL
+        sAct := sPush
+    else if nR
+        sAct := false
+    ASt.new(array.size(hiA), cH, cL, cHC, cLC, blk, array.copy(hiA), array.copy(loA), array.copy(hiCA), array.copy(loCA))
+
+// שם המסגרת לתצוגה
+f_tfName(int cls) => cls == 1 ? "1m" : cls == 2 ? "5m" : cls == 3 ? "15m" : cls == 4 ? "1H" : cls == 5 ? "4H" : cls == 6 ? "1D" : "1W"
+
+// הסטטוס של מסגרת אחת — אותה לוגיקת סטייה בדיוק
+f_tfState(ASt nq, ASt es, ASt ym) =>
+    s = ""
+    if not na(nq) and not na(es) and not na(ym) and nq.n > 0 and es.n > 0 and ym.n > 0 and not nq.blk
+        [bT, bI, bS] = f_findBear(nq.hiA, es.hiA, ym.hiA, nq.hiCA, es.hiCA, ym.hiCA, nq.cH, es.cH, ym.cH, nq.cHC, es.cHC, ym.cHC)
+        [uT, uI, uS] = f_findBull(nq.loA, es.loA, ym.loA, nq.loCA, es.loCA, ym.loCA, nq.cL, es.cL, ym.cL, nq.cLC, es.cLC, ym.cLC)
+        sb = bT != 0 ? "▼" + bS : ""
+        su = uT != 0 ? "▲" + uS : ""
+        s := sb != "" and su != "" ? sb + " " + su : sb + su
+    s
+
+lkh = barmerge.lookahead_off
+nqT1 = request.security(sNQ, "1",   f_stateOf(1), lookahead = lkh)
+esT1 = request.security(sES, "1",   f_stateOf(1), lookahead = lkh)
+ymT1 = request.security(sYM, "1",   f_stateOf(1), lookahead = lkh)
+nqT2 = request.security(sNQ, "5",   f_stateOf(2), lookahead = lkh)
+esT2 = request.security(sES, "5",   f_stateOf(2), lookahead = lkh)
+ymT2 = request.security(sYM, "5",   f_stateOf(2), lookahead = lkh)
+nqT3 = request.security(sNQ, "15",  f_stateOf(3), lookahead = lkh)
+esT3 = request.security(sES, "15",  f_stateOf(3), lookahead = lkh)
+ymT3 = request.security(sYM, "15",  f_stateOf(3), lookahead = lkh)
+nqT4 = request.security(sNQ, "60",  f_stateOf(4), lookahead = lkh)
+esT4 = request.security(sES, "60",  f_stateOf(4), lookahead = lkh)
+ymT4 = request.security(sYM, "60",  f_stateOf(4), lookahead = lkh)
+nqT5 = request.security(sNQ, "240", f_stateOf(5), lookahead = lkh)
+esT5 = request.security(sES, "240", f_stateOf(5), lookahead = lkh)
+ymT5 = request.security(sYM, "240", f_stateOf(5), lookahead = lkh)
+nqT6 = request.security(sNQ, "1D",  f_stateOf(6), lookahead = lkh)
+esT6 = request.security(sES, "1D",  f_stateOf(6), lookahead = lkh)
+ymT6 = request.security(sYM, "1D",  f_stateOf(6), lookahead = lkh)
+nqT7 = request.security(sNQ, "1W",  f_stateOf(7), lookahead = lkh)
+esT7 = request.security(sES, "1W",  f_stateOf(7), lookahead = lkh)
+ymT7 = request.security(sYM, "1W",  f_stateOf(7), lookahead = lkh)
+
+// הסריקה רצה רק על הנר האחרון — מציגים מצב נוכחי, לא היסטוריה
+panPos  = mtfPanPos == "ימין למטה" ? position.bottom_right : mtfPanPos == "ימין למעלה" ? position.top_right : mtfPanPos == "שמאל למטה" ? position.bottom_left : position.top_left
+markPos = mtfMarkPos == "שמאל למטה" ? position.bottom_left : mtfMarkPos == "שמאל למעלה" ? position.top_left : mtfMarkPos == "אמצע למטה" ? position.bottom_center : position.bottom_right
+
+var string mtfPrev = ""
+var table mtfTbl  = table.new(panPos,  2, 8, border_width = 0)
+var table markTbl = table.new(markPos, 1, 1, border_width = 0)
+
+if mtfOn and barstate.islast
+    s1 = f_tfState(nqT1, esT1, ymT1)
+    s2 = f_tfState(nqT2, esT2, ymT2)
+    s3 = f_tfState(nqT3, esT3, ymT3)
+    s4 = f_tfState(nqT4, esT4, ymT4)
+    s5 = f_tfState(nqT5, esT5, ymT5)
+    s6 = f_tfState(nqT6, esT6, ymT6)
+    s7 = f_tfState(nqT7, esT7, ymT7)
+
+    // שורת סימון מרוכזת — רק מסגרות שיש בהן שבירה חיה
+    line1 = ""
+    line1 := s7 != "" ? line1 + "1W " + s7 + "   " : line1
+    line1 := s6 != "" ? line1 + "1D " + s6 + "   " : line1
+    line1 := s5 != "" ? line1 + "4H " + s5 + "   " : line1
+    line1 := s4 != "" ? line1 + "1H " + s4 + "   " : line1
+    line1 := s3 != "" ? line1 + "15m " + s3 + "   " : line1
+    line1 := s2 != "" ? line1 + "5m " + s2 + "   " : line1
+    line1 := s1 != "" ? line1 + "1m " + s1 : line1
+    line1 := str.trim(line1)
+
+    table.clear(markTbl, 0, 0, 0, 0)
+    if mtfMark and line1 != ""
+        table.cell(markTbl, 0, 0, "QT  " + line1, text_color = mtfColor, text_size = size.tiny, bgcolor = color.new(color.black, 100))
+
+    // פאנל מלא — שורה לכל מסגרת, 1W למעלה
+    table.clear(mtfTbl, 0, 0, 1, 7)
+    if mtfPanel
+        rows = array.from(7, 6, 5, 4, 3, 2, 1)
+        txts = array.from(s7, s6, s5, s4, s3, s2, s1)
+        for r = 0 to 6
+            cls = array.get(rows, r)
+            st  = array.get(txts, r)
+            nm  = (cls == tfClass ? "▶ " : "   ") + f_tfName(cls)
+            cl  = str.startswith(st, "▼") ? colBear : str.startswith(st, "▲") ? colBull : mtfColor
+            table.cell(mtfTbl, 0, r, nm, text_color = mtfColor, text_size = size.tiny, bgcolor = color.new(color.black, 100))
+            table.cell(mtfTbl, 1, r, st == "" ? "—" : st, text_color = cl, text_size = size.tiny, bgcolor = color.new(color.black, 100))
+        table.cell(mtfTbl, 0, 7, "QT", text_color = mtfColor, text_size = size.tiny, bgcolor = color.new(color.black, 100))
+        table.cell(mtfTbl, 1, 7, "", bgcolor = color.new(color.black, 100))
+
+    // התראה אחת לכל המסגרות — נורית בכל שינוי מצב
+    if mtfAlert and line1 != mtfPrev and line1 != ""
+        alert("QT SSMT: " + line1, alert.freq_once_per_bar)
+    mtfPrev := line1
 
 // ═══════════════════════════════════════════════════════════════════
 // טבלת בדיקה (אבחון — כבויה כברירת מחדל)
