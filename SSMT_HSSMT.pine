@@ -35,6 +35,7 @@ mtfPanel   = input.bool(false, "הצג פאנל מסגרות זמן", group = gr
 mtfPanPos  = input.string("ימין למטה", "מיקום הפאנל", options = ["ימין למטה", "ימין למעלה", "שמאל למטה", "שמאל למעלה"], group = grpMTF)
 mtfColor   = input.color(#787b86, "צבע הסימון והפאנל", group = grpMTF)
 mtfAlert   = input.bool(true,  "כלול שבירות ממסגרות אחרות בהתראה", group = grpMTF)
+mtfBars    = input.int(3000, "כמה נרות היסטוריה לכל מסגרת", minval = 500, maxval = 20000, step = 500, group = grpMTF, tooltip = "מגביל כמה נרות כל מנוע מחשב. אם האינדיקטור לא נטען — להוריד. אם מסגרת נשארת ריקה — להעלות.")
 
 // ═══════════════════════════════════════════════════════════════════
 // בחירת סימבולים
@@ -775,7 +776,9 @@ f_cycIds(int cls) =>
     blk = ((cls == 5 or cls == 4) and dw == dayofweek.friday) or (cls == 5 and blockDeadWeek and dead)
     [rId, lId, kL, blk]
 
-// מצב נכס אחד במסגרת זמן אחת
+// מצב נכס אחד במסגרת זמן אחת.
+// שדות שטוחים ולא מערכים: מערך שחוצה request.security נוצר מחדש בכל נר
+// ומפוצץ את מגבלת הזיכרון. עד 6 תת-מחזורים במיכל (5 ימים + זרע) — מספיק לכולם.
 type ASt
     int    n
     float  cH
@@ -783,10 +786,49 @@ type ASt
     float  cHC
     float  cLC
     bool   blk
-    array<float> hiA
-    array<float> loA
-    array<float> hiCA
-    array<float> loCA
+    float h0
+    float h1
+    float h2
+    float h3
+    float h4
+    float h5
+    float l0
+    float l1
+    float l2
+    float l3
+    float l4
+    float l5
+    float c0
+    float c1
+    float c2
+    float c3
+    float c4
+    float c5
+    float d0
+    float d1
+    float d2
+    float d3
+    float d4
+    float d5
+
+f_at(a, i) => i < array.size(a) ? array.get(a, i) : na
+
+// בונה מערך באורך n מתוך 6 השדות השטוחים (סדר: 0 = הישן ביותר)
+f_mk(v0, v1, v2, v3, v4, v5, n) =>
+    r = array.new_float()
+    if n > 0
+        array.push(r, v0)
+    if n > 1
+        array.push(r, v1)
+    if n > 2
+        array.push(r, v2)
+    if n > 3
+        array.push(r, v3)
+    if n > 4
+        array.push(r, v4)
+    if n > 5
+        array.push(r, v5)
+    r
 
 f_stateOf(int cls) =>
     [rId, lId, kL, blk] = f_cycIds(cls)
@@ -836,7 +878,7 @@ f_stateOf(int cls) =>
         sAct := sPush
     else if nR
         sAct := false
-    ASt.new(array.size(hiA), cH, cL, cHC, cLC, blk, array.copy(hiA), array.copy(loA), array.copy(hiCA), array.copy(loCA))
+    ASt.new(math.min(array.size(hiA), 6), cH, cL, cHC, cLC, blk, f_at(hiA, 0), f_at(hiA, 1), f_at(hiA, 2), f_at(hiA, 3), f_at(hiA, 4), f_at(hiA, 5), f_at(loA, 0), f_at(loA, 1), f_at(loA, 2), f_at(loA, 3), f_at(loA, 4), f_at(loA, 5), f_at(hiCA, 0), f_at(hiCA, 1), f_at(hiCA, 2), f_at(hiCA, 3), f_at(hiCA, 4), f_at(hiCA, 5), f_at(loCA, 0), f_at(loCA, 1), f_at(loCA, 2), f_at(loCA, 3), f_at(loCA, 4), f_at(loCA, 5))
 
 // שם המסגרת לתצוגה
 f_tfName(int cls) => cls == 1 ? "1m" : cls == 2 ? "5m" : cls == 3 ? "15m" : cls == 4 ? "1H" : cls == 5 ? "4H" : cls == 6 ? "1D" : "1W"
@@ -845,35 +887,48 @@ f_tfName(int cls) => cls == 1 ? "1m" : cls == 2 ? "5m" : cls == 3 ? "15m" : cls 
 f_tfState(ASt nq, ASt es, ASt ym) =>
     s = ""
     if not na(nq) and not na(es) and not na(ym) and nq.n > 0 and es.n > 0 and ym.n > 0 and not nq.blk
-        [bT, bI, bS] = f_findBear(nq.hiA, es.hiA, ym.hiA, nq.hiCA, es.hiCA, ym.hiCA, nq.cH, es.cH, ym.cH, nq.cHC, es.cHC, ym.cHC)
-        [uT, uI, uS] = f_findBull(nq.loA, es.loA, ym.loA, nq.loCA, es.loCA, ym.loCA, nq.cL, es.cL, ym.cL, nq.cLC, es.cLC, ym.cLC)
+        n = math.min(math.min(nq.n, es.n), ym.n)
+        nqHi = f_mk(nq.h0, nq.h1, nq.h2, nq.h3, nq.h4, nq.h5, n)
+        esHi = f_mk(es.h0, es.h1, es.h2, es.h3, es.h4, es.h5, n)
+        ymHi = f_mk(ym.h0, ym.h1, ym.h2, ym.h3, ym.h4, ym.h5, n)
+        nqLo = f_mk(nq.l0, nq.l1, nq.l2, nq.l3, nq.l4, nq.l5, n)
+        esLo = f_mk(es.l0, es.l1, es.l2, es.l3, es.l4, es.l5, n)
+        ymLo = f_mk(ym.l0, ym.l1, ym.l2, ym.l3, ym.l4, ym.l5, n)
+        nqHc = f_mk(nq.c0, nq.c1, nq.c2, nq.c3, nq.c4, nq.c5, n)
+        esHc = f_mk(es.c0, es.c1, es.c2, es.c3, es.c4, es.c5, n)
+        ymHc = f_mk(ym.c0, ym.c1, ym.c2, ym.c3, ym.c4, ym.c5, n)
+        nqLc = f_mk(nq.d0, nq.d1, nq.d2, nq.d3, nq.d4, nq.d5, n)
+        esLc = f_mk(es.d0, es.d1, es.d2, es.d3, es.d4, es.d5, n)
+        ymLc = f_mk(ym.d0, ym.d1, ym.d2, ym.d3, ym.d4, ym.d5, n)
+        [bT, bI, bS] = f_findBear(nqHi, esHi, ymHi, nqHc, esHc, ymHc, nq.cH, es.cH, ym.cH, nq.cHC, es.cHC, ym.cHC)
+        [uT, uI, uS] = f_findBull(nqLo, esLo, ymLo, nqLc, esLc, ymLc, nq.cL, es.cL, ym.cL, nq.cLC, es.cLC, ym.cLC)
         sb = bT != 0 ? "▼" + bS : ""
         su = uT != 0 ? "▲" + uS : ""
         s := sb != "" and su != "" ? sb + " " + su : sb + su
     s
 
 lkh = barmerge.lookahead_off
-nqT1 = request.security(sNQ, "1",   f_stateOf(1), lookahead = lkh)
-esT1 = request.security(sES, "1",   f_stateOf(1), lookahead = lkh)
-ymT1 = request.security(sYM, "1",   f_stateOf(1), lookahead = lkh)
-nqT2 = request.security(sNQ, "5",   f_stateOf(2), lookahead = lkh)
-esT2 = request.security(sES, "5",   f_stateOf(2), lookahead = lkh)
-ymT2 = request.security(sYM, "5",   f_stateOf(2), lookahead = lkh)
-nqT3 = request.security(sNQ, "15",  f_stateOf(3), lookahead = lkh)
-esT3 = request.security(sES, "15",  f_stateOf(3), lookahead = lkh)
-ymT3 = request.security(sYM, "15",  f_stateOf(3), lookahead = lkh)
-nqT4 = request.security(sNQ, "60",  f_stateOf(4), lookahead = lkh)
-esT4 = request.security(sES, "60",  f_stateOf(4), lookahead = lkh)
-ymT4 = request.security(sYM, "60",  f_stateOf(4), lookahead = lkh)
-nqT5 = request.security(sNQ, "240", f_stateOf(5), lookahead = lkh)
-esT5 = request.security(sES, "240", f_stateOf(5), lookahead = lkh)
-ymT5 = request.security(sYM, "240", f_stateOf(5), lookahead = lkh)
-nqT6 = request.security(sNQ, "1D",  f_stateOf(6), lookahead = lkh)
-esT6 = request.security(sES, "1D",  f_stateOf(6), lookahead = lkh)
-ymT6 = request.security(sYM, "1D",  f_stateOf(6), lookahead = lkh)
-nqT7 = request.security(sNQ, "1W",  f_stateOf(7), lookahead = lkh)
-esT7 = request.security(sES, "1W",  f_stateOf(7), lookahead = lkh)
-ymT7 = request.security(sYM, "1W",  f_stateOf(7), lookahead = lkh)
+nqT1 = request.security(sNQ, "1",   f_stateOf(1), lookahead = lkh, calc_bars_count = mtfBars)
+esT1 = request.security(sES, "1",   f_stateOf(1), lookahead = lkh, calc_bars_count = mtfBars)
+ymT1 = request.security(sYM, "1",   f_stateOf(1), lookahead = lkh, calc_bars_count = mtfBars)
+nqT2 = request.security(sNQ, "5",   f_stateOf(2), lookahead = lkh, calc_bars_count = mtfBars)
+esT2 = request.security(sES, "5",   f_stateOf(2), lookahead = lkh, calc_bars_count = mtfBars)
+ymT2 = request.security(sYM, "5",   f_stateOf(2), lookahead = lkh, calc_bars_count = mtfBars)
+nqT3 = request.security(sNQ, "15",  f_stateOf(3), lookahead = lkh, calc_bars_count = mtfBars)
+esT3 = request.security(sES, "15",  f_stateOf(3), lookahead = lkh, calc_bars_count = mtfBars)
+ymT3 = request.security(sYM, "15",  f_stateOf(3), lookahead = lkh, calc_bars_count = mtfBars)
+nqT4 = request.security(sNQ, "60",  f_stateOf(4), lookahead = lkh, calc_bars_count = mtfBars)
+esT4 = request.security(sES, "60",  f_stateOf(4), lookahead = lkh, calc_bars_count = mtfBars)
+ymT4 = request.security(sYM, "60",  f_stateOf(4), lookahead = lkh, calc_bars_count = mtfBars)
+nqT5 = request.security(sNQ, "240", f_stateOf(5), lookahead = lkh, calc_bars_count = mtfBars)
+esT5 = request.security(sES, "240", f_stateOf(5), lookahead = lkh, calc_bars_count = mtfBars)
+ymT5 = request.security(sYM, "240", f_stateOf(5), lookahead = lkh, calc_bars_count = mtfBars)
+nqT6 = request.security(sNQ, "1D",  f_stateOf(6), lookahead = lkh, calc_bars_count = mtfBars)
+esT6 = request.security(sES, "1D",  f_stateOf(6), lookahead = lkh, calc_bars_count = mtfBars)
+ymT6 = request.security(sYM, "1D",  f_stateOf(6), lookahead = lkh, calc_bars_count = mtfBars)
+nqT7 = request.security(sNQ, "1W",  f_stateOf(7), lookahead = lkh, calc_bars_count = mtfBars)
+esT7 = request.security(sES, "1W",  f_stateOf(7), lookahead = lkh, calc_bars_count = mtfBars)
+ymT7 = request.security(sYM, "1W",  f_stateOf(7), lookahead = lkh, calc_bars_count = mtfBars)
 
 // הסריקה רצה רק על הנר האחרון — מציגים מצב נוכחי, לא היסטוריה
 panPos  = mtfPanPos == "ימין למטה" ? position.bottom_right : mtfPanPos == "ימין למעלה" ? position.top_right : mtfPanPos == "שמאל למטה" ? position.bottom_left : position.top_left
