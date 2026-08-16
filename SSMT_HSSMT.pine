@@ -790,6 +790,16 @@ type Eng
     bool   started
     bool   sAct
     string txt
+    int    dir
+    int    bTy
+    int    uTy
+    string bStr
+    string uStr
+    int    bSeq
+    int    uSeq
+    int    seqC
+    int    bRefI
+    int    uRefI
     float  nH
     float  nL
     float  nHC
@@ -816,7 +826,7 @@ type Eng
     array<float> yLcA
 
 f_newEng(int cls) =>
-    Eng.new(cls, 0, 0, 0, false, false, "", na, na, na, na, na, na, na, na, na, na, na, na, array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float())
+    Eng.new(cls, 0, 0, 0, false, false, "", 0, 0, 0, "", "", 0, 0, 0, -1, -1, na, na, na, na, na, na, na, na, na, na, na, na, array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float())
 
 // צעד אחד: נר סגור אחד של המסגרת שהמנוע מייצג
 f_engStep(Eng e, int t, float nh, float nl, float nc, float eh, float el, float ec, float yh, float yl, float yc) =>
@@ -899,15 +909,59 @@ f_engStep(Eng e, int t, float nh, float nl, float nc, float eh, float el, float 
         e.started := true
         e.refId   := rId
         e.lifeId  := lId
+        // פקיעת מחזור־על מאפסת את מצב התצוגה, ומחיקת הזרע מזיזה את האינדקסים ב-1
+        if newLife
+            e.bTy   := 0
+            e.uTy   := 0
+            e.bRefI := -1
+            e.uRefI := -1
+        if sDrop
+            e.bRefI := e.bRefI > 0 ? e.bRefI - 1 : -1
+            e.uRefI := e.uRefI > 0 ? e.uRefI - 1 : -1
+
         // אותה לוגיקת סטייה בדיוק כמו הגרף הראשי
-        string s = ""
+        int    nbT = 0
+        int    nbI = -1
+        string nbS = ""
+        int    nuT = 0
+        int    nuI = -1
+        string nuS = ""
         if array.size(e.nHiA) > 0 and not blk
-            [bT, bI, bS] = f_findBear(e.nHiA, e.eHiA, e.yHiA, e.nHcA, e.eHcA, e.yHcA, e.nH, e.eH, e.yH, e.nHC, e.eHC, e.yHC)
-            [uT, uI, uS] = f_findBull(e.nLoA, e.eLoA, e.yLoA, e.nLcA, e.eLcA, e.yLcA, e.nL, e.eL, e.yL, e.nLC, e.eLC, e.yLC)
-            sb = bT != 0 ? "▼" + bS : ""
-            su = uT != 0 ? "▲" + uS : ""
-            s := sb != "" and su != "" ? sb + " " + su : sb + su
-        e.txt := s
+            [xbT, xbI, xbS] = f_findBear(e.nHiA, e.eHiA, e.yHiA, e.nHcA, e.eHcA, e.yHcA, e.nH, e.eH, e.yH, e.nHC, e.eHC, e.yHC)
+            [xuT, xuI, xuS] = f_findBull(e.nLoA, e.eLoA, e.yLoA, e.nLcA, e.eLcA, e.yLcA, e.nL, e.eL, e.yL, e.nLC, e.eLC, e.yLC)
+            nbT := xbT
+            nbI := xbI
+            nbS := xbS
+            nuT := xuT
+            nuI := xuI
+            nuS := xuS
+
+        // ── שני הכיוונים חיים במקביל, אבל מוצג רק אחד: הכי חדש. כשהוא מתבטל
+        //    (הגרעין לקח את הרמה) הישן התקף חוזר להיצג מעצמו. ──
+        if nbT != 0
+            if e.bTy == 0 or nbI != e.bRefI      // כיוון שהיה כבוי, או התעגנות לייחוס אחר = שבירה חדשה
+                e.seqC := e.seqC + 1
+                e.bSeq := e.seqC
+            e.bRefI := nbI
+            e.bTy   := nbT
+            e.bStr  := nbS
+        else
+            e.bTy   := 0
+            e.bRefI := -1
+        if nuT != 0
+            if e.uTy == 0 or nuI != e.uRefI
+                e.seqC := e.seqC + 1
+                e.uSeq := e.seqC
+            e.uRefI := nuI
+            e.uTy   := nuT
+            e.uStr  := nuS
+        else
+            e.uTy   := 0
+            e.uRefI := -1
+
+        d = e.bTy != 0 and e.uTy != 0 ? (e.bSeq > e.uSeq ? -1 : 1) : e.bTy != 0 ? -1 : e.uTy != 0 ? 1 : 0
+        e.dir := d
+        e.txt := d == -1 ? "▼" + e.bStr : d == 1 ? "▲" + e.uStr : ""
     e.txt
 
 // שם המסגרת לתצוגה
@@ -987,7 +1041,8 @@ markPos = mtfMarkPos == "שמאל למטה" ? position.bottom_left : mtfMarkPos 
 
 var string mtfPrev = ""
 var table mtfTbl  = table.new(panPos,  2, 8, border_width = 0)
-var table markTbl = table.new(markPos, 1, 1, border_width = 0)
+// תא נפרד לכל מסגרת, כדי שכל אחת תיצבע בצבע הכיוון שלה
+var table markTbl = table.new(markPos, 6, 1, border_width = 0)
 
 if mtfOn and barstate.islast and tfClass != 0
     // מסגרת הגרף נלקחת מהמנוע המקומי — בדיוק מה שמצויר על הגרף
@@ -997,34 +1052,41 @@ if mtfOn and barstate.islast and tfClass != 0
 
     clsArr = array.from(cU3, cU2, cU1, tfClass, cD1, cD2)
     stArr  = array.from(egU3.txt, egU2.txt, egU1.txt, sC, egD1.txt, egD2.txt)
+    dirArr = array.from(egU3.dir, egU2.dir, egU1.dir, showDir, egD1.dir, egD2.dir)
     // מדרגה שלא נסרקת (מעל 4H, או מתחת לדקה) פשוט יוצאת מהרשימה
     useArr = array.from(useU3, useU2, useU1, true, useD1, useD2)
 
+    bg = color.new(color.black, 100)
     mark = ""
     prevC = -1
     row = 0
-    table.clear(mtfTbl, 0, 0, 1, 7)
+    mcol = 1
+    table.clear(mtfTbl,  0, 0, 1, 7)
+    table.clear(markTbl, 0, 0, 5, 0)
     for i = 0 to 5
         c  = array.get(clsArr, i)
         st = array.get(stArr, i)
+        d  = array.get(dirArr, i)
         if array.get(useArr, i) and c != prevC   // הרשימה יורדת, אז די בהשוואה לקודם כדי לנקות כפילויות בקצוות
+            // צבע הכיוון של האינדיקטור עצמו — אדום לדובי, ירוק לשורי
+            cl = d == -1 ? colBear : d == 1 ? colBull : mtfColor
             if st != ""
                 mark := mark + f_tfName(c) + " " + st + "   "
+                if mtfMark and mcol <= 5
+                    table.cell(markTbl, mcol, 0, f_tfName(c) + " " + st, text_color = cl, text_size = size.small, bgcolor = bg)
+                    mcol := mcol + 1
             if mtfPanel
                 nm = (c == tfClass ? "▶ " : "   ") + f_tfName(c)
-                cl = str.startswith(st, "▼") ? colBear : str.startswith(st, "▲") ? colBull : mtfColor
-                table.cell(mtfTbl, 0, row, nm, text_color = mtfColor, text_size = size.small, bgcolor = color.new(color.black, 100))
-                table.cell(mtfTbl, 1, row, st == "" ? "—" : st, text_color = cl, text_size = size.small, bgcolor = color.new(color.black, 100))
+                table.cell(mtfTbl, 0, row, nm, text_color = cl, text_size = size.small, bgcolor = bg)
+                table.cell(mtfTbl, 1, row, st == "" ? "—" : st, text_color = cl, text_size = size.small, bgcolor = bg)
             row := row + 1
             prevC := c
     mark := str.trim(mark)
     if mtfPanel
-        table.cell(mtfTbl, 0, row, "QT", text_color = mtfColor, text_size = size.small, bgcolor = color.new(color.black, 100))
-        table.cell(mtfTbl, 1, row, "", bgcolor = color.new(color.black, 100))
-
-    table.clear(markTbl, 0, 0, 0, 0)
-    if mtfMark and mark != ""
-        table.cell(markTbl, 0, 0, "QT  " + mark, text_color = mtfColor, text_size = size.small, bgcolor = color.new(color.black, 100))
+        table.cell(mtfTbl, 0, row, "QT", text_color = mtfColor, text_size = size.small, bgcolor = bg)
+        table.cell(mtfTbl, 1, row, "", bgcolor = bg)
+    if mtfMark and mcol > 1
+        table.cell(markTbl, 0, 0, "QT", text_color = mtfColor, text_size = size.small, bgcolor = bg)
 
     if mtfAlert and mark != mtfPrev and mark != ""
         alert("QT SSMT: " + mark, alert.freq_once_per_bar)
