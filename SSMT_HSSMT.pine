@@ -1016,9 +1016,11 @@ useU3 = tfClass + 3 <= 5
 useD1 = tfClass - 1 >= 1
 useD2 = tfClass - 2 >= 1
 
-// הצעד רק בסגירת נר גרף: בנר חי הסקריפט רץ מחדש בכל טיק ומצב ה-var מוחזר
-// אחורה, וצעד באמצע נר היה נספר פעמיים.
-if mtfOn and barstate.isconfirmed and tfClass != 0
+// הצעד רץ גם בתוך נר הגרף החי, ולא רק בסגירתו — כך שבירה של 5 דקות מופיעה
+// ברגע שנר ה-5 נסגר, בלי לחכות לסגירת נר ה-15. זה בטוח: בנר חי הסקריפט רץ
+// מחדש בכל טיק ומצב ה-var מוחזר אחורה לסגירת הנר הקודם, ולכן הצעדים פשוט
+// מחושבים מחדש מאותה נקודה ולא נספרים פעמיים.
+if mtfOn and tfClass != 0
     if useU1
         f_engStep(egU1, aT,  aNh, aNl, aNc, aEh, aEl, aEc, aYh, aYl, aYc)
     if useU2
@@ -1071,7 +1073,9 @@ if mtfOn and barstate.islast and tfClass != 0
             cl = d == -1 ? colBear : d == 1 ? colBull : mtfColor
             if st != ""
                 mark := mark + f_tfName(c) + " " + st + "   "
-                if mtfMark and mcol <= 5
+                // את מסגרת הגרף עצמה לא כותבים בפינה — היא כבר מצוירת על הגרף.
+                // בפאנל ובהתראה היא כן נשארת.
+                if mtfMark and c != tfClass and mcol <= 5
                     table.cell(markTbl, mcol, 0, f_tfName(c) + " " + st, text_color = cl, text_size = size.small, bgcolor = bg)
                     mcol := mcol + 1
             if mtfPanel
