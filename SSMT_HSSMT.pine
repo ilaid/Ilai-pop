@@ -1045,10 +1045,9 @@ var table mtfTbl  = table.new(panPos,  2, 8, border_width = 0)
 var table markTbl = table.new(markPos, 6, 1, border_width = 0)
 
 if mtfOn and barstate.islast and tfClass != 0
-    // מסגרת הגרף נלקחת מהמנוע המקומי — בדיוק מה שמצויר על הגרף
-    sbC = bearType != 0 ? "▼" + bearStr : ""
-    suC = bullType != 0 ? "▲" + bullStr : ""
-    sC  = sbC != "" and suC != "" ? sbC + " " + suC : sbC + suC
+    // מסגרת הגרף נלקחת מהמנוע המקומי — בדיוק אותה שבירה שמצוירת על הגרף,
+    // כלומר רק אחת (העדכנית), לפי showDir. בלי זה נראו שני הכיוונים יחד.
+    sC = showDir == -1 ? "▼" + bearStr : showDir == 1 ? "▲" + bullStr : ""
 
     clsArr = array.from(cU3, cU2, cU1, tfClass, cD1, cD2)
     stArr  = array.from(egU3.txt, egU2.txt, egU1.txt, sC, egD1.txt, egD2.txt)
