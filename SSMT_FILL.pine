@@ -17,8 +17,10 @@ indicator("SSMT Fill | Quarterly Theory", overlay = true, max_labels_count = 20,
 // אבל הגאפ נשאר תקף, וכניסה חוזרת אליו נמדדת מחדש ויכולה לייצר שבירה.
 //
 // שבירה היא אירוע שקרה — אחרי שנרשמה היא נשארת, והדרגה יכולה רק לעלות.
-// רק שלושה דברים מבטלים אותה: IFVG · שבירה נגדית · החלפת מיכל.
-// חיה עד סוף המיכל בכל מסגרות הזמן, ומוצגת תמיד העדכנית ביותר.
+// מה שמוציא אותה מהמשחק: IFVG על הגאפ שלה, או החלפת מיכל.
+// שבירה נגדית רק דוחקת אותה מהתצוגה — מוצגת תמיד החיה העדכנית ביותר.
+// אם הגאפ של הנגדית הופך ל-IFVG, הקודמת בכיוון ההפוך חוזרת להיות המוצגת,
+// כל עוד המיכל לא התחלף.
 //
 // מיפוי תת-מחזור/מיכל לכל מסגרת זמן:
 //   1M  — רבע 22.5m   → מיקרו-סשן    5M  — מיקרו-סשן → סשן
@@ -515,7 +517,7 @@ f_step(Engine e, int tOpen, float no0, float nh0, float nl0, float nc0, float no
                         gr.fDeg  := deg
                         gr.fLead := dN > dE ? "NQ" : "ES"
 
-        // ── בחירת השבירה המוצגת + ביטול בשבירה נגדית ──
+        // ── בחירת השבירה המוצגת (החיה העדכנית ביותר) ──
         int selI = -1
         int selS = -1
         if array.size(e.gaps) > 0
@@ -530,11 +532,6 @@ f_step(Engine e, int tOpen, float no0, float nh0, float nl0, float nc0, float no
             e.fLead := ""
         else
             Gap gd = array.get(e.gaps, selI)
-            if e.shownDir != 0 and gd.dir != e.shownDir
-                for i = 0 to array.size(e.gaps) - 1
-                    Gap gk = array.get(e.gaps, i)
-                    if gk.dir == e.shownDir
-                        gk.fDeg := 0
             e.shownDir := gd.dir
             e.fDir     := gd.dir
             e.fDeg     := gd.fDeg
@@ -765,12 +762,14 @@ if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK and array.
 // ═══════════════════════════════════════════════════════════════════
 // בחירת מה מוצג — השבירה החיה העדכנית ביותר
 //
-// שבירה חיה עד סוף המיכל, בכל מסגרות הזמן. מה שמבטל אותה זה רק שלושת
-// אלה: IFVG · שבירה נגדית · החלפת מיכל.
+// שבירה חיה עד סוף המיכל, בכל מסגרות הזמן. מה שמוציא אותה מהרשימה זה
+// IFVG על הגאפ שלה, או החלפת מיכל.
 //   15M — שבירה של לונדון מלווה את שאר יום המסחר (NY-AM ו-NY-PM)
 //   1H  — של יום שני, עד סוף השבוע · 4H — של שבוע, עד סוף החודש
 //   1D  — של רבעון, עד סוף השנה · 1W — של שנה, עד סוף מחזור 4 השנים
-// מבין השבירות החיות מצוירת זו שקרתה אחרונה.
+// מבין השבירות החיות מצוירת זו שקרתה אחרונה. שבירה נגדית לא מוחקת את
+// הקודמות — היא רק חדשה יותר ולכן קופצת לתצוגה. אם היא מתה ב-IFVG,
+// הקודמת בכיוון ההפוך חוזרת מעצמה.
 // ═══════════════════════════════════════════════════════════════════
 
 int selIdx = -1
@@ -782,18 +781,15 @@ if array.size(gaps) > 0
             selSeq := gv.fSeq
             selIdx := i
 
-// שבירה נגדית מבטלת את השבירות בכיוון הישן (באותה מסגרת זמן)
+// שבירה נגדית דוחקת את הקודמות מהתצוגה, אבל לא מוחקת אותן. הבחירה למעלה
+// לוקחת תמיד את החיה העדכנית ביותר, ולכן כשהגאפ של הנגדית הופך ל-IFVG הוא
+// יוצא מהרשימה והשבירה הקודמת בכיוון ההפוך חוזרת מעצמה. ‏5 שבירות לירידות,
+// אחת לעליות שנשברת — וחוזרים לירידות, עד שהמיכל מתחלף.
 var int shownDir = 0
 if newLifeCycle
     shownDir := 0
 if selIdx != -1
-    int newDirShown = array.get(gaps, selIdx).dir
-    if shownDir != 0 and newDirShown != shownDir
-        for i = 0 to array.size(gaps) - 1
-            Gap gk = array.get(gaps, i)
-            if gk.dir == shownDir
-                gk.fDeg := 0
-    shownDir := newDirShown
+    shownDir := array.get(gaps, selIdx).dir
 
 // ═══════════════════════════════════════════════════════════════════
 // מסגרות זמן אחרות — מנוע נפרד לכל אחת
@@ -1025,26 +1021,24 @@ if showMtf and barstate.islast and tfClass != 0
 
 flashPosition = flashPos == "שמאל למעלה" ? position.top_left : flashPos == "ימין למטה" ? position.bottom_right : flashPos == "ימין למעלה" ? position.top_right : flashPos == "אמצע למטה" ? position.bottom_center : position.bottom_left
 
-var table flashT = table.new(flashPosition, 1, 1)
+// תא נפרד לכל מסגרת ולא מחרוזת אחת, כדי שכל אחת תיצבע לפי הכיוון שלה:
+// ירוק לעליות, אדום לירידות — אותם צבעים של הקופסאות על הגרף.
+var table flashT = table.new(flashPosition, 7, 1)
 
 if barstate.islast
-    string fTxt = ""
-    color  fCol = color.gray
+    for cx = 0 to 6
+        table.cell(flashT, cx, 0, "", bgcolor = color.new(color.black, 100))
     if mtfFlash and mtfOn and tfClass != 0
         if flashMode == "כל עוד יש שבירה חיה"
             // כל המסגרות האחרות שיש עליהן שבירה חיה, מהגבוהה לנמוכה
-            int newest = 0
+            int cx = 0
             for cc = 7 to 1
                 int cd = array.get(pDir, cc - 1)
                 if cc != tfClass and cd != -9 and cd != 0
-                    fTxt := fTxt + (fTxt == "" ? "" : "   ") + f_clsName(cc) + (cd == 1 ? " ▲" : " ▼") + str.tostring(array.get(pDeg, cc - 1))
-                    if array.get(pTime, cc - 1) >= newest
-                        newest := array.get(pTime, cc - 1)
-                        fCol   := cd == 1 ? colBull : colBear
+                    table.cell(flashT, cx, 0, f_clsName(cc) + (cd == 1 ? " ▲" : " ▼") + str.tostring(array.get(pDeg, cc - 1)) + "  ", bgcolor = color.new(color.black, 100), text_color = cd == 1 ? colBull : colBear, text_size = size.small)
+                    cx := cx + 1
         else if flashTxt != "" and timenow - flashTime <= mtfFlashMin * 60000
-            fTxt := flashTxt
-            fCol := flashDir == 1 ? colBull : colBear
-    table.cell(flashT, 0, 0, fTxt, bgcolor = color.new(color.black, 100), text_color = fCol, text_size = size.small)
+            table.cell(flashT, 0, 0, flashTxt, bgcolor = color.new(color.black, 100), text_color = flashDir == 1 ? colBull : colBear, text_size = size.small)
 
 
 // ═══════════════════════════════════════════════════════════════════
