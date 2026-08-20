@@ -98,6 +98,10 @@ mtfFlash     = input.bool(true, "הצג סימון זעיר משאר המסגר�
 flashMode    = input.string("רק כששבירה נולדת", "מתי להציג", options = ["רק כששבירה נולדת", "כל עוד יש שבירה חיה"], group = grpMtf)
 mtfFlashMin  = input.int(10, "כמה דקות להשאיר את הסימון", minval = 1, maxval = 240, group = grpMtf)
 flashPos     = input.string("שמאל למטה", "מיקום הסימון", options = ["שמאל למטה", "שמאל למעלה", "ימין למטה", "ימין למעלה", "אמצע למטה"], group = grpMtf)
+// טריידינגויו מדביק טבלאות של אינדיקטורים שונים באותה פינה זו לצד זו. שורות
+// ריקות מרימות את השורה שלנו מעל השורה של האינדיקטור השני, בלי לשנות כלום
+// בעיצוב עצמו. 0 = צמוד לקצה כמו קודם.
+flashLift    = input.int(1, "הרם את הסימון (שורות)", minval = 0, maxval = 6, group = grpMtf)
 mtfAlert     = input.bool(true, "כלול שבירות ממסגרות אחרות בהתראה", group = grpMtf)
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1021,13 +1025,22 @@ if showMtf and barstate.islast and tfClass != 0
 
 flashPosition = flashPos == "שמאל למעלה" ? position.top_left : flashPos == "ימין למטה" ? position.bottom_right : flashPos == "ימין למעלה" ? position.top_right : flashPos == "אמצע למטה" ? position.bottom_center : position.bottom_left
 
+// כשהטבלה עוגנת למטה, השורה האמיתית היא העליונה והריקות דוחפות אותה כלפי
+// מעלה. כשהיא עוגנת למעלה — הפוך.
+flashTop = flashPos == "שמאל למעלה" or flashPos == "ימין למעלה"
+flashRow = flashTop ? flashLift : 0
+
 // תא נפרד לכל מסגרת ולא מחרוזת אחת, כדי שכל אחת תיצבע לפי הכיוון שלה:
 // ירוק לעליות, אדום לירידות — אותם צבעים של הקופסאות על הגרף.
-var table flashT = table.new(flashPosition, 7, 1)
+var table flashT = table.new(flashPosition, 7, flashLift + 1)
 
 if barstate.islast
-    for cx = 0 to 6
-        table.cell(flashT, cx, 0, "", bgcolor = color.new(color.black, 100))
+    for rr = 0 to flashLift
+        for cx = 0 to 6
+            table.cell(flashT, cx, rr, "", bgcolor = color.new(color.black, 100))
+        // מרווח בלתי נראה ששומר על גובה השורה
+        if rr != flashRow
+            table.cell(flashT, 0, rr, "·", bgcolor = color.new(color.black, 100), text_color = color.new(color.white, 100), text_size = size.small)
     if mtfFlash and mtfOn and tfClass != 0
         if flashMode == "כל עוד יש שבירה חיה"
             // כל המסגרות האחרות שיש עליהן שבירה חיה, מהגבוהה לנמוכה
@@ -1035,10 +1048,10 @@ if barstate.islast
             for cc = 7 to 1
                 int cd = array.get(pDir, cc - 1)
                 if cc != tfClass and cd != -9 and cd != 0
-                    table.cell(flashT, cx, 0, f_clsName(cc) + (cd == 1 ? " ▲" : " ▼") + str.tostring(array.get(pDeg, cc - 1)) + "  ", bgcolor = color.new(color.black, 100), text_color = cd == 1 ? colBull : colBear, text_size = size.small)
+                    table.cell(flashT, cx, flashRow, f_clsName(cc) + (cd == 1 ? " ▲" : " ▼") + str.tostring(array.get(pDeg, cc - 1)) + "  ", bgcolor = color.new(color.black, 100), text_color = cd == 1 ? colBull : colBear, text_size = size.small)
                     cx := cx + 1
         else if flashTxt != "" and timenow - flashTime <= mtfFlashMin * 60000
-            table.cell(flashT, 0, 0, flashTxt, bgcolor = color.new(color.black, 100), text_color = flashDir == 1 ? colBull : colBear, text_size = size.small)
+            table.cell(flashT, 0, flashRow, flashTxt, bgcolor = color.new(color.black, 100), text_color = flashDir == 1 ? colBull : colBear, text_size = size.small)
 
 
 // ═══════════════════════════════════════════════════════════════════
