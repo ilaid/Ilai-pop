@@ -966,12 +966,22 @@ f_engStep(Eng e, int t, float nh, float nl, float nc, float eh, float el, float 
 
 // סמן רץ: מחזיר את האינדקס האחרון במערך הזמנים שזמנו <= t, החל מ-from.
 // המערכים ממוינים ולכן הסמן רק מתקדם — מעבר אחד על כל תת-הנרות.
+// חשוב: ב-Pine האופרטור and לא מובטח כ-short-circuit, ולכן אסור לכתוב
+// while k < n - 1 and array.get(ta, k + 1) <= t — ה-array.get יורץ גם
+// כשהתנאי הראשון שקרי ויזרוק Index out of range. לכן שני if מקוננים.
 f_cur(array<int> ta, int t, int from) =>
-    k = from
     n = array.size(ta)
+    k = from < 0 ? 0 : from > n - 1 ? n - 1 : from
     if n > 0
-        while k < n - 1 and array.get(ta, k + 1) <= t
-            k := k + 1
+        bool go = true
+        while go
+            if k < n - 1
+                if array.get(ta, k + 1) <= t
+                    k := k + 1
+                else
+                    go := false
+            else
+                go := false
     k
 
 // שם המסגרת לתצוגה
