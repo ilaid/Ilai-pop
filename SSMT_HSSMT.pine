@@ -964,6 +964,16 @@ f_engStep(Eng e, int t, float nh, float nl, float nc, float eh, float el, float 
         e.txt := d == -1 ? "▼" + e.bStr : d == 1 ? "▲" + e.uStr : ""
     e.txt
 
+// סמן רץ: מחזיר את האינדקס האחרון במערך הזמנים שזמנו <= t, החל מ-from.
+// המערכים ממוינים ולכן הסמן רק מתקדם — מעבר אחד על כל תת-הנרות.
+f_cur(array<int> ta, int t, int from) =>
+    k = from
+    n = array.size(ta)
+    if n > 0
+        while k < n - 1 and array.get(ta, k + 1) <= t
+            k := k + 1
+    k
+
 // שם המסגרת לתצוגה
 f_tfName(int cls) => cls == 1 ? "1m" : cls == 2 ? "5m" : cls == 3 ? "15m" : cls == 4 ? "1H" : cls == 5 ? "4H" : cls == 6 ? "1D" : "1W"
 
@@ -997,12 +1007,15 @@ lkh = barmerge.lookahead_off
 
 // ignore_invalid_timeframe מחזיר ריק במקום להפיל את הסקריפט כשהמדרגה הזאת
 // לא באמת מתחת לגרף (למשל גרף דקה, שאין מתחתיו כלום).
-[dT_, dNh, dNl, dNc] = request.security_lower_tf(sNQ, tD1, [time, high, low, close], ignore_invalid_timeframe = true)
-[dEh, dEl, dEc]      = request.security_lower_tf(sES, tD1, [high, low, close], ignore_invalid_timeframe = true)
-[dYh, dYl, dYc]      = request.security_lower_tf(sYM, tD1, [high, low, close], ignore_invalid_timeframe = true)
-[fT_, fNh, fNl, fNc] = request.security_lower_tf(sNQ, tD2, [time, high, low, close], ignore_invalid_timeframe = true)
-[fEh, fEl, fEc]      = request.security_lower_tf(sES, tD2, [high, low, close], ignore_invalid_timeframe = true)
-[fYh, fYl, fYc]      = request.security_lower_tf(sYM, tD2, [high, low, close], ignore_invalid_timeframe = true)
+// כל אחד משלושת הנכסים מוחזר כמערך משלו, ודקה בלי עסקאות פשוט לא מייצרת נר.
+// לכן חובה למשוך גם time לכל נכס ולזווג לפי זמן — זיווג לפי אינדקס משווה
+// דקה של NQ מול דקה אחרת של YM ומייצר סטיות שגויות.
+[dNt, dNh, dNl, dNc] = request.security_lower_tf(sNQ, tD1, [time, high, low, close], ignore_invalid_timeframe = true)
+[dEt, dEh, dEl, dEc] = request.security_lower_tf(sES, tD1, [time, high, low, close], ignore_invalid_timeframe = true)
+[dYt, dYh, dYl, dYc] = request.security_lower_tf(sYM, tD1, [time, high, low, close], ignore_invalid_timeframe = true)
+[fNt, fNh, fNl, fNc] = request.security_lower_tf(sNQ, tD2, [time, high, low, close], ignore_invalid_timeframe = true)
+[fEt, fEh, fEl, fEc] = request.security_lower_tf(sES, tD2, [time, high, low, close], ignore_invalid_timeframe = true)
+[fYt, fYh, fYl, fYc] = request.security_lower_tf(sYM, tD2, [time, high, low, close], ignore_invalid_timeframe = true)
 
 var Eng egU1 = f_newEng(cU1)
 var Eng egU2 = f_newEng(cU2)
@@ -1027,12 +1040,27 @@ if mtfOn and tfClass != 0
         f_engStep(egU2, bT_, bNh, bNl, bNc, bEh, bEl, bEc, bYh, bYl, bYc)
     if useU3
         f_engStep(egU3, cT_, cNh, cNl, cNc, cEh, cEl, cEc, cYh, cYl, cYc)
-    if useD1 and array.size(dNc) > 0 and array.size(dEc) == array.size(dNc) and array.size(dYc) == array.size(dNc)
+    // תת-הנרות מזווגים לפי זמן: הזמנים של NQ הם המפתח, וסמן רץ מוצא לכל נכס
+    // את הנר שלו באותו זמן. נכס שחסרה לו הדקה הזאת נשאר על הנר הקודם שלו —
+    // וזה בטוח, כי המצברים לוקחים מקסימום/מינימום וערך שכבר נכלל לא משנה כלום.
+    if useD1 and array.size(dNc) > 0 and array.size(dEc) > 0 and array.size(dYc) > 0
+        int ke = 0
+        int ky = 0
         for j = 0 to array.size(dNc) - 1
-            f_engStep(egD1, array.get(dT_, j), array.get(dNh, j), array.get(dNl, j), array.get(dNc, j), array.get(dEh, j), array.get(dEl, j), array.get(dEc, j), array.get(dYh, j), array.get(dYl, j), array.get(dYc, j))
-    if useD2 and array.size(fNc) > 0 and array.size(fEc) == array.size(fNc) and array.size(fYc) == array.size(fNc)
+            tj = array.get(dNt, j)
+            ke := f_cur(dEt, tj, ke)
+            ky := f_cur(dYt, tj, ky)
+            if array.get(dEt, ke) <= tj and array.get(dYt, ky) <= tj
+                f_engStep(egD1, tj, array.get(dNh, j), array.get(dNl, j), array.get(dNc, j), array.get(dEh, ke), array.get(dEl, ke), array.get(dEc, ke), array.get(dYh, ky), array.get(dYl, ky), array.get(dYc, ky))
+    if useD2 and array.size(fNc) > 0 and array.size(fEc) > 0 and array.size(fYc) > 0
+        int me = 0
+        int my = 0
         for j = 0 to array.size(fNc) - 1
-            f_engStep(egD2, array.get(fT_, j), array.get(fNh, j), array.get(fNl, j), array.get(fNc, j), array.get(fEh, j), array.get(fEl, j), array.get(fEc, j), array.get(fYh, j), array.get(fYl, j), array.get(fYc, j))
+            tj = array.get(fNt, j)
+            me := f_cur(fEt, tj, me)
+            my := f_cur(fYt, tj, my)
+            if array.get(fEt, me) <= tj and array.get(fYt, my) <= tj
+                f_engStep(egD2, tj, array.get(fNh, j), array.get(fNl, j), array.get(fNc, j), array.get(fEh, me), array.get(fEl, me), array.get(fEc, me), array.get(fYh, my), array.get(fYl, my), array.get(fYc, my))
 
 // ═══════════════════════════════════════════════════════════════════
 // תצוגה — סימון זעיר בפינה + פאנל אופציונלי + התראה אחת
