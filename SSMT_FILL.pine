@@ -1509,6 +1509,49 @@ if showDebug and barstate.islast
     table.cell(dbg, 3, 10, friBlock ? "FRI" : "-", bgcolor = wc)
 
 // ═══════════════════════════════════════════════════════════════════
+// אבחון המנועים — מה כל מסגרת באמת מחזיקה
+//
+// נדלק יחד עם טבלת הבדיקה. לכל מסגרת פעילה: כמה גאפים חיים יש לה, כמה מהם
+// נדרכו, מה הדרגה שנרשמה ומי המשתתפים. זה מה שמפריד בין "הזיהוי לא מצא
+// גאפ", "הגאפ נמצא אבל לא נדרך" ו"הכול קיים אבל העומקים לא נותנים דרגה".
+// ═══════════════════════════════════════════════════════════════════
+
+var table edbg = table.new(position.middle_left, 5, 10, border_width = 1)
+if showDebug and barstate.islast and array.size(allEng) > 0
+    color ehc = color.gray
+    color ewc = color.white
+    for rr = 0 to 9
+        for cx = 0 to 4
+            table.cell(edbg, cx, rr, "", bgcolor = color.new(color.black, 100))
+    table.cell(edbg, 0, 0, "מנוע", bgcolor = ehc, text_color = ewc, text_size = size.tiny)
+    table.cell(edbg, 1, 0, "גאפים", bgcolor = ehc, text_color = ewc, text_size = size.tiny)
+    table.cell(edbg, 2, 0, "נדרכו", bgcolor = ehc, text_color = ewc, text_size = size.tiny)
+    table.cell(edbg, 3, 0, "deg", bgcolor = ehc, text_color = ewc, text_size = size.tiny)
+    table.cell(edbg, 4, 0, "משתתפים", bgcolor = ehc, text_color = ewc, text_size = size.tiny)
+    int er = 0
+    for k = 0 to array.size(allEng) - 1
+        if f_useSlot(k) and er < 9
+            Engine ee = array.get(allEng, k)
+            int egLive = 0
+            int egArm  = 0
+            int egMax  = 0
+            if array.size(ee.gaps) > 0
+                for i = 0 to array.size(ee.gaps) - 1
+                    Gap gq = array.get(ee.gaps, i)
+                    if not gq.dead
+                        egLive += 1
+                        if gq.armed
+                            egArm += 1
+                        egMax := math.max(egMax, gq.fracDeg())
+            er += 1
+            table.cell(edbg, 0, er, f_clsName(ee.cls), bgcolor = ehc, text_color = ewc, text_size = size.tiny)
+            table.cell(edbg, 1, er, str.tostring(egLive), bgcolor = ewc, text_size = size.tiny)
+            table.cell(edbg, 2, er, str.tostring(egArm), bgcolor = ewc, text_size = size.tiny)
+            // deg = מה שנרשם · (deg) = מה שהעומקים נותנים כרגע על הגאפ הכי חזק
+            table.cell(edbg, 3, er, str.tostring(ee.fDeg) + " (" + str.tostring(egMax) + ")", bgcolor = ewc, text_size = size.tiny)
+            table.cell(edbg, 4, er, ee.fLead == "" ? "-" : ee.fLead, bgcolor = ewc, text_size = size.tiny)
+
+// ═══════════════════════════════════════════════════════════════════
 // שליחת ההתראה — פעם אחת בסוף הנר
 //
 // ההודעה נאספה משבירות של מסגרת הגרף וגם של כל המסגרות האחרות, ולכן
