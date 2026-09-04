@@ -301,6 +301,7 @@ type Gap
     float  esRawTop
     int    refId    // תת-המחזור שבו נולד
     int    birth    // הנר השלישי — הנר שסגר את ה-FVG
+    int    birthT   // זמן הפתיחה של אותו נר — לזיהוי הגאפ בטבלת האבחון
     int    origin   // הנר הראשון של ה-FVG — משם מתחילה הקופסה
     float  nqExt    // הקיצוניות בביקור הנוכחי (min ל-bull, max ל-bear)
     float  esExt
@@ -439,6 +440,8 @@ type Engine
     string       fLead
     int          fSeq
     int          fTime      // זמן הסגירה שבו נרשמה — לחישוב "טרייה"
+    int          fGapId     // הגאפ שנושא את השבירה המוצגת
+    int          fWhen      // ומתי הוא נולד
     bool         justFired
 
 // כל מזהי המחזורים מתוך חותמת זמן של נר, לפי מחלקת מסגרת הזמן.
@@ -663,7 +666,7 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
             int parts = (na(nt) ? 0 : 1) + (na(et) ? 0 : 1) + (na(yt) ? 0 : 1)
             if parts >= 2
                 e.gapCounter := e.gapCounter + 1
-                Gap gn = Gap.new(e.gapCounter, nd, nb, nt, eb, et, yb, yt, nrb, nrt, erb, ert, rf, bar_index, bar_index, nd == 1 ? nt : nb, nd == 1 ? et : eb, nd == 1 ? yt : yb, 0, 0, 0, 0, false, false, false, 0, "", 0, 0, na)
+                Gap gn = Gap.new(e.gapCounter, nd, nb, nt, eb, et, yb, yt, nrb, nrt, erb, ert, rf, bar_index, tOpen, bar_index, nd == 1 ? nt : nb, nd == 1 ? et : eb, nd == 1 ? yt : yb, 0, 0, 0, 0, false, false, false, 0, "", 0, 0, na)
                 array.push(e.gaps, gn)
                 if array.size(e.gaps) > maxGaps
                     array.shift(e.gaps)
@@ -693,12 +696,16 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
                     selS := gv.fSeq
                     selI := i
         if selI == -1
-            e.fDir  := 0
-            e.fDeg  := 0
-            e.fLead := ""
+            e.fDir   := 0
+            e.fDeg   := 0
+            e.fLead  := ""
+            e.fGapId := 0
+            e.fWhen  := 0
         else
             Gap gd = array.get(e.gaps, selI)
             e.shownDir := gd.dir
+            e.fGapId   := gd.id
+            e.fWhen    := gd.birthT
             e.fDir     := gd.dir
             e.fDeg     := gd.fDeg
             e.fLead    := gd.fLead
@@ -910,7 +917,7 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
         int parts = (na(nt) ? 0 : 1) + (na(et) ? 0 : 1) + (na(yt) ? 0 : 1)
         if parts >= 2
             gapCounter += 1
-            Gap gn = Gap.new(gapCounter, newDir, nb, nt, eb, et, yb, yt, nrb, nrt, erb, ert, refCycleId, bar_index, bar_index - 2, newDir == 1 ? nt : nb, newDir == 1 ? et : eb, newDir == 1 ? yt : yb, 0, 0, 0, 0, false, false, false, 0, "", 0, 0, na)
+            Gap gn = Gap.new(gapCounter, newDir, nb, nt, eb, et, yb, yt, nrb, nrt, erb, ert, refCycleId, bar_index, time, bar_index - 2, newDir == 1 ? nt : nb, newDir == 1 ? et : eb, newDir == 1 ? yt : yb, 0, 0, 0, 0, false, false, false, 0, "", 0, 0, na)
             array.push(gaps, gn)
             if array.size(gaps) > maxGaps
                 array.shift(gaps)
@@ -1071,16 +1078,16 @@ tfl3 = cL3 == 1 ? "1" : cL3 == 2 ? "5" : cL3 == 3 ? "15" : cL3 == 4 ? "60" : cL3
 [q2yo, q2yh, q2yl, q2yc] = request.security_lower_tf(sYM, tfl2, [open, high, low, close], ignore_invalid_timeframe = true)
 [q3yo, q3yh, q3yl, q3yc] = request.security_lower_tf(sYM, tfl3, [open, high, low, close], ignore_invalid_timeframe = true)
 
-var Engine eg1 = Engine.new(c1, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, false)
-var Engine eg2 = Engine.new(c2, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, false)
-var Engine eg3 = Engine.new(c3, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, false)
-var Engine eg4 = Engine.new(c4, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, false)
-var Engine eg5 = Engine.new(c5, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, false)
-var Engine eg6 = Engine.new(c6, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, false)
+var Engine eg1 = Engine.new(c1, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, 0, 0, false)
+var Engine eg2 = Engine.new(c2, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, 0, 0, false)
+var Engine eg3 = Engine.new(c3, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, 0, 0, false)
+var Engine eg4 = Engine.new(c4, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, 0, 0, false)
+var Engine eg5 = Engine.new(c5, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, 0, 0, false)
+var Engine eg6 = Engine.new(c6, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, 0, 0, false)
 
-var Engine el1 = Engine.new(cL1, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, false)
-var Engine el2 = Engine.new(cL2, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, false)
-var Engine el3 = Engine.new(cL3, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, false)
+var Engine el1 = Engine.new(cL1, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, 0, 0, false)
+var Engine el2 = Engine.new(cL2, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, 0, 0, false)
+var Engine el3 = Engine.new(cL3, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, 0, 0, false)
 
 // אילו מדרגות באמת קיימות ונצעדות
 useH1 = tfClass + 1 <= 7
@@ -1427,7 +1434,7 @@ if showDebug and barstate.islast
     float  tYmTop  = na
     float  tYmBot  = na
     int    tArmB   = 0
-    int    tBirth  = 0
+    int    tBirthT = 0
     if dIdx != -1
         Gap gt   = array.get(gaps, dIdx)
         tN      := gt.depthOf(0)
@@ -1447,7 +1454,7 @@ if showDebug and barstate.islast
         tYmTop  := gt.ymTop
         tYmBot  := gt.ymBot
         tArmB   := gt.armB
-        tBirth  := gt.birth
+        tBirthT := gt.birthT
 
     table.cell(dbg, 0, 0, "SSMT Fill", bgcolor = hc, text_color = wc)
     table.cell(dbg, 1, 0, "NQ", bgcolor = hc, text_color = wc)
@@ -1499,7 +1506,7 @@ if showDebug and barstate.islast
     table.cell(dbg, 3, 8, f_num(tYmBot), bgcolor = wc)
 
     table.cell(dbg, 0, 9, "נולד / נדרך", bgcolor = hc, text_color = wc)
-    table.cell(dbg, 1, 9, f_time(tBirth), bgcolor = wc)
+    table.cell(dbg, 1, 9, tBirthT == 0 ? "-" : str.format_time(tBirthT, "dd/MM HH:mm", TZ), bgcolor = wc)
     table.cell(dbg, 2, 9, f_time(tArmB), bgcolor = wc)
     table.cell(dbg, 3, 9, "Q" + str.tostring(qtWeekNum), bgcolor = wc)
 
@@ -1516,18 +1523,19 @@ if showDebug and barstate.islast
 // גאפ", "הגאפ נמצא אבל לא נדרך" ו"הכול קיים אבל העומקים לא נותנים דרגה".
 // ═══════════════════════════════════════════════════════════════════
 
-var table edbg = table.new(position.middle_left, 5, 10, border_width = 1)
+var table edbg = table.new(position.middle_left, 6, 10, border_width = 1)
 if showDebug and barstate.islast and array.size(allEng) > 0
     color ehc = color.gray
     color ewc = color.white
     for rr = 0 to 9
-        for cx = 0 to 4
+        for cx = 0 to 5
             table.cell(edbg, cx, rr, "", bgcolor = color.new(color.black, 100))
     table.cell(edbg, 0, 0, "מנוע", bgcolor = ehc, text_color = ewc, text_size = size.tiny)
     table.cell(edbg, 1, 0, "גאפים", bgcolor = ehc, text_color = ewc, text_size = size.tiny)
     table.cell(edbg, 2, 0, "נדרכו", bgcolor = ehc, text_color = ewc, text_size = size.tiny)
     table.cell(edbg, 3, 0, "deg", bgcolor = ehc, text_color = ewc, text_size = size.tiny)
     table.cell(edbg, 4, 0, "משתתפים", bgcolor = ehc, text_color = ewc, text_size = size.tiny)
+    table.cell(edbg, 5, 0, "הגאפ", bgcolor = ehc, text_color = ewc, text_size = size.tiny)
     int er = 0
     for k = 0 to array.size(allEng) - 1
         if f_useSlot(k) and er < 9
@@ -1550,6 +1558,8 @@ if showDebug and barstate.islast and array.size(allEng) > 0
             // deg = מה שנרשם · (deg) = מה שהעומקים נותנים כרגע על הגאפ הכי חזק
             table.cell(edbg, 3, er, str.tostring(ee.fDeg) + " (" + str.tostring(egMax) + ")", bgcolor = ewc, text_size = size.tiny)
             table.cell(edbg, 4, er, ee.fLead == "" ? "-" : ee.fLead, bgcolor = ewc, text_size = size.tiny)
+            // על איזה גאפ בדיוק יושבת השבירה המוצגת, ומתי הוא נולד
+            table.cell(edbg, 5, er, ee.fGapId == 0 ? "-" : "#" + str.tostring(ee.fGapId) + " " + str.format_time(ee.fWhen, "dd/MM HH:mm", TZ), bgcolor = ewc, text_size = size.tiny)
 
 // ═══════════════════════════════════════════════════════════════════
 // שליחת ההתראה — פעם אחת בסוף הנר
