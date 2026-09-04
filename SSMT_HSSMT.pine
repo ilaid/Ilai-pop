@@ -488,9 +488,11 @@ f_findBear(nqHiA, esHiA, ymHiA, nqHiCA, esHiCA, ymHiCA, nqCH, esCH, ymCH, nqCHC,
         float nqMHc = nqCHC
         float esMHc = esCHC
         float ymMHc = ymCHC
-        bool stopped = false
+        // אין עצירה כשהגרעין הסכים על רבע מסוים: הגבוה של רבע ישן יותר (אסיה)
+        // בדרך כלל גבוה מזה של הרבע שאחריו (לונדון), ולקיחת לונדון לא אומרת
+        // שאסיה נלקחה. המקסימום המצטבר כבר מבטיח שרבע שכן נלקח לא ידווח.
         for i = n - 1 to 0
-            if bT == 0 and not stopped
+            if bT == 0
                 nw = nqMH > array.get(nqHiA, i)    // פתיל מעל הפתיל-הגבוה של הייחוס (SSMT)
                 ew = esMH > array.get(esHiA, i)
                 yw = ymMH > array.get(ymHiA, i)
@@ -514,8 +516,6 @@ f_findBear(nqHiA, esHiA, ymHiA, nqHiCA, esHiCA, ymHiCA, nqCH, esCH, ymCH, nqCHC,
                     bT := hs != "" ? 2 : 1
                     bI := i
                     bS := lbl
-                else if (nw and ew) or (nc and ec)
-                    stopped := true      // הגרעין הסכים (בפתיל או בסגירה) — אין שבירה דובית
             nqMH  := math.max(nqMH,  array.get(nqHiA, i))
             esMH  := math.max(esMH,  array.get(esHiA, i))
             ymMH  := math.max(ymMH,  array.get(ymHiA, i))
@@ -538,9 +538,10 @@ f_findBull(nqLoA, esLoA, ymLoA, nqLoCA, esLoCA, ymLoCA, nqCL, esCL, ymCL, nqCLC,
         float nqMLc = nqCLC
         float esMLc = esCLC
         float ymMLc = ymCLC
-        bool stopped = false
+        // אותו עיקרון כמו בדובי: לא עוצרים ברבע שהגרעין לקח, כי הנמוך של רבע
+        // ישן יותר בדרך כלל נמוך יותר ועדיין לא נלקח. המינימום המצטבר מסנן.
         for i = n - 1 to 0
-            if bT == 0 and not stopped
+            if bT == 0
                 nw = nqML < array.get(nqLoA, i)    // פתיל מתחת לפתיל-הנמוך של הייחוס (SSMT)
                 ew = esML < array.get(esLoA, i)
                 yw = ymML < array.get(ymLoA, i)
@@ -564,8 +565,6 @@ f_findBull(nqLoA, esLoA, ymLoA, nqLoCA, esLoCA, ymLoCA, nqCL, esCL, ymCL, nqCLC,
                     bT := hs != "" ? 2 : 1
                     bI := i
                     bS := lbl
-                else if (nw and ew and yw) or (nc and ec and yc)
-                    stopped := true      // כל השלושה לקחו את הנמוך — הסכמה, אין שבירה שורית
             nqML  := math.min(nqML,  array.get(nqLoA, i))
             esML  := math.min(esML,  array.get(esLoA, i))
             ymML  := math.min(ymML,  array.get(ymLoA, i))
