@@ -85,17 +85,25 @@ quarterIdx    = math.floor(minsInMicro / 22.5)
 
 daysSinceMonday = tdDow == dayofweek.sunday ? 6 : tdDow - 2
 mondayTime      = tradeDayTime - daysSinceMonday * 86400000
+tuesdayTime     = mondayTime + 86400000
 thursdayTime    = mondayTime + 3 * 86400000
 
 monMonth = month(mondayTime, TZ)
 monDom   = dayofmonth(mondayTime, TZ)
 monYear  = year(mondayTime, TZ)
+// העוגן לשיוך שבוע לחודש הוא יום **שלישי**, לא יום שני. שבוע שרק יום שני שלו
+// בחודש הקודם (למשל 31.8 שנופל בשני) הוא ארבעה ימים בחודש החדש, ולכן הוא
+// השבוע הראשון של החודש החדש — לא שבוע מת ולא שבוע של החודש הקודם.
+tueMonth = month(tuesdayTime, TZ)
+tueDom   = dayofmonth(tuesdayTime, TZ)
+tueYear  = year(tuesdayTime, TZ)
 thuMonth = month(thursdayTime, TZ)
 
-// שבוע מת = יום שני עד יום חמישי אינם באותו חודש. שבוע נספר לחודש רק אם שני–חמישי
-// שלו באותו חודש (למשל 4.7–9.7 = השבוע הראשון; שבוע שמתחיל 30.6 הוא שבוע מת).
-isDeadWeek = monMonth != thuMonth
-qtWeekNum  = isDeadWeek ? 0 : math.floor((monDom - 1) / 7) + 1
+// שבוע מת = שלישי וחמישי בחודשים שונים, כלומר לאף חודש אין 4 מתוך 5 ימי המסחר
+// (שני+שלישי בחודש הישן, או שני–רביעי בו). מספור השבוע נספר לפי יום שלישי,
+// ולכן שלישי 1.9 = שבוע 1 ושלישי 8.9 = שבוע 2 (שבוע ה-CPI).
+isDeadWeek = tueMonth != thuMonth
+qtWeekNum  = isDeadWeek ? 0 : math.floor((tueDom - 1) / 7) + 1
 
 // ═══════════════════════════════════════════════════════════════════
 // שנת QT — מתחילה באפריל. Q1 = אפר/מאי/יונ, Q2 = יול/אוג/ספט,
@@ -113,10 +121,10 @@ yearInCyc   = qtYearNum % 4                        // 0..3 — מקום השנה
 // ═══════════════════════════════════════════════════════════════════
 
 tradeDayId = tdYear * 10000 + tdMon * 100 + tdDom
-weekId     = monYear * 10000 + monMonth * 100 + monDom
-// חודש-מחזור ל-4H נקבע לפי חודש יום-שני של השבוע — כך הגבול נופל תמיד בתחילת שבוע
-// (ולא באמצע שבוע מת), המיכל מתאפס נכון, ושבוע 1 = השבוע הראשון שכולו בחודש.
-monthId    = monYear * 100 + monMonth
+weekId     = monYear * 10000 + monMonth * 100 + monDom   // מזהה ייחודי לשבוע — לפי יום שני
+// חודש-מחזור ל-4H נקבע לפי חודש יום-**שלישי** של השבוע — כך הגבול נופל תמיד
+// בתחילת שבוע, והשבוע נספר לחודש שבו נמצאים לפחות 4 מ-5 ימי המסחר שלו.
+monthId    = tueYear * 100 + tueMonth
 sessionId  = tradeDayId * 10 + sessionIdx
 microId    = sessionId * 10 + microIdx
 quarterId  = microId * 10 + quarterIdx
@@ -758,17 +766,21 @@ f_cycT(int cls, int t) =>
     qIdx  = math.floor(mIM / 22.5)
     dsm = dw == dayofweek.sunday ? 6 : dw - 2
     mon = tdt - dsm * 86400000
+    tue = mon + 86400000
     thu = mon + 3 * 86400000
     moM = month(mon, TZ)
     moD = dayofmonth(mon, TZ)
     moY = year(mon, TZ)
-    dead = moM != month(thu, TZ)
+    // אותו עוגן כמו בחישוב הראשי: החודש של השבוע נקבע לפי יום שלישי
+    tuM = month(tue, TZ)
+    tuY = year(tue, TZ)
+    dead = tuM != month(thu, TZ)
     qMonIdx = mm >= 4 ? mm - 4 : mm + 8
     qYear   = mm >= 4 ? yy : yy - 1
     qQtr    = math.floor(qMonIdx / 3) + 1
     tdId = yy * 10000 + mm * 100 + dd
     wkId = moY * 10000 + moM * 100 + moD
-    moId = moY * 100 + moM
+    moId = tuY * 100 + tuM
     seId = tdId * 10 + sIdx
     miId = seId * 10 + miIdx
     quId = miId * 10 + qIdx
