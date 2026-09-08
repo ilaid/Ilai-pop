@@ -176,27 +176,40 @@ quarterIdx    = math.floor(minsInMicro / 22.5)
 
 daysSinceMonday = tdDow == dayofweek.sunday ? 6 : tdDow - 2
 mondayTime      = tradeDayTime - daysSinceMonday * 86400000
+tuesdayTime     = mondayTime + 86400000
 thursdayTime    = mondayTime + 3 * 86400000
 
 monMonth = month(mondayTime, TZ)
 monDom   = dayofmonth(mondayTime, TZ)
 monYear  = year(mondayTime, TZ)
+tueMonth = month(tuesdayTime, TZ)
+tueDom   = dayofmonth(tuesdayTime, TZ)
+tueYear  = year(tuesdayTime, TZ)
 thuMonth = month(thursdayTime, TZ)
 
-// שבוע מת = יום שני עד יום חמישי אינם באותו חודש. שבוע נספר לחודש רק אם שני–חמישי
-// שלו באותו חודש (למשל 4.7–9.7 = השבוע הראשון; שבוע שמתחיל 30.6 הוא שבוע מת).
-isDeadWeek = monMonth != thuMonth
-qtWeekNum  = isDeadWeek ? 0 : math.floor((monDom - 1) / 7) + 1
+// שבוע שייך לחודש שבו נמצאים לפחות 4 מתוך 5 ימי המסחר שלו. אם אין חודש כזה —
+// שבוע מת. **העוגן הוא יום שלישי**, וזה מימוש שקול ופשוט של אותו כלל:
+//   שני 31.8, אחריו 1–4.9  → שלישי בספטמבר → שבוע 1 של ספטמבר (4 מ-5 ימים שם)
+//   שני+שלישי בחודש הישן   → שלישי וחמישי בחודשים שונים → שבוע מת
+//   שני–חמישי בחודש הישן   → שלישי וחמישי באותו חודש ישן → השבוע האחרון שלו
+// עיגון ליום שני היה מזיז את המיכל החודשי לשבוע הלא נכון, וכל תחילת חודש
+// נשארה בלי אף תת-מחזור להשוות אליו.
+// תוצאת לוואי: המספור הזה מיישר את "שבוע 2" עם שבוע פרסום ה-CPI ברוב
+// החודשים, בלי יומן מאקרו (שאין אליו גישה ב-Pine).
+isDeadWeek = tueMonth != thuMonth
+qtWeekNum  = isDeadWeek ? 0 : math.floor((tueDom - 1) / 7) + 1
 
 // ═══════════════════════════════════════════════════════════════════
 // מזהי מחזורים
 // ═══════════════════════════════════════════════════════════════════
 
 tradeDayId = tdYear * 10000 + tdMon * 100 + tdDom
+// weekId הוא רק מזהה ייחודי לשבוע, ולכן יום שני מספיק לו.
 weekId     = monYear * 10000 + monMonth * 100 + monDom
-// חודש-מחזור ל-4H נקבע לפי חודש יום-שני של השבוע — כך הגבול נופל תמיד בתחילת שבוע
-// (ולא באמצע שבוע מת), המיכל מתאפס נכון, ושבוע 1 = השבוע הראשון שכולו בחודש.
-monthId    = monYear * 100 + monMonth
+// monthId הוא זה שקובע מתי המיכל החודשי מתאפס, ולכן הוא **לפי יום שלישי** —
+// אותו עוגן של isDeadWeek ו-qtWeekNum. כך הגבול נופל תמיד בתחילת שבוע, ושבוע
+// שרק יום שני שלו בחודש הקודם נספר נכון לחודש החדש.
+monthId    = tueYear * 100 + tueMonth
 sessionId  = tradeDayId * 10 + sessionIdx
 microId    = sessionId * 10 + microIdx
 quarterId  = microId * 10 + quarterIdx
@@ -467,14 +480,20 @@ f_setCycles(Engine e, int t) =>
     int  qIdx = math.floor(mInU / 22.5)
     int  dsm  = dw == dayofweek.sunday ? 6 : dw - 2
     int  monT = tdt - dsm * 86400000
+    int  tueT = monT + 86400000
     int  thuT = monT + 3 * 86400000
     int  moM  = month(monT, TZ)
     int  moD  = dayofmonth(monT, TZ)
     int  moY  = year(monT, TZ)
-    bool dead = moM != month(thuT, TZ)
+    // אותו עוגן יום-שלישי של הגרף הראשי: שבוע שייך לחודש שבו לפחות 4 מ-5 ימי
+    // המסחר שלו. wkId נשאר לפי יום שני כי הוא רק מזהה ייחודי; mnId — המיכל
+    // החודשי — חייב להיות לפי שלישי.
+    int  tuM  = month(tueT, TZ)
+    int  tuY  = year(tueT, TZ)
+    bool dead = tuM != month(thuT, TZ)
     int  tdId = yy * 10000 + mm * 100 + dd
     int  wkId = moY * 10000 + moM * 100 + moD
-    int  mnId = moY * 100 + moM
+    int  mnId = tuY * 100 + tuM
     int  ssId = tdId * 10 + sIdx
     int  ucId = ssId * 10 + uIdx
     int  qrId = ucId * 10 + qIdx
