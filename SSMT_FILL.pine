@@ -312,9 +312,11 @@ type Gap
     float  nqRawTop
     float  esRawBot
     float  esRawTop
-    int    refId    // תת-המחזור שבו נולד
-    int    birth    // הנר השלישי — הנר שסגר את ה-FVG
-    int    birthT   // זמן הפתיחה של אותו נר — לזיהוי הגאפ בטבלת האבחון
+    // תת-המחזור של **הנר האמצעי** — הנר שיצר את חוסר האיזון. הנר השלישי רק
+    // מאשר אותו, ולכן גאפ שנוצר ב-23:45 שייך לאסיה גם אם האישור הגיע ב-00:00.
+    int    refId
+    int    birth    // הנר השלישי — הנר שסגר את ה-FVG (משמש למניעת IFVG על נר הלידה)
+    int    birthT   // זמן הפתיחה של הנר האמצעי — הזמן שבו הגאפ באמת נוצר
     int    origin   // הנר הראשון של ה-FVG — משם מתחילה הקופסה
     float  nqExt    // הקיצוניות בביקור הנוכחי (min ל-bull, max ל-bear)
     float  esExt
@@ -512,6 +514,11 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
     float nc0 = array.get(n, 3)
     float ec0 = array.get(s, 3)
     if not na(tOpen) and tOpen != e.lastT and (not na(nc0) or not na(ec0))
+        // הצעד הקודם עיבד בדיוק את הנר שהוא כאן הנר האמצעי של השלישייה, ולכן
+        // e.lastT (לפני הדריסה) הוא הזמן שבו הגאפ נוצר. מחשבים ממנו את
+        // תת-המחזור, ואז קוראים שוב עם tOpen כדי להחזיר את שדות cur* לנר הנוכחי.
+        int  tMid  = e.lastT
+        int  rfMid = tMid == 0 ? 0 : f_setCycles(e, tMid)
         e.lastT := tOpen
         f_setCycles(e, tOpen)
         int  rf    = e.curRef
@@ -685,7 +692,8 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
             int parts = (na(nt) ? 0 : 1) + (na(et) ? 0 : 1) + (na(yt) ? 0 : 1)
             if parts >= 2
                 e.gapCounter := e.gapCounter + 1
-                Gap gn = Gap.new(e.gapCounter, nd, nb, nt, eb, et, yb, yt, nrb, nrt, erb, ert, rf, bar_index, tOpen, bar_index, nd == 1 ? nt : nb, nd == 1 ? et : eb, nd == 1 ? yt : yb, 0, 0, 0, 0, false, false, false, 0, "", 0, 0, na)
+                // התיוג הוא לפי הנר האמצעי, לא לפי הנר המאשר
+                Gap gn = Gap.new(e.gapCounter, nd, nb, nt, eb, et, yb, yt, nrb, nrt, erb, ert, rfMid == 0 ? rf : rfMid, bar_index, tMid == 0 ? tOpen : tMid, bar_index, nd == 1 ? nt : nb, nd == 1 ? et : eb, nd == 1 ? yt : yb, 0, 0, 0, 0, false, false, false, 0, "", 0, 0, na)
                 array.push(e.gaps, gn)
                 if array.size(e.gaps) > maxGaps
                     array.shift(e.gaps)
@@ -936,7 +944,9 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
         int parts = (na(nt) ? 0 : 1) + (na(et) ? 0 : 1) + (na(yt) ? 0 : 1)
         if parts >= 2
             gapCounter += 1
-            Gap gn = Gap.new(gapCounter, newDir, nb, nt, eb, et, yb, yt, nrb, nrt, erb, ert, refCycleId, bar_index, time, bar_index - 2, newDir == 1 ? nt : nb, newDir == 1 ? et : eb, newDir == 1 ? yt : yb, 0, 0, 0, 0, false, false, false, 0, "", 0, 0, na)
+            // תת-המחזור והזמן נלקחים מ-[1] — הנר האמצעי, זה שיצר את הגאפ.
+            // הנר השלישי רק מאשר, ואסור שהוא יגרור את הגאפ לתת-המחזור הבא.
+            Gap gn = Gap.new(gapCounter, newDir, nb, nt, eb, et, yb, yt, nrb, nrt, erb, ert, refCycleId[1], bar_index, time[1], bar_index - 2, newDir == 1 ? nt : nb, newDir == 1 ? et : eb, newDir == 1 ? yt : yb, 0, 0, 0, 0, false, false, false, 0, "", 0, 0, na)
             array.push(gaps, gn)
             if array.size(gaps) > maxGaps
                 array.shift(gaps)
