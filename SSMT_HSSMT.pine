@@ -47,12 +47,22 @@ sYM = symYM
 // זיהוי Timeframe
 // ═══════════════════════════════════════════════════════════════════
 
-tfMin   = timeframe.in_seconds() / 60
-// 6 = יומי (ייחוס חודש, מיכל רבעון), 7 = שבועי (ייחוס רבעון, מיכל שנה).
-// רק 1D ו-1W בדיוק; כל טווח אחר מעל 4H כבוי.
+tfSec   = timeframe.in_seconds()
+tfMin   = tfSec / 60
+// סולם המדרגות (המספר עולה ככל שהמסגרת גדולה יותר — הסדר הזה חשוב, כי סריקת
+// מסגרות הזמן מחשבת מדרגה אחת למעלה/למטה כ-tfClass±1):
+//   1 = 15 שניות (ייחוס תת-רבע 5.625 דק', מיכל רבע 22.5 דק')
+//   2 = דקה   (ייחוס רבע 22.5 דק', מיכל מיקרו 90 דק')
+//   3 = 5 דק' (ייחוס מיקרו, מיכל סשן 6 שעות)
+//   4 = 15 דק' (ייחוס סשן, מיכל יום-מסחר)
+//   5 = שעה   (ייחוס יום-מסחר, מיכל שבוע)
+//   6 = 4 שעות (ייחוס שבוע, מיכל חודש)
+//   7 = יומי  (ייחוס רבעון, מיכל שנת QT)   — רק 1D בדיוק
+//   8 = שבועי (ייחוס שנת QT, מיכל מחזור 4 שנים) — רק 1W בדיוק
+//   0 = מסגרת לא נתמכת
 isD1 = timeframe.isdaily  and timeframe.multiplier == 1
 isW1 = timeframe.isweekly and timeframe.multiplier == 1
-tfClass = isD1 ? 6 : isW1 ? 7 : tfMin <= 1 ? 1 : tfMin <= 5 ? 2 : tfMin <= 15 ? 3 : tfMin <= 60 ? 4 : tfMin <= 240 ? 5 : 0
+tfClass = isD1 ? 7 : isW1 ? 8 : tfSec <= 15 ? 1 : tfMin <= 1 ? 2 : tfMin <= 5 ? 3 : tfMin <= 15 ? 4 : tfMin <= 60 ? 5 : tfMin <= 240 ? 6 : 0
 
 // ═══════════════════════════════════════════════════════════════════
 // חישובי זמן EST
@@ -61,11 +71,16 @@ tfClass = isD1 ? 6 : isW1 ? 7 : tfMin <= 1 ? 1 : tfMin <= 5 ? 2 : tfMin <= 15 ? 
 TZ = "America/New_York"
 estHour = hour(time, TZ)
 estMin  = minute(time, TZ)
+estSec  = second(time, TZ)
 
 minutesOfDay = estHour * 60 + estMin
 
 isPostOpen       = minutesOfDay >= 1080
 minsFromDayStart = isPostOpen ? minutesOfDay - 1080 : minutesOfDay + 360
+// תת-הרבע הוא 5.625 דקות = 337.5 שניות, כלומר גבול שנופל גם על חצאי דקות.
+// לכן כל ההיררכיה התוך-יומית מחושבת בשניות. בנרות של דקה ומעלה השניות תמיד
+// אפס, ולכן התוצאה זהה בדיוק לחישוב הישן שהיה בדקות.
+secsFromDayStart = minsFromDayStart * 60 + estSec
 
 tradeDayTime = isPostOpen ? time + 86400000 : time
 tdYear = year(tradeDayTime, TZ)
@@ -73,11 +88,13 @@ tdMon  = month(tradeDayTime, TZ)
 tdDom  = dayofmonth(tradeDayTime, TZ)
 tdDow  = dayofweek(tradeDayTime, TZ)
 
-sessionIdx    = math.floor(minsFromDayStart / 360)
-minsInSession = minsFromDayStart % 360
-microIdx      = math.floor(minsInSession / 90)
-minsInMicro   = minsInSession % 90
-quarterIdx    = math.floor(minsInMicro / 22.5)
+sessionIdx    = math.floor(secsFromDayStart / 21600)   // סשן = 6 שעות
+secsInSession = secsFromDayStart % 21600
+microIdx      = math.floor(secsInSession / 5400)       // מיקרו = 90 דקות
+secsInMicro   = secsInSession % 5400
+quarterIdx    = math.floor(secsInMicro / 1350)         // רבע = 22.5 דקות
+secsInQuarter = secsInMicro % 1350
+subQIdx       = math.floor(secsInQuarter / 337.5)      // תת-רבע = 5.625 דקות
 
 // ═══════════════════════════════════════════════════════════════════
 // מספור שבועות לפי QT
@@ -128,6 +145,7 @@ monthId    = tueYear * 100 + tueMonth
 sessionId  = tradeDayId * 10 + sessionIdx
 microId    = sessionId * 10 + microIdx
 quarterId  = microId * 10 + quarterIdx
+subQId     = quarterId * 10 + subQIdx
 // ביומי הרבעון נקבע לפי חודש יום-המסחר; בשבועי הרבעון/שנה נקבעים לפי יום-שני
 // של השבוע — אותו כלל שמשייך שבוע לחודש ב-4H, כך שהגבול נופל תמיד בתחילת שבוע.
 qtrId      = qtYearNum * 10 + qtQtrNum
@@ -135,36 +153,40 @@ qtYearId   = qtYearNum
 cyc4Id     = math.floor(qtYearNum / 4)
 
 refCycleId = 0
-if tfClass == 7
+if tfClass == 8
     refCycleId := qtYearId
-else if tfClass == 6
+else if tfClass == 7
     refCycleId := qtrId
-else if tfClass == 5
+else if tfClass == 6
     refCycleId := weekId
-else if tfClass == 4
+else if tfClass == 5
     refCycleId := tradeDayId
-else if tfClass == 3
+else if tfClass == 4
     refCycleId := sessionId
-else if tfClass == 2
+else if tfClass == 3
     refCycleId := microId
-else if tfClass == 1
+else if tfClass == 2
     refCycleId := quarterId
+else if tfClass == 1
+    refCycleId := subQId
 
 lifeCycleId = 0
-if tfClass == 7
+if tfClass == 8
     lifeCycleId := cyc4Id
-else if tfClass == 6
+else if tfClass == 7
     lifeCycleId := qtYearId
-else if tfClass == 5
+else if tfClass == 6
     lifeCycleId := monthId
-else if tfClass == 4
+else if tfClass == 5
     lifeCycleId := weekId
-else if tfClass == 3
+else if tfClass == 4
     lifeCycleId := tradeDayId
-else if tfClass == 2
+else if tfClass == 3
     lifeCycleId := sessionId
-else if tfClass == 1
+else if tfClass == 2
     lifeCycleId := microId
+else if tfClass == 1
+    lifeCycleId := quarterId
 
 newRefCycle  = ta.change(refCycleId)  != 0
 newLifeCycle = ta.change(lifeCycleId) != 0
@@ -174,7 +196,7 @@ newLifeCycle = ta.change(lifeCycleId) != 0
 // ב-4H המחזור החודשי עומד בפני עצמו: השבועות משווים רק בתוך אותו חודש (בלי חודש קודם).
 // ביומי ובשבועי אותו עיקרון כמו 1H: הרבעון/השנה הראשונים של המיכל משווים גם ליחידה
 // האחרונה של המיכל הקודם (Q1 מול Q4 הקודם), והזרע הזה נמחק אחרי היחידה הראשונה.
-keepLast = tfClass == 4 or tfClass == 6 or tfClass == 7
+keepLast = tfClass == 5 or tfClass == 7 or tfClass == 8
 
 // ═══════════════════════════════════════════════════════════════════
 // True Open
@@ -187,6 +209,7 @@ inWeeklyQ2  = tdDow == dayofweek.tuesday
 inDailyQ2   = minsFromDayStart >= 360 and minsFromDayStart < 720
 inSessionQ2 = microIdx == 1
 inMicroQ2   = quarterIdx == 1
+inQrtQ2     = subQIdx == 1           // תת-הרבע השני בתוך הרבע — ה-True Open של 15 שניות
 
 var bool pCycQ2 = false
 var bool pYrQ2  = false
@@ -195,22 +218,25 @@ var bool pWkQ2  = false
 var bool pDayQ2 = false
 var bool pSesQ2 = false
 var bool pMicQ2 = false
+var bool pQrtQ2 = false
 
 isTrueOpenBar = false
-if tfClass == 7
+if tfClass == 8
     isTrueOpenBar := inCyc4Q2 and not pCycQ2
-else if tfClass == 6
+else if tfClass == 7
     isTrueOpenBar := inYearlyQ2 and not pYrQ2
-else if tfClass == 5
+else if tfClass == 6
     isTrueOpenBar := inMonthlyQ2 and not pMonQ2
-else if tfClass == 4
+else if tfClass == 5
     isTrueOpenBar := inWeeklyQ2 and not pWkQ2
-else if tfClass == 3
+else if tfClass == 4
     isTrueOpenBar := inDailyQ2 and not pDayQ2
-else if tfClass == 2
+else if tfClass == 3
     isTrueOpenBar := inSessionQ2 and not pSesQ2
-else if tfClass == 1
+else if tfClass == 2
     isTrueOpenBar := inMicroQ2 and not pMicQ2
+else if tfClass == 1
+    isTrueOpenBar := inQrtQ2 and not pQrtQ2
 
 pCycQ2 := inCyc4Q2
 pYrQ2  := inYearlyQ2
@@ -219,6 +245,7 @@ pWkQ2  := inWeeklyQ2
 pDayQ2 := inDailyQ2
 pSesQ2 := inSessionQ2
 pMicQ2 := inMicroQ2
+pQrtQ2 := inQrtQ2
 
 var float trueOpenPrice = na
 if isTrueOpenBar
@@ -459,8 +486,8 @@ else if newRefCycle
 // ═══════════════════════════════════════════════════════════════════
 
 nLevels = array.size(nqHiA)
-cycleOK   = not (tfClass == 5 and blockDeadWeek and isDeadWeek)
-friBlock  = (tfClass == 5 or tfClass == 4) and tdDow == dayofweek.friday
+cycleOK   = not (tfClass == 6 and blockDeadWeek and isDeadWeek)
+friBlock  = (tfClass == 6 or tfClass == 5) and tdDow == dayofweek.friday
 
 bearOK = not requireTrueOpen or (not na(trueOpenPrice) and close > trueOpenPrice)
 bullOK = not requireTrueOpen or (not na(trueOpenPrice) and close < trueOpenPrice)
@@ -680,7 +707,7 @@ else if bullType != 0
     showDir := 1
 
 // חידוד: שבירה שעתית מייצגת את השבוע (שני–חמישי) — ביום שישי היא כבר לא רלוונטית.
-if tfClass == 4 and tdDow == dayofweek.friday
+if tfClass == 5 and tdDow == dayofweek.friday
     showDir := 0
 
 dispType = showDir == -1 ? bearType : showDir == 1 ? bullType : 0
@@ -751,6 +778,7 @@ if not na(aLine) and showDir != 0
 f_cycT(int cls, int t) =>
     eH   = hour(t, TZ)
     eM   = minute(t, TZ)
+    eS   = second(t, TZ)
     mOD  = eH * 60 + eM
     post = mOD >= 1080
     mFD  = post ? mOD - 1080 : mOD + 360
@@ -759,11 +787,15 @@ f_cycT(int cls, int t) =>
     mm = month(tdt, TZ)
     dd = dayofmonth(tdt, TZ)
     dw = dayofweek(tdt, TZ)
-    sIdx  = math.floor(mFD / 360)
-    mIS   = mFD % 360
-    miIdx = math.floor(mIS / 90)
-    mIM   = mIS % 90
-    qIdx  = math.floor(mIM / 22.5)
+    // בשניות, בדיוק כמו בחישוב הראשי — בשביל תת-הרבע של 5.625 דקות
+    sFD   = mFD * 60 + eS
+    sIdx  = math.floor(sFD / 21600)
+    sIS   = sFD % 21600
+    miIdx = math.floor(sIS / 5400)
+    sIM   = sIS % 5400
+    qIdx  = math.floor(sIM / 1350)
+    sIQ   = sIM % 1350
+    sqIdx = math.floor(sIQ / 337.5)
     dsm = dw == dayofweek.sunday ? 6 : dw - 2
     mon = tdt - dsm * 86400000
     tue = mon + 86400000
@@ -784,12 +816,13 @@ f_cycT(int cls, int t) =>
     seId = tdId * 10 + sIdx
     miId = seId * 10 + miIdx
     quId = miId * 10 + qIdx
+    sqId = quId * 10 + sqIdx
     qrId = qYear * 10 + qQtr
     c4Id = math.floor(qYear / 4)
-    rId = cls == 7 ? qYear : cls == 6 ? qrId : cls == 5 ? wkId : cls == 4 ? tdId : cls == 3 ? seId : cls == 2 ? miId : quId
-    lId = cls == 7 ? c4Id  : cls == 6 ? qYear : cls == 5 ? moId : cls == 4 ? wkId : cls == 3 ? tdId : cls == 2 ? seId : miId
-    kL  = cls == 4 or cls == 6 or cls == 7
-    blk = ((cls == 5 or cls == 4) and dw == dayofweek.friday) or (cls == 5 and blockDeadWeek and dead)
+    rId = cls == 8 ? qYear : cls == 7 ? qrId : cls == 6 ? wkId : cls == 5 ? tdId : cls == 4 ? seId : cls == 3 ? miId : cls == 2 ? quId : sqId
+    lId = cls == 8 ? c4Id  : cls == 7 ? qYear : cls == 6 ? moId : cls == 5 ? wkId : cls == 4 ? tdId : cls == 3 ? seId : cls == 2 ? miId : quId
+    kL  = cls == 5 or cls == 7 or cls == 8
+    blk = ((cls == 6 or cls == 5) and dw == dayofweek.friday) or (cls == 6 and blockDeadWeek and dead)
     [rId, lId, kL, blk]
 
 // מנוע שלם למסגרת זמן אחת — כל המצב שלו מוקצה פעם אחת ומתעדכן במקום
@@ -996,23 +1029,24 @@ f_cur(array<int> ta, int t, int from) =>
     k
 
 // שם המסגרת לתצוגה
-f_tfName(int cls) => cls == 1 ? "1m" : cls == 2 ? "5m" : cls == 3 ? "15m" : cls == 4 ? "1H" : cls == 5 ? "4H" : cls == 6 ? "1D" : "1W"
+f_tfName(int cls) => cls == 1 ? "15s" : cls == 2 ? "1m" : cls == 3 ? "5m" : cls == 4 ? "15m" : cls == 5 ? "1H" : cls == 6 ? "4H" : cls == 7 ? "1D" : "1W"
 
 // שלוש מסגרות מעל הגרף ושתיים מתחת, אבל **לא מעל 4H**: 1D ו-1W לא נסרקים
 // ולא מוצגים בפינה. מסגרת הגרף עצמה תמיד מוצגת, גם אם היא יומית או שבועית.
-cU1 = math.min(tfClass + 1, 5)
-cU2 = math.min(tfClass + 2, 5)
-cU3 = math.min(tfClass + 3, 5)
+// המדרגה התחתונה היא 15 שניות; מתחתיה אין כלום.
+cU1 = math.min(tfClass + 1, 6)
+cU2 = math.min(tfClass + 2, 6)
+cU3 = math.min(tfClass + 3, 6)
 cD1 = math.max(tfClass - 1, 1)
 cD2 = math.max(tfClass - 2, 1)
 
 // המחרוזות חייבות להיות טרנרי ישיר ולא קריאה לפונקציה: פונקציה ב-Pine מחזירה
 // תמיד series string, ו-request.security דורש simple string בפרמטר הזמן.
-tU1 = cU1 == 1 ? "1" : cU1 == 2 ? "5" : cU1 == 3 ? "15" : cU1 == 4 ? "60" : cU1 == 5 ? "240" : cU1 == 6 ? "D" : "W"
-tU2 = cU2 == 1 ? "1" : cU2 == 2 ? "5" : cU2 == 3 ? "15" : cU2 == 4 ? "60" : cU2 == 5 ? "240" : cU2 == 6 ? "D" : "W"
-tU3 = cU3 == 1 ? "1" : cU3 == 2 ? "5" : cU3 == 3 ? "15" : cU3 == 4 ? "60" : cU3 == 5 ? "240" : cU3 == 6 ? "D" : "W"
-tD1 = cD1 == 1 ? "1" : cD1 == 2 ? "5" : cD1 == 3 ? "15" : cD1 == 4 ? "60" : cD1 == 5 ? "240" : cD1 == 6 ? "D" : "W"
-tD2 = cD2 == 1 ? "1" : cD2 == 2 ? "5" : cD2 == 3 ? "15" : cD2 == 4 ? "60" : cD2 == 5 ? "240" : cD2 == 6 ? "D" : "W"
+tU1 = cU1 == 1 ? "15S" : cU1 == 2 ? "1" : cU1 == 3 ? "5" : cU1 == 4 ? "15" : cU1 == 5 ? "60" : cU1 == 6 ? "240" : cU1 == 7 ? "D" : "W"
+tU2 = cU2 == 1 ? "15S" : cU2 == 2 ? "1" : cU2 == 3 ? "5" : cU2 == 4 ? "15" : cU2 == 5 ? "60" : cU2 == 6 ? "240" : cU2 == 7 ? "D" : "W"
+tU3 = cU3 == 1 ? "15S" : cU3 == 2 ? "1" : cU3 == 3 ? "5" : cU3 == 4 ? "15" : cU3 == 5 ? "60" : cU3 == 6 ? "240" : cU3 == 7 ? "D" : "W"
+tD1 = cD1 == 1 ? "15S" : cD1 == 2 ? "1" : cD1 == 3 ? "5" : cD1 == 4 ? "15" : cD1 == 5 ? "60" : cD1 == 6 ? "240" : cD1 == 7 ? "D" : "W"
+tD2 = cD2 == 1 ? "15S" : cD2 == 2 ? "1" : cD2 == 3 ? "5" : cD2 == 4 ? "15" : cD2 == 5 ? "60" : cD2 == 6 ? "240" : cD2 == 7 ? "D" : "W"
 
 lkh = barmerge.lookahead_off
 
@@ -1044,9 +1078,9 @@ var Eng egU3 = f_newEng(cU3)
 var Eng egD1 = f_newEng(cD1)
 var Eng egD2 = f_newEng(cD2)
 
-useU1 = tfClass + 1 <= 5
-useU2 = tfClass + 2 <= 5
-useU3 = tfClass + 3 <= 5
+useU1 = tfClass + 1 <= 6
+useU2 = tfClass + 2 <= 6
+useU3 = tfClass + 3 <= 6
 useD1 = tfClass - 1 >= 1
 useD2 = tfClass - 2 >= 1
 
