@@ -34,6 +34,10 @@ mtfPanel   = input.bool(false, "הצג פאנל מסגרות זמן", group = gr
 mtfPanPos  = input.string("ימין למטה", "מיקום הפאנל", options = ["ימין למטה", "ימין למעלה", "שמאל למטה", "שמאל למעלה"], group = grpMTF)
 mtfColor   = input.color(color.white, "צבע הסימון והפאנל", group = grpMTF)
 mtfAlert   = input.bool(true,  "כלול שבירות ממסגרות אחרות בהתראה", group = grpMTF)
+// נתוני שניות דורשים מנוי שתומך בהם. בלעדיהם הבקשה אמורה לחזור ריקה והשורה
+// פשוט לא תוצג — אבל אם TradingView בכל זאת מתלונן, לכבות את המתג הזה מוריד
+// את מדרגת 15 השניות מהסריקה לגמרי. הגרף עצמו לא מושפע.
+use15s     = input.bool(true,  "כלול מדרגת 15 שניות בסריקה", group = grpMTF)
 
 // ═══════════════════════════════════════════════════════════════════
 // בחירת סימבולים
@@ -1037,8 +1041,10 @@ f_tfName(int cls) => cls == 1 ? "15s" : cls == 2 ? "1m" : cls == 3 ? "5m" : cls 
 cU1 = math.min(tfClass + 1, 6)
 cU2 = math.min(tfClass + 2, 6)
 cU3 = math.min(tfClass + 3, 6)
-cD1 = math.max(tfClass - 1, 1)
-cD2 = math.max(tfClass - 2, 1)
+// המדרגה הנמוכה ביותר שנסרקת: 1 = 15 שניות, או 2 = דקה כשהמתג כבוי
+minCls = use15s ? 1 : 2
+cD1 = math.max(tfClass - 1, minCls)
+cD2 = math.max(tfClass - 2, minCls)
 
 // המחרוזות חייבות להיות טרנרי ישיר ולא קריאה לפונקציה: פונקציה ב-Pine מחזירה
 // תמיד series string, ו-request.security דורש simple string בפרמטר הזמן.
@@ -1081,8 +1087,8 @@ var Eng egD2 = f_newEng(cD2)
 useU1 = tfClass + 1 <= 6
 useU2 = tfClass + 2 <= 6
 useU3 = tfClass + 3 <= 6
-useD1 = tfClass - 1 >= 1
-useD2 = tfClass - 2 >= 1
+useD1 = tfClass - 1 >= minCls
+useD2 = tfClass - 2 >= minCls
 
 // הצעד רץ גם בתוך נר הגרף החי, ולא רק בסגירתו — כך שבירה של 5 דקות מופיעה
 // ברגע שנר ה-5 נסגר, בלי לחכות לסגירת נר ה-15. זה בטוח: בנר חי הסקריפט רץ
