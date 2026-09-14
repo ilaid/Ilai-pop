@@ -34,10 +34,11 @@ mtfPanel   = input.bool(false, "הצג פאנל מסגרות זמן", group = gr
 mtfPanPos  = input.string("ימין למטה", "מיקום הפאנל", options = ["ימין למטה", "ימין למעלה", "שמאל למטה", "שמאל למעלה"], group = grpMTF)
 mtfColor   = input.color(color.white, "צבע הסימון והפאנל", group = grpMTF)
 mtfAlert   = input.bool(true,  "כלול שבירות ממסגרות אחרות בהתראה", group = grpMTF)
-// נתוני שניות דורשים מנוי שתומך בהם. בלעדיהם הבקשה אמורה לחזור ריקה והשורה
-// פשוט לא תוצג — אבל אם TradingView בכל זאת מתלונן, לכבות את המתג הזה מוריד
-// את מדרגת 15 השניות מהסריקה לגמרי. הגרף עצמו לא מושפע.
-use15s     = input.bool(true,  "כלול מדרגת 15 שניות בסריקה", group = grpMTF)
+// מדרגת 15 השניות כבויה כברירת מחדל: TradingView זורק שגיאת ריצה RE10063
+// ("seconds-based timeframes ... Premium and higher-tier plans") על עצם הבקשה
+// למסגרת שניות, ו-ignore_invalid_timeframe לא מכסה את זה. כשהמתג כבוי
+// המדרגה התחתונה היא דקה, ושום בקשה במסגרת שניות לא נשלחת.
+use15s     = input.bool(false, "כלול מדרגת 15 שניות (דורש מנוי Premium)", group = grpMTF)
 
 // ═══════════════════════════════════════════════════════════════════
 // בחירת סימבולים
