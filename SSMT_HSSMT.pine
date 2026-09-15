@@ -12,6 +12,11 @@ grpSym = "סימבולים"
 symNQ = input.symbol("CME_MINI:MNQ1!",  "NQ", group = grpSym)
 symES = input.symbol("CME_MINI:MES1!",  "ES", group = grpSym)
 symYM = input.symbol("CBOT_MINI:MYM1!", "YM", group = grpSym)
+// בשבוע גלגול חוזים (ספטמבר→דצמבר וכו') החוזה הרציף "1!" קופץ במרווח שבין
+// החוזים — כ-1% מהמחיר, כלומר כ-290 נקודות ב-NQ. בלי יישור, ההיסטוריה שלפני
+// הגלגול נמדדת בחוזה הישן והמחירים של היום בחדש, ההשוואה נשברת, והקו מצויר
+// במקום שאין בו נרות. היישור מסיר את הקפיצה ומחזיר רצף אמיתי.
+adjMode = input.string("מיושר לגלגול", "נתוני חוזה רציף", options = ["מיושר לגלגול", "בלי יישור", "ברירת המחדל של הסימבול"], group = grpSym)
 
 grpVis = "תצוגה"
 colBull    = input.color(#26a69a, "צבע שורי", group = grpVis)
@@ -44,9 +49,14 @@ use15s     = input.bool(false, "כלול מדרגת 15 שניות (דורש מנ
 // בחירת סימבולים
 // ═══════════════════════════════════════════════════════════════════
 
-sNQ = symNQ
-sES = symES
-sYM = symYM
+// ticker.modify מחזיר simple string, ולכן מותר להעביר אותו ל-request.security.
+// היישור חל על שלושת הנכסים יחד — זה קריטי, כי מרווח הגלגול שונה בנקודות לכל
+// אחד מהם, ויישור חלקי היה מעוות את ההשוואה ביניהם יותר מאשר בלי יישור בכלל.
+bAdj = adjMode == "מיושר לגלגול" ? backadjustment.on : adjMode == "בלי יישור" ? backadjustment.off : backadjustment.inherit
+
+sNQ = ticker.modify(symNQ, backadjustment = bAdj)
+sES = ticker.modify(symES, backadjustment = bAdj)
+sYM = ticker.modify(symYM, backadjustment = bAdj)
 
 // ═══════════════════════════════════════════════════════════════════
 // זיהוי Timeframe
