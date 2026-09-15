@@ -1191,7 +1191,7 @@ if mtfOn and barstate.islast and tfClass != 0
 
 f_num(x) => na(x) ? "-" : str.tostring(x, format.mintick)
 
-var table dbg = table.new(position.top_right, 4, 14, border_width = 1)
+var table dbg = table.new(position.top_right, 4, 16, border_width = 1)
 if showDebug and barstate.islast
     // רמות ייחוס הכי נמוכות/גבוהות במיכל (סגירה) — "הכי נמוך/גבוה בחודש"
     float nqMinLoC = nLevels > 0 ? array.min(nqLoCA) : na
@@ -1269,3 +1269,14 @@ if showDebug and barstate.islast
     table.cell(dbg, 1, 13, str.tostring(bearSeq) + "/" + str.tostring(bullSeq), bgcolor = wc)
     table.cell(dbg, 2, 13, "", bgcolor = wc)
     table.cell(dbg, 3, 13, "", bgcolor = wc)
+    // תת-המחזור והמיכל הנוכחיים. בגרף שעה ref = יום המסחר (YYYYMMDD) ו-life =
+    // השבוע (התאריך של יום שני). ככה רואים בדיוק לאיזה יום ההשוואה אמורה להיות.
+    table.cell(dbg, 0, 14, "ref/life", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 14, str.tostring(refCycleId), bgcolor = wc)
+    table.cell(dbg, 2, 14, str.tostring(lifeCycleId), bgcolor = wc)
+    table.cell(dbg, 3, 14, "seed:" + (seedActive ? "1" : "0"), bgcolor = wc)
+    // הזמן שבו נקבע הגבוה/הנמוך של הייחוס הראשון במערך — לזיהוי הנר בגרף
+    table.cell(dbg, 0, 15, "refBar h/l", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 15, nLevels > 0 ? str.format_time(time[bar_index - array.get(nqHiBA, 0)], "dd/MM HH:mm", TZ) : "-", bgcolor = wc)
+    table.cell(dbg, 2, 15, nLevels > 0 ? str.format_time(time[bar_index - array.get(nqLoBA, 0)], "dd/MM HH:mm", TZ) : "-", bgcolor = wc)
+    table.cell(dbg, 3, 15, "", bgcolor = wc)
