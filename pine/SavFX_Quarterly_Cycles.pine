@@ -1,0 +1,241 @@
+//@version=5
+indicator("Sav FX - Semi / Quarterly Cycles", shorttitle="Sav FX", overlay=false, max_boxes_count=500, max_lines_count=500, max_labels_count=500)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  MULTI-LEVEL QUARTERLY CYCLES
+//
+//  Eight nested levels, every one of them split into four quarters:
+//
+//    1  Quadrennial   cell = 1 year     (Q1 pre-election .. Q4 two years after)
+//    2  Yearly        cell = 1 quarter  (Q1 Jan-Mar .. Q4 Oct-Dec)
+//    3  Weekly        cell = 1 week     (Q1 = NFP week = week of the 1st Friday)
+//    4  Daily         cell = 1 day      (Q1 Mon .. Q4 Thu, day opens 18:00)
+//    5  Session       cell = 6 hours    (Q1 Asia, Q2 London, Q3 AM, Q4 PM)
+//    6  90 minute     cell = 90 min     (four per session)
+//    7  22.5 minute   cell = 22.5 min   (four per 90 min)
+//    8  5.625 minute  cell = 5.625 min  (four per 22.5 min)
+//
+//  Every cell is labelled with the chain of quarters that leads to it, from the
+//  highest level down to its own, so a 22.5 min cell reading  1-3-4  means
+//  Asia session -> 3rd 90 min -> 4th 22.5 min, and the 5.625 min cells under it
+//  read 3-4-1 .. 3-4-4.  "Levels Per Label" sets how many links are printed.
+//
+//  Note: the week is a quarter of a month, but there is no monthly row between
+//  it and the yearly quarter, so the weekly chain reads quadrennial-quarter-week.
+//
+//  Time base: the day opens at 18:00 on the same (exchange time + 1h) scale the
+//  original script used, so the intraday grid sits exactly where it did before.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+
+// ───────────────────────────────── inputs ─────────────────────────────────────
+g_cyc = "Time Cycles"
+showQuad   = input.bool(true, "Quadrennial Cycles", group = g_cyc)
+showYearly = input.bool(true, "Yearly Cycles",      group = g_cyc)
+showWeekly = input.bool(true, "Weekly Cycles",      group = g_cyc)
+showDaily  = input.bool(true, "Daily Cycles",       group = g_cyc)
+show6H     = input.bool(true, "6 Hour Cycles",      group = g_cyc)
+show90     = input.bool(true, "90 Minute",          group = g_cyc)
+show225    = input.bool(true, "22.5 Minute",        group = g_cyc)
+show5625   = input.bool(true, "5.625 Minute",       group = g_cyc)
+
+g_lab = "Labels"
+showLabels  = input.bool(true, "Show Labels", group = g_lab)
+labelDepth  = input.int(3, "Levels Per Label", minval = 1, maxval = 3, group = g_lab, tooltip = "How many levels of the hierarchy each cell prints. 3 gives 3-4-2 (grandparent-parent-self), 2 gives 4-2, 1 gives 2.")
+sepStr      = input.string("-", "Separator", options = ["-", ".", " "], group = g_lab)
+appendNames = input.bool(false, "Append Day / Session Name", group = g_lab, tooltip = "Adds Mon..Sun on the daily row and Asia/Lon/AM/PM on the session row, after the numbers.")
+textSizeIn  = input.string("small", "Text Size", options = ["tiny", "small", "normal", "large"], group = g_lab)
+textCol     = input.color(color.new(#000000, 10), "Text Color", group = g_lab)
+
+g_col = "Colors"
+c1 = input.color(#c8cbd0, "Q1", group = g_col, inline = "q")
+c2 = input.color(#f0a8b0, "Q2", group = g_col, inline = "q")
+c3 = input.color(#a6d6a6, "Q3", group = g_col, inline = "q")
+c4 = input.color(#a3b8e8, "Q4", group = g_col, inline = "q")
+c5 = input.color(#e8eaec, "5+", group = g_col, inline = "q", tooltip = "Used by the cells that fall outside the four quarters: Friday..Sunday on the daily row, and a 5th week in months with five Fridays.")
+
+g_dsp = "Display"
+borderW   = input.int(1, "Border Thickness", minval = 1, maxval = 10, group = g_dsp)
+cellsKept = input.int(100, "Cells Kept Per Row", minval = 4, maxval = 500, group = g_dsp, tooltip = "How much history each row keeps. TradingView allows 500 boxes in total, so a smaller number here leaves room for the slower rows.")
+
+
+// ──────────────────────────── border colour ───────────────────────────────────
+isDarkBg() =>
+    bg   = chart.bg_color
+    luma = (0.299 * color.r(bg) + 0.587 * color.g(bg) + 0.114 * color.b(bg)) / 255
+    luma < 0.5
+
+borderCol = isDarkBg() ? #787b86 : color.new(color.black, 10)
+
+
+// ─────────────────────── which rows are drawn, and where ──────────────────────
+tfs = timeframe.in_seconds()
+
+en1 = showQuad   and tfs >= 21600 and tfs <= 10368000
+en2 = showYearly and tfs >= 21600 and tfs <= 10368000
+en3 = showWeekly and tfs >= 1800  and tfs <= 604800
+en4 = showDaily  and tfs >= 60    and tfs <= 43200
+en5 = show6H     and tfs >= 60    and tfs <= 21600
+en6 = show90     and tfs <= 2700
+en7 = show225    and tfs <= 540
+en8 = show5625   and tfs <= 120
+
+// each row owns one unit of vertical space; the slowest cycle sits at the bottom
+y1 = 1
+y2 = y1 + (en1 ? 1 : 0)
+y3 = y2 + (en2 ? 1 : 0)
+y4 = y3 + (en3 ? 1 : 0)
+y5 = y4 + (en4 ? 1 : 0)
+y6 = y5 + (en5 ? 1 : 0)
+y7 = y6 + (en6 ? 1 : 0)
+y8 = y7 + (en7 ? 1 : 0)
+
+
+// ──────────────────────────────── time base ───────────────────────────────────
+MS_DAY  = 86400000
+MS_6H   = 21600000
+MS_90   = 5400000
+MS_225  = 1350000
+MS_5625 = 337500
+
+// same +1h / exchange-time scale as the original script
+adj = time + 3600000
+
+// milliseconds elapsed since the 18:00 open of the current trading day.
+// tod is measured against midnight rather than built from hour()/minute()/
+// second(), so it stays exact on sub-minute charts: a 5.625 min boundary falls
+// on a half second, which whole-second components would round into the wrong cell
+tod = adj - timestamp(year(adj), month(adj), dayofmonth(adj), 0, 0, 0)
+md  = (tod - 18 * 3600000 + MS_DAY) % MS_DAY
+
+// offset inside each intraday cell -> exact cell boundaries, free of rounding
+off6    = md % MS_6H
+off90   = md % MS_90
+off225  = md % MS_225
+off5625 = md % MS_5625
+
+i6    = int(math.floor(md      / MS_6H))   + 1
+i90   = int(math.floor(off6    / MS_90))   + 1
+i225  = int(math.floor(off90   / MS_225))  + 1
+i5625 = int(math.floor(off225  / MS_5625)) + 1
+
+dayStart = time - md
+
+// the calendar date the trading day belongs to (18:00 + 6h lands on midnight)
+tday = adj + MS_6H
+dw   = dayofweek(tday)                  // 1 = Sunday .. 7 = Saturday
+iDay = dw == 1 ? 7 : dw - 1             // Mon 1 .. Thu 4, then Fri 5, Sat 6, Sun 7
+
+weekStart = dayStart - (iDay - 1) * MS_DAY
+
+// NFP week = the week holding the first Friday of the month, so the week index
+// follows the calendar day of this week's Friday
+friTs  = tday + (5 - iDay) * MS_DAY
+friDom = dayofmonth(friTs)
+iWeek  = int(math.floor((friDom - 1) / 7)) + 1
+
+// yearly quarter
+mth    = month(tday)
+yr     = year(tday)
+iQtr   = int(math.floor((mth - 1) / 3)) + 1
+qtrBeg = timestamp("GMT-5", yr, (iQtr - 1) * 3 + 1, 1, 0, 0)
+qtrEnd = iQtr == 4 ? timestamp("GMT-5", yr + 1, 1, 1, 0, 0) : timestamp("GMT-5", yr, iQtr * 3 + 1, 1, 0, 0)
+
+// quadrennial phase, anchored on the 2024 US election and valid in both directions
+iQuad   = int((yr - 2023) % 4) + 1
+quadBeg = timestamp("GMT-5", yr, 1, 1, 0, 0)
+quadEnd = timestamp("GMT-5", yr + 1, 1, 1, 0, 0)
+
+
+// ──────────────────────────── label construction ──────────────────────────────
+var int[] idx = array.new_int(8, na)
+array.set(idx, 0, iQuad)
+array.set(idx, 1, iQtr)
+array.set(idx, 2, iWeek)
+array.set(idx, 3, iDay)
+array.set(idx, 4, i6)
+array.set(idx, 5, i90)
+array.set(idx, 6, i225)
+array.set(idx, 7, i5625)
+
+// the chain of quarters leading to level `lvl`, highest level first
+chain(int lvl) =>
+    string out = ""
+    int    beg = math.max(1, lvl - labelDepth + 1)
+    if showLabels
+        for i = beg to lvl
+            int v = array.get(idx, i - 1)
+            out := out + (i == beg ? "" : sepStr) + (na(v) ? "?" : str.tostring(v))
+    out
+
+dayName() =>
+    switch iDay
+        1 => "Mon"
+        2 => "Tue"
+        3 => "Wed"
+        4 => "Thu"
+        5 => "Fri"
+        6 => "Sat"
+        => "Sun"
+
+sessName() =>
+    switch i6
+        1 => "Asia"
+        2 => "Lon"
+        3 => "AM"
+        4 => "PM"
+        => ""
+
+colFor(int i) =>
+    i == 1 ? c1 : i == 2 ? c2 : i == 3 ? c3 : i == 4 ? c4 : c5
+
+
+// ───────────────────────────────── drawing ────────────────────────────────────
+var box[] bx1 = array.new_box()
+var box[] bx2 = array.new_box()
+var box[] bx3 = array.new_box()
+var box[] bx4 = array.new_box()
+var box[] bx5 = array.new_box()
+var box[] bx6 = array.new_box()
+var box[] bx7 = array.new_box()
+var box[] bx8 = array.new_box()
+
+// one box per cell: created when a new cell opens, and the row keeps only the
+// last `cellsKept` of them so the slower rows never lose their boxes to the
+// 500 box budget
+cell(box[] store, int left, int right, int top, string txt, color bg) =>
+    int prev = array.size(store) > 0 ? box.get_left(array.get(store, array.size(store) - 1)) : na
+    if na(prev) or prev != left
+        array.push(store, box.new(left = left, top = top, right = right, bottom = top - 1, xloc = xloc.bar_time, bgcolor = bg, border_color = borderCol, border_width = borderW, border_style = line.style_solid, text = txt, text_color = textCol, text_size = textSizeIn))
+        if array.size(store) > cellsKept
+            box.delete(array.shift(store))
+
+if en1
+    cell(bx1, quadBeg, quadEnd, y1, chain(1), colFor(iQuad))
+
+if en2
+    cell(bx2, qtrBeg, qtrEnd, y2, chain(2), colFor(iQtr))
+
+if en3
+    cell(bx3, weekStart, weekStart + 7 * MS_DAY, y3, chain(3), colFor(iWeek))
+
+if en4
+    string t4 = chain(4) + (appendNames and showLabels ? " " + dayName() : "")
+    cell(bx4, dayStart, dayStart + MS_DAY, y4, t4, colFor(iDay))
+
+if en5
+    string t5 = chain(5) + (appendNames and showLabels ? " " + sessName() : "")
+    cell(bx5, time - off6, time - off6 + MS_6H, y5, t5, colFor(i6))
+
+if en6
+    cell(bx6, time - off90, time - off90 + MS_90, y6, chain(6), colFor(i90))
+
+if en7
+    cell(bx7, time - off225, time - off225 + MS_225, y7, chain(7), colFor(i225))
+
+if en8
+    cell(bx8, time - off5625, time - off5625 + MS_5625, y8, chain(8), colFor(i5625))
+
+// the rows are drawn entirely with boxes; this hidden plot only satisfies Pine's
+// "at least one output" rule and is excluded from the pane and the scale
+plot(0, "", display = display.none, editable = false)
