@@ -8,8 +8,8 @@ indicator("Sav FX - Semi / Quarterly Cycles", shorttitle="Sav FX", overlay=false
 //  of the level above it:
 //
 //    row            cell         numbers
-//    1 Quadrennial   1 QT year    which year of the four year cycle
-//    2 Yearly        1 quarter    which quarter of the QT year (it opens in April)
+//    1 Quadrennial   1 year       which year of the four year cycle, 2023 .. 2026
+//    2 Yearly        1 quarter    which quarter of the year, Q1 Jan-Mar .. Q4 Oct-Dec
 //    3 Weekly        1 week       which week of the month
 //    4 Daily         1 day        which day of the week, Mon 1 .. Thu 4
 //    5 6 Hour        6 hours      which session: Asia 1, London 2, AM 3, PM 4
@@ -39,8 +39,8 @@ indicator("Sav FX - Semi / Quarterly Cycles", shorttitle="Sav FX", overlay=false
 
 // ───────────────────────────────── inputs ─────────────────────────────────────
 g_cyc = "Time Cycles"
-showCyc4   = input.bool(true, "Quadrennial Cycles", group = g_cyc, tooltip = "One cell per QT year: which year of the four year cycle it is. A year divisible by 4 is year 1, so 2024-2027 is one cycle.")
-showQtYear = input.bool(true, "Yearly Cycles",      group = g_cyc, tooltip = "One cell per quarter: which quarter of the QT year it is. The QT year opens in April, so Q1 Apr-Jun, Q2 Jul-Sep, Q3 Oct-Dec, Q4 Jan-Mar.")
+showCyc4   = input.bool(true, "Quadrennial Cycles", group = g_cyc, tooltip = "One cell per year: which year of the four year cycle it is. 2023 opens the cycle and 2026 closes it, so 2023 is year 1 and 2026 is year 4.")
+showQtYear = input.bool(true, "Yearly Cycles",      group = g_cyc, tooltip = "One cell per quarter: which quarter of the year it is. Q1 Jan-Mar, Q2 Apr-Jun, Q3 Jul-Sep, Q4 Oct-Dec. April opens Q2, which is the true open of the year.")
 showWeekly = input.bool(true, "Weekly Cycles",      group = g_cyc, tooltip = "One cell per week: which week of the month it is. A week belongs to the month holding its Tuesday.")
 showDaily  = input.bool(true, "Daily Cycles",       group = g_cyc, tooltip = "One cell per trading day: which day of the week it is, Mon 1 .. Thu 4. Friday carries no number.")
 show6H     = input.bool(true, "6 Hour Cycles",      group = g_cyc, tooltip = "One cell per session: Asia 1, London 2, AM 3, PM 4.")
@@ -152,27 +152,21 @@ dead  = year(tueTs) * 100 + month(tueTs) != year(thuTs) * 100 + month(thuTs)
 iWeek = dead ? na : int(math.floor((dayofmonth(tueTs) - 1) / 7)) + 1
 
 
-// ─────────────────── QT year, quarter and the four year cycle ─────────────────
+// ───────────────────── year, quarter and the four year cycle ──────────────────
 mth = month(tday)
 yr  = year(tday)
 
-// the QT year opens in April, so Jan-Mar still belongs to the previous QT year
-qtMonIdx = mth >= 4 ? mth - 4 : mth + 8          // 0 = April .. 11 = March
-qtYear   = mth >= 4 ? yr : yr - 1
-iQtr     = int(math.floor(qtMonIdx / 3)) + 1     // 1 = Apr-Jun .. 4 = Jan-Mar
+// plain calendar quarters: Q1 Jan-Mar, Q2 Apr-Jun, Q3 Jul-Sep, Q4 Oct-Dec.
+// April is not a year boundary, it opens Q2 and with it the true open of the year
+iQtr   = int(math.floor((mth - 1) / 3)) + 1
+qtrBeg = timestamp("GMT-5", yr, (iQtr - 1) * 3 + 1, 1, 0, 0)
+qtrEnd = iQtr == 4 ? timestamp("GMT-5", yr + 1, 1, 1, 0, 0) : timestamp("GMT-5", yr, iQtr * 3 + 1, 1, 0, 0)
 
-// quarter box: Q1 opens on 1 April, Q4 runs Jan-Mar of the next calendar year
-qtrBegY  = iQtr == 4 ? qtYear + 1 : qtYear
-qtrBegM  = iQtr == 4 ? 1 : iQtr * 3 + 1
-qtrEndY  = iQtr >= 3 ? qtYear + 1 : qtYear
-qtrEndM  = iQtr == 3 ? 1 : iQtr == 4 ? 4 : iQtr * 3 + 4
-qtrBeg   = timestamp("GMT-5", qtrBegY, qtrBegM, 1, 0, 0)
-qtrEnd   = timestamp("GMT-5", qtrEndY, qtrEndM, 1, 0, 0)
-
-// a year divisible by four is year 1 of the cycle: 2024, 2025, 2026, 2027
-iCyc4   = int(qtYear % 4) + 1
-cycBeg  = timestamp("GMT-5", qtYear, 4, 1, 0, 0)
-cycEnd  = timestamp("GMT-5", qtYear + 1, 4, 1, 0, 0)
+// the four year cycle runs 2023 2024 2025 2026: 2023 opens it, 2026 closes it.
+// 2023 is 3 mod 4, so (yr + 1) mod 4 numbers it without ever going negative
+iCyc4  = int((yr + 1) % 4) + 1
+cycBeg = timestamp("GMT-5", yr, 1, 1, 0, 0)
+cycEnd = timestamp("GMT-5", yr + 1, 1, 1, 0, 0)
 
 
 // ──────────────────────────── label construction ──────────────────────────────
