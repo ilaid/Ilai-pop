@@ -23,7 +23,7 @@ indicator("Sav FX - Semi / Quarterly Cycles", shorttitle="Sav FX", overlay=false
 //  read 3-4-1 .. 3-4-4.  "Levels Per Label" sets how many links are printed.
 //
 //  The month is three per quarter, not four, so it carries no quarter number of
-//  its own: the chain runs 4 year cycle -> QT quarter -> week, and the month is
+//  its own: the chain runs 4 year cycle -> quarter -> week, and the month is
 //  only what the week is numbered inside.
 //
 //  Levels that carry no quarter number are drawn without colour and without a
@@ -81,7 +81,7 @@ borderCol = isDarkBg() ? #787b86 : color.new(color.black, 10)
 // ─────────────────────── which rows are drawn, and where ──────────────────────
 tfs = timeframe.in_seconds()
 
-en1 = showCyc4   and tfs >= 21600 and tfs <= 10368000   // cell = 1 QT year
+en1 = showCyc4   and tfs >= 21600 and tfs <= 10368000   // cell = 1 year    
 en2 = showQtYear and tfs >= 21600 and tfs <= 10368000   // cell = 1 quarter
 en3 = showWeekly and tfs >= 1800  and tfs <= 604800     // cell = 1 week
 en4 = showDaily  and tfs >= 60    and tfs <= 43200      // cell = 1 trading day
