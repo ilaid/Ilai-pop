@@ -24,6 +24,10 @@ colBear    = input.color(#ef5350, "צבע דובי", group = grpVis)
 labelSize  = input.string("small", "גודל תווית", options = ["tiny", "small", "normal"], group = grpVis)
 offsetMlt  = input.float(1.5, "מרחק התווית מהנר (ATR)", minval = 0.1, maxval = 6.0, step = 0.1, group = grpVis)
 showLine   = input.bool(true, "הצג קו שבירה", group = grpVis)
+// "אופקי" = הקו הישן, ברמת הייחוס, נמתח עד הנר הנוכחי.
+// "אלכסוני" = קו בין נר הייחוס לנר שקבע את הקיצון הנוכחי, מוזז כך שלא יחצה נרות.
+lineMode   = input.string("אלכסוני", "סוג הקו", options = ["אלכסוני", "אופקי", "שניהם"], group = grpVis)
+linePad    = input.float(0.3, "מרווח הקו האלכסוני מהנרות (ATR)", minval = 0.0, maxval = 3.0, step = 0.05, group = grpVis)
 lineWidth  = input.int(2, "עובי קו", minval = 1, maxval = 4, group = grpVis)
 showDebug  = input.bool(false, "הצג טבלת בדיקה", group = grpVis)
 
@@ -206,12 +210,16 @@ else if tfClass == 1
 newRefCycle  = ta.change(refCycleId)  != 0
 newLifeCycle = ta.change(lifeCycleId) != 0
 
-// ב-1H תת-המחזור הראשון (יום שני) משווה לתת-המחזור האחרון של השבוע הקודם (שישי),
-// אבל אותו "זרע" נמחק אחרי היום הראשון — שישי משווה רק לשני, לא לשאר השבוע.
-// ב-4H המחזור החודשי עומד בפני עצמו: השבועות משווים רק בתוך אותו חודש (בלי חודש קודם).
-// ביומי ובשבועי אותו עיקרון כמו 1H: הרבעון/השנה הראשונים של המיכל משווים גם ליחידה
-// האחרונה של המיכל הקודם (Q1 מול Q4 הקודם), והזרע הזה נמחק אחרי היחידה הראשונה.
-keepLast = tfClass == 5 or tfClass == 7 or tfClass == 8
+// "זרע" = תת-המחזור הראשון של מיכל חדש משווה גם לתת-המחזור האחרון של המיכל
+// הקודם (Q4 → Q1), והזרע נמחק ברגע שתת-המחזור הראשון נסגר. כלומר ההשוואה
+// החוצה-מיכל אפשרית **רק** בין האחרון לראשון, לא הלאה.
+//   15S / 1M / 5M — כן. למשל ב-5M: המיקרו האחרון של לונדון מול המיקרו הראשון
+//                   של ניו-יורק AM. חל בכל החלפת מיכל, כולל מעבר יום מסחר וסוף שבוע.
+//   15M           — לא. הסשנים משווים רק בתוך אותו יום מסחר.
+//   1H            — כן: יום שני משווה גם ליום שישי שעבר.
+//   4H            — לא. המחזור החודשי עומד בפני עצמו, בלי חודש קודם.
+//   1D / 1W       — כן: הרבעון/השנה הראשונים מול האחרונים של המיכל הקודם.
+keepLast = tfClass <= 3 or tfClass == 5 or tfClass == 7 or tfClass == 8
 
 // ═══════════════════════════════════════════════════════════════════
 // True Open
@@ -646,6 +654,8 @@ var int    bearSigB = 0
 var float  bearYPos = na
 var int    bearSeq  = 0
 var int    bearRefI = -1
+var int    bearCurB = 0      // הנר שקבע את הקיצון של תת-המחזור הנוכחי — הקצה השני של הקו
+var float  bearCurP = na
 
 var int    bullType = 0
 var string bullStr  = ""
@@ -655,6 +665,8 @@ var int    bullSigB = 0
 var float  bullYPos = na
 var int    bullSeq  = 0
 var int    bullRefI = -1
+var int    bullCurB = 0
+var float  bullCurP = na
 
 var int seqCounter = 0
 
@@ -688,6 +700,9 @@ if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK and nLevel
         bearStr  := nbS
         bearLvl  := nbT == 2 ? (isNQc ? array.get(nqHiCA, nbI) : isESc ? array.get(esHiCA, nbI) : array.get(ymHiCA, nbI)) : (isNQc ? array.get(nqHiA, nbI) : isESc ? array.get(esHiA, nbI) : array.get(ymHiA, nbI))
         bearRefB := nbT == 2 ? (isNQc ? array.get(nqHiCBA, nbI) : isESc ? array.get(esHiCBA, nbI) : array.get(ymHiCBA, nbI)) : (isNQc ? array.get(nqHiBA, nbI) : isESc ? array.get(esHiBA, nbI) : array.get(ymHiBA, nbI))
+        // הקצה השני של הקו האלכסוני: הקיצון של תת-המחזור הנוכחי, מאותו סוג (סגירה ל-H, פתיל ל-S)
+        bearCurP := nbT == 2 ? (isNQc ? nqCHC : isESc ? esCHC : ymCHC) : (isNQc ? nqCH : isESc ? esCH : ymCH)
+        bearCurB := nbT == 2 ? (isNQc ? nqCHCb : isESc ? esCHCb : ymCHCb) : (isNQc ? nqCHb : isESc ? esCHb : ymCHb)
     else
         bearType := 0
         bearRefI := -1
@@ -705,6 +720,8 @@ if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK and nLevel
         bullStr  := nuS
         bullLvl  := nuT == 2 ? (isNQc ? array.get(nqLoCA, nuI) : isESc ? array.get(esLoCA, nuI) : array.get(ymLoCA, nuI)) : (isNQc ? array.get(nqLoA, nuI) : isESc ? array.get(esLoA, nuI) : array.get(ymLoA, nuI))
         bullRefB := nuT == 2 ? (isNQc ? array.get(nqLoCBA, nuI) : isESc ? array.get(esLoCBA, nuI) : array.get(ymLoCBA, nuI)) : (isNQc ? array.get(nqLoBA, nuI) : isESc ? array.get(esLoBA, nuI) : array.get(ymLoBA, nuI))
+        bullCurP := nuT == 2 ? (isNQc ? nqCLC : isESc ? esCLC : ymCLC) : (isNQc ? nqCL : isESc ? esCL : ymCL)
+        bullCurB := nuT == 2 ? (isNQc ? nqCLCb : isESc ? esCLCb : ymCLCb) : (isNQc ? nqCLb : isESc ? esCLb : ymCLb)
     else
         bullType := 0
         bullRefI := -1
@@ -731,21 +748,49 @@ dispLvl  = showDir == -1 ? bearLvl  : showDir == 1 ? bullLvl  : na
 dispRefB = showDir == -1 ? bearRefB : showDir == 1 ? bullRefB : 0
 dispSigB = showDir == -1 ? bearSigB : showDir == 1 ? bullSigB : 0
 dispYPos = showDir == -1 ? bearYPos : showDir == 1 ? bullYPos : na
+dispCurB = showDir == -1 ? bearCurB : showDir == 1 ? bullCurB : 0
+dispCurP = showDir == -1 ? bearCurP : showDir == 1 ? bullCurP : na
+dispRefI = showDir == -1 ? bearRefI : showDir == 1 ? bullRefI : -1
 curSeq   = showDir == -1 ? bearSeq  : showDir == 1 ? bullSeq  : -1
 
 // ═══════════════════════════════════════════════════════════════════
 // ציור
 // ═══════════════════════════════════════════════════════════════════
 
+// כמה צריך להזיז את הקו האלכסוני כדי שלא יחצה אף נר.
+// במקום לסרוק נרות אחורה (שזה גם יקר וגם מסתכן ב"historical offset" חורג),
+// משתמשים בקיצונים שכבר שמורים לכל תת-מחזור במערכים — הם ממילא מכסים את כל
+// הטווח שבין שתי נקודות הקו. מחזיר הזזה אחידה לשני הקצוות, ולכן השיפוע נשמר.
+f_clearShift(bool isBull, int b1, float p1, int b2, float p2, array<float> extA, array<int> extBA, int fromI, float curExt, int curExtB, float pad) =>
+    float sh = 0.0
+    if b2 != b1
+        slope = (p2 - p1) / (b2 - b1)
+        n = array.size(extA)
+        // חובה לוודא fromI <= n-1: ב-Pine לולאת for עם התחלה גדולה מהסוף רצה אחורה
+        if n > 0 and fromI >= 0 and fromI <= n - 1
+            for k = fromI to n - 1
+                xb = array.get(extBA, k)
+                ln = p1 + slope * (xb - b1)
+                ex = array.get(extA, k)
+                sh := math.max(sh, isBull ? ln - (ex - pad) : (ex + pad) - ln)
+        if not na(curExt)
+            lnc = p1 + slope * (curExtB - b1)
+            sh := math.max(sh, isBull ? lnc - (curExt - pad) : (curExt + pad) - lnc)
+    sh
+
 var label aLbl  = na
 var line  aLine = na
+var line  aDiag = na
 var int    drawnSeq  = -999
 var int    drawnDir  = -999
 var int    drawnType = -999
 var string drawnStr  = ""
 var float  drawnLvl  = na
+var int    drawnCurB = -999
+var float  drawnCurP = na
 
-needRedraw = curSeq != drawnSeq or showDir != drawnDir or dispType != drawnType or dispStr != drawnStr or dispLvl != drawnLvl
+// הקצה השני של הקו זז כשתת-המחזור הנוכחי קובע קיצון חדש, ולכן הוא חלק מהתנאי
+needRedraw = curSeq != drawnSeq or showDir != drawnDir or dispType != drawnType or dispStr != drawnStr or dispLvl != drawnLvl or dispCurB != drawnCurB or nz(dispCurP) != nz(drawnCurP)
 
 if needRedraw
     if not na(aLbl)
@@ -754,20 +799,40 @@ if needRedraw
     if not na(aLine)
         line.delete(aLine)
         aLine := na
+    if not na(aDiag)
+        line.delete(aDiag)
+        aDiag := na
     if showDir != 0 and not na(dispYPos)
         col  = showDir == 1 ? colBull : colBear
         cFin = dispType == 2 ? col : color.new(col, 30)
         txt  = "W " + dispStr
         aLbl := label.new(dispSigB, dispYPos, txt, style = label.style_none, textcolor = cFin, size = labelSize, textalign = text.align_center)
         if showLine and not na(dispLvl) and dispRefB > 0
-            aLine := line.new(dispRefB, dispLvl, bar_index, dispLvl, color = cFin, style = line.style_solid, width = lineWidth)
+            if lineMode != "אלכסוני"
+                aLine := line.new(dispRefB, dispLvl, bar_index, dispLvl, color = cFin, style = line.style_solid, width = lineWidth)
+            // הקו האלכסוני מחבר את נר הייחוס לנר שקבע את הקיצון הנוכחי, ומוזז
+            // כלפי מטה/מעלה עד שהוא נקי מכל הנרות שביניהם.
+            if lineMode != "אופקי" and not na(dispCurP) and dispCurB > dispRefB
+                isBull = showDir == 1
+                pad    = atr * linePad
+                extA   = isBull ? (isNQc ? nqLoA  : isESc ? esLoA  : ymLoA)  : (isNQc ? nqHiA  : isESc ? esHiA  : ymHiA)
+                extBA  = isBull ? (isNQc ? nqLoBA : isESc ? esLoBA : ymLoBA) : (isNQc ? nqHiBA : isESc ? esHiBA : ymHiBA)
+                curEx  = isBull ? (isNQc ? nqCL : isESc ? esCL : ymCL) : (isNQc ? nqCH : isESc ? esCH : ymCH)
+                curExB = isBull ? (isNQc ? nqCLb : isESc ? esCLb : ymCLb) : (isNQc ? nqCHb : isESc ? esCHb : ymCHb)
+                sh = f_clearShift(isBull, dispRefB, dispLvl, dispCurB, dispCurP, extA, extBA, dispRefI, curEx, curExB, pad)
+                y1 = isBull ? dispLvl  - pad - sh : dispLvl  + pad + sh
+                y2 = isBull ? dispCurP - pad - sh : dispCurP + pad + sh
+                aDiag := line.new(dispRefB, y1, dispCurB, y2, color = cFin, style = line.style_solid, width = lineWidth)
     drawnSeq  := curSeq
     drawnDir  := showDir
     drawnType := dispType
     drawnStr  := dispStr
     drawnLvl  := dispLvl
+    drawnCurB := dispCurB
+    drawnCurP := dispCurP
 
-// התווית והקו עוקבים אחרי הנר הנוכחי
+// התווית והקו האופקי עוקבים אחרי הנר הנוכחי. האלכסוני לא — שני קצותיו נעולים
+// על נרות אמיתיים, וזה כל הרעיון שלו.
 if not na(aLbl) and showDir != 0
     label.set_x(aLbl, dispSigB)
     label.set_y(aLbl, dispYPos)
@@ -836,7 +901,7 @@ f_cycT(int cls, int t) =>
     c4Id = math.floor(qYear / 4)
     rId = cls == 8 ? qYear : cls == 7 ? qrId : cls == 6 ? wkId : cls == 5 ? tdId : cls == 4 ? seId : cls == 3 ? miId : cls == 2 ? quId : sqId
     lId = cls == 8 ? c4Id  : cls == 7 ? qYear : cls == 6 ? moId : cls == 5 ? wkId : cls == 4 ? tdId : cls == 3 ? seId : cls == 2 ? miId : quId
-    kL  = cls == 5 or cls == 7 or cls == 8
+    kL  = cls <= 3 or cls == 5 or cls == 7 or cls == 8
     blk = ((cls == 6 or cls == 5) and dw == dayofweek.friday) or (cls == 6 and blockDeadWeek and dead)
     [rId, lId, kL, blk]
 
