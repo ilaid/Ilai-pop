@@ -28,6 +28,9 @@ showLine   = input.bool(true, "הצג קו שבירה", group = grpVis)
 // "אלכסוני" = קו בין נר הייחוס לנר שקבע את הקיצון הנוכחי, מוזז כך שלא יחצה נרות.
 lineMode   = input.string("אלכסוני", "סוג הקו", options = ["אלכסוני", "אופקי", "שניהם"], group = grpVis)
 linePad    = input.float(0.1, "מרווח הקו האלכסוני מהנרות (ATR)", minval = 0.0, maxval = 3.0, step = 0.05, group = grpVis)
+// כששתי שבירות חיות במקביל (דובית ושורית), העדכנית מוצגת בצבע המלא והישנה
+// מקבלת את השקיפות הזאת מעליו — גם על הגרף וגם בכיתוב בפינה.
+weakFade   = input.int(45, "שקיפות השבירה החלשה", minval = 0, maxval = 90, group = grpVis)
 lineWidth  = input.int(2, "עובי קו", minval = 1, maxval = 4, group = grpVis)
 showDebug  = input.bool(false, "הצג טבלת בדיקה", group = grpVis)
 
@@ -740,11 +743,25 @@ dispRefB = showDir == -1 ? bearRefB : showDir == 1 ? bullRefB : 0
 dispSigB = showDir == -1 ? bearSigB : showDir == 1 ? bullSigB : 0
 dispYPos = showDir == -1 ? bearYPos : showDir == 1 ? bullYPos : na
 dispRefI = showDir == -1 ? bearRefI : showDir == 1 ? bullRefI : -1
-// הקיצון ה**פתילי** של תת-המחזור הנוכחי בנכס הגרף. הקו האלכסוני נמתח תמיד בין
-// פתילים, גם כששבירה היא HSSMT — קו ברמת הסגירה עובר בתוך גוף הנר ונראה תלוש.
-chartCurEx  = showDir == 1 ? (isNQc ? nqCL  : isESc ? esCL  : ymCL)  : (isNQc ? nqCH  : isESc ? esCH  : ymCH)
-chartCurExB = showDir == 1 ? (isNQc ? nqCLb : isESc ? esCLb : ymCLb) : (isNQc ? nqCHb : isESc ? esCHb : ymCHb)
 curSeq   = showDir == -1 ? bearSeq  : showDir == 1 ? bullSeq  : -1
+
+// ── השבירה החלשה: כששני הכיוונים חיים במקביל, זה הישן מביניהם. הוא מצויר
+//    בנוסף לעדכני, בצבע דהוי יותר, כדי שיהיה ברור מי העיקרי. ──
+secDir  = (showDir != 0 and bearType != 0 and bullType != 0) ? -showDir : 0
+secType = secDir == -1 ? bearType : secDir == 1 ? bullType : 0
+secStr  = secDir == -1 ? bearStr  : secDir == 1 ? bullStr  : ""
+secLvl  = secDir == -1 ? bearLvl  : secDir == 1 ? bullLvl  : na
+secRefB = secDir == -1 ? bearRefB : secDir == 1 ? bullRefB : 0
+secSigB = secDir == -1 ? bearSigB : secDir == 1 ? bullSigB : 0
+secYPos = secDir == -1 ? bearYPos : secDir == 1 ? bullYPos : na
+secRefI = secDir == -1 ? bearRefI : secDir == 1 ? bullRefI : -1
+
+// ארבעת מצברי הנכס של הגרף. הקצה הימני של הקו האלכסוני נגזר מהם, ולכן שינוי
+// שלהם מחייב ציור מחדש.
+cHb  = isNQc ? nqCHb  : isESc ? esCHb  : ymCHb
+cLb  = isNQc ? nqCLb  : isESc ? esCLb  : ymCLb
+cHCb = isNQc ? nqCHCb : isESc ? esCHCb : ymCHCb
+cLCb = isNQc ? nqCLCb : isESc ? esCLCb : ymCLCb
 
 // ═══════════════════════════════════════════════════════════════════
 // ציור
@@ -784,19 +801,66 @@ f_clearShift(bool isBull, int b1, float p1, int b2, float p2, array<float> extA,
                     sh := math.max(sh, isBull ? ln - (ex - pad) : (ex + pad) - ln)
     sh
 
+// צבע השבירה: HSSMT בצבע מלא, SSMT מעט שקוף, ולשבירה החלשה (הישנה מבין
+// השתיים שחיות במקביל) מתווספת שקיפות נוספת מעל זה.
+f_col(color base, int typ, bool weak) =>
+    t = (typ == 2 ? 0 : 30) + (weak ? weakFade : 0)
+    color.new(base, math.min(t, 95))
+
+// ציור ערכה שלמה לכיוון אחד: תווית, קו אופקי וקו אלכסוני. מוחזרים כדי שהקורא
+// ישמור אותם ב-var וימחק אותם בציור הבא.
+f_drawSet(int dir, int typ, string str, float lvl, int refB, int refI, int sigB, float yPos, bool weak) =>
+    label lb = na
+    line  ln = na
+    line  dg = na
+    if dir != 0 and not na(yPos)
+        cFin = f_col(dir == 1 ? colBull : colBear, typ, weak)
+        lb := label.new(sigB, yPos, "W " + str, style = label.style_none, textcolor = cFin, size = labelSize, textalign = text.align_center)
+        if showLine and not na(lvl) and refB > 0
+            if lineMode != "אלכסוני"
+                ln := line.new(refB, lvl, bar_index, lvl, color = cFin, style = line.style_solid, width = lineWidth)
+            // HSSMT נמתח **מסגירה לסגירה**, SSMT מפתיל לפתיל — כל אחד על הסדרה
+            // שבה הוא באמת נמדד. קו של HSSMT על הפתילים לא מייצג את השבירה.
+            if lineMode != "אופקי" and refI >= 0
+                isBull = dir == 1
+                isH    = typ == 2
+                extA  = isH ? (isBull ? (isNQc ? nqLoCA  : isESc ? esLoCA  : ymLoCA)  : (isNQc ? nqHiCA  : isESc ? esHiCA  : ymHiCA))  : (isBull ? (isNQc ? nqLoA  : isESc ? esLoA  : ymLoA)  : (isNQc ? nqHiA  : isESc ? esHiA  : ymHiA))
+                extBA = isH ? (isBull ? (isNQc ? nqLoCBA : isESc ? esLoCBA : ymLoCBA) : (isNQc ? nqHiCBA : isESc ? esHiCBA : ymHiCBA)) : (isBull ? (isNQc ? nqLoBA : isESc ? esLoBA : ymLoBA) : (isNQc ? nqHiBA : isESc ? esHiBA : ymHiBA))
+                curE  = isH ? (isBull ? (isNQc ? nqCLC  : isESc ? esCLC  : ymCLC)  : (isNQc ? nqCHC  : isESc ? esCHC  : ymCHC))  : (isBull ? (isNQc ? nqCL  : isESc ? esCL  : ymCL)  : (isNQc ? nqCH  : isESc ? esCH  : ymCH))
+                curEB = isH ? (isBull ? (isNQc ? nqCLCb : isESc ? esCLCb : ymCLCb) : (isNQc ? nqCHCb : isESc ? esCHCb : ymCHCb)) : (isBull ? (isNQc ? nqCLb : isESc ? esCLb : ymCLb) : (isNQc ? nqCHb : isESc ? esCHb : ymCHb))
+                if refI <= array.size(extA) - 1
+                    pad = atr * linePad
+                    p1  = array.get(extA,  refI)
+                    b1  = array.get(extBA, refI)
+                    [p2, b2] = f_takeBar(isBull, extA, extBA, refI, curE, curEB)
+                    if b2 > b1 and not na(p1) and not na(p2)
+                        sh = f_clearShift(isBull, b1, p1, b2, p2, extA, extBA, refI, pad)
+                        y1 = isBull ? p1 - pad - sh : p1 + pad + sh
+                        y2 = isBull ? p2 - pad - sh : p2 + pad + sh
+                        dg := line.new(b1, y1, b2, y2, color = cFin, style = line.style_solid, width = lineWidth)
+    [lb, ln, dg]
+
 var label aLbl  = na
 var line  aLine = na
 var line  aDiag = na
+var label bLbl  = na
+var line  bLine = na
+var line  bDiag = na
 var int    drawnSeq  = -999
 var int    drawnDir  = -999
 var int    drawnType = -999
 var string drawnStr  = ""
 var float  drawnLvl  = na
-var int    drawnCurB = -999
-var float  drawnCurP = na
+var int    drawnSDir = -999
+var int    drawnSTyp = -999
+var string drawnSStr = ""
+var int    drawnHb   = -1
+var int    drawnLb   = -1
+var int    drawnHCb  = -1
+var int    drawnLCb  = -1
 
-// הקצה הימני של הקו זז כשהקיצון המצטבר משתנה, ולכן הוא חלק מהתנאי
-needRedraw = curSeq != drawnSeq or showDir != drawnDir or dispType != drawnType or dispStr != drawnStr or dispLvl != drawnLvl or chartCurExB != drawnCurB or nz(chartCurEx) != nz(drawnCurP)
+// הקצה הימני של הקו האלכסוני נגזר מהמצברים, ולכן גם הם חלק מהתנאי
+needRedraw = curSeq != drawnSeq or showDir != drawnDir or dispType != drawnType or dispStr != drawnStr or dispLvl != drawnLvl or secDir != drawnSDir or secType != drawnSTyp or secStr != drawnSStr or cHb != drawnHb or cLb != drawnLb or cHCb != drawnHCb or cLCb != drawnLCb
 
 if needRedraw
     if not na(aLbl)
@@ -808,45 +872,48 @@ if needRedraw
     if not na(aDiag)
         line.delete(aDiag)
         aDiag := na
-    if showDir != 0 and not na(dispYPos)
-        col  = showDir == 1 ? colBull : colBear
-        cFin = dispType == 2 ? col : color.new(col, 30)
-        txt  = "W " + dispStr
-        aLbl := label.new(dispSigB, dispYPos, txt, style = label.style_none, textcolor = cFin, size = labelSize, textalign = text.align_center)
-        if showLine and not na(dispLvl) and dispRefB > 0
-            if lineMode != "אלכסוני"
-                aLine := line.new(dispRefB, dispLvl, bar_index, dispLvl, color = cFin, style = line.style_solid, width = lineWidth)
-            // הקו האלכסוני: משני הפתילים של תת-מחזור הייחוס ושל הנר שלקח אותו.
-            // שני הקצוות נעולים על קיצוני נרות אמיתיים, ולכן הוא צמוד למחיר.
-            if lineMode != "אופקי" and dispRefI >= 0
-                isBull = showDir == 1
-                extA   = isBull ? (isNQc ? nqLoA  : isESc ? esLoA  : ymLoA)  : (isNQc ? nqHiA  : isESc ? esHiA  : ymHiA)
-                extBA  = isBull ? (isNQc ? nqLoBA : isESc ? esLoBA : ymLoBA) : (isNQc ? nqHiBA : isESc ? esHiBA : ymHiBA)
-                if dispRefI <= array.size(extA) - 1
-                    pad = atr * linePad
-                    p1  = array.get(extA,  dispRefI)
-                    b1  = array.get(extBA, dispRefI)
-                    [p2, b2] = f_takeBar(isBull, extA, extBA, dispRefI, chartCurEx, chartCurExB)
-                    if b2 > b1 and not na(p1) and not na(p2)
-                        sh = f_clearShift(isBull, b1, p1, b2, p2, extA, extBA, dispRefI, pad)
-                        y1 = isBull ? p1 - pad - sh : p1 + pad + sh
-                        y2 = isBull ? p2 - pad - sh : p2 + pad + sh
-                        aDiag := line.new(b1, y1, b2, y2, color = cFin, style = line.style_solid, width = lineWidth)
+    if not na(bLbl)
+        label.delete(bLbl)
+        bLbl := na
+    if not na(bLine)
+        line.delete(bLine)
+        bLine := na
+    if not na(bDiag)
+        line.delete(bDiag)
+        bDiag := na
+    [l1, n1, g1] = f_drawSet(showDir, dispType, dispStr, dispLvl, dispRefB, dispRefI, dispSigB, dispYPos, false)
+    aLbl  := l1
+    aLine := n1
+    aDiag := g1
+    [l2, n2, g2] = f_drawSet(secDir, secType, secStr, secLvl, secRefB, secRefI, secSigB, secYPos, true)
+    bLbl  := l2
+    bLine := n2
+    bDiag := g2
     drawnSeq  := curSeq
     drawnDir  := showDir
     drawnType := dispType
     drawnStr  := dispStr
     drawnLvl  := dispLvl
-    drawnCurB := chartCurExB
-    drawnCurP := chartCurEx
+    drawnSDir := secDir
+    drawnSTyp := secType
+    drawnSStr := secStr
+    drawnHb   := cHb
+    drawnLb   := cLb
+    drawnHCb  := cHCb
+    drawnLCb  := cLCb
 
-// התווית והקו האופקי עוקבים אחרי הנר הנוכחי. האלכסוני לא — שני קצותיו נעולים
-// על נרות אמיתיים, וזה כל הרעיון שלו.
+// התוויות והקווים האופקיים עוקבים אחרי הנר הנוכחי. האלכסוניים לא — שני קצותיהם
+// נעולים על נרות אמיתיים, וזה כל הרעיון שלהם.
 if not na(aLbl) and showDir != 0
     label.set_x(aLbl, dispSigB)
     label.set_y(aLbl, dispYPos)
 if not na(aLine) and showDir != 0
     line.set_x2(aLine, bar_index)
+if not na(bLbl) and secDir != 0
+    label.set_x(bLbl, secSigB)
+    label.set_y(bLbl, secYPos)
+if not na(bLine) and secDir != 0
+    line.set_x2(bLine, bar_index)
 
 // ═══════════════════════════════════════════════════════════════════
 // סריקת מסגרות זמן אחרות
@@ -924,6 +991,8 @@ type Eng
     bool   sAct
     string txt
     int    dir
+    string txt2     // השבירה החלשה — הכיוון השני כשגם הוא חי
+    int    dir2
     int    bTy
     int    uTy
     string bStr
@@ -959,7 +1028,7 @@ type Eng
     array<float> yLcA
 
 f_newEng(int cls) =>
-    Eng.new(cls, 0, 0, 0, false, false, "", 0, 0, 0, "", "", 0, 0, 0, -1, -1, na, na, na, na, na, na, na, na, na, na, na, na, array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float())
+    Eng.new(cls, 0, 0, 0, false, false, "", 0, "", 0, 0, 0, "", "", 0, 0, 0, -1, -1, na, na, na, na, na, na, na, na, na, na, na, na, array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float())
 
 // צעד אחד: נר סגור אחד של המסגרת שהמנוע מייצג
 f_engStep(Eng e, int t, float nh, float nl, float nc, float eh, float el, float ec, float yh, float yl, float yc) =>
@@ -1095,6 +1164,10 @@ f_engStep(Eng e, int t, float nh, float nl, float nc, float eh, float el, float 
         d = e.bTy != 0 and e.uTy != 0 ? (e.bSeq > e.uSeq ? -1 : 1) : e.bTy != 0 ? -1 : e.uTy != 0 ? 1 : 0
         e.dir := d
         e.txt := d == -1 ? "▼" + e.bStr : d == 1 ? "▲" + e.uStr : ""
+        // השבירה החלשה — הכיוון ההפוך, רק כששניהם חיים במקביל
+        d2 = (e.bTy != 0 and e.uTy != 0) ? -d : 0
+        e.dir2 := d2
+        e.txt2 := d2 == -1 ? "▼" + e.bStr : d2 == 1 ? "▲" + e.uStr : ""
     e.txt
 
 // סמן רץ: מחזיר את האינדקס האחרון במערך הזמנים שזמנו <= t, החל מ-from.
@@ -1217,17 +1290,21 @@ markPos = mtfMarkPos == "שמאל למטה" ? position.bottom_left : mtfMarkPos 
 
 var string mtfPrev = ""
 var table mtfTbl  = table.new(panPos,  2, 8, border_width = 0)
-// תא נפרד לכל מסגרת, כדי שכל אחת תיצבע בצבע הכיוון שלה
-var table markTbl = table.new(markPos, 6, 1, border_width = 0)
+// תא נפרד לכל שבירה, כדי שכל אחת תיצבע בצבע ובשקיפות שלה. מסגרת יכולה לתרום
+// שני תאים — העדכנית והחלשה — ולכן יש כאן מקום לשתיים לכל מדרגה.
+var table markTbl = table.new(markPos, 12, 1, border_width = 0)
 
 if mtfOn and barstate.islast and tfClass != 0
     // מסגרת הגרף נלקחת מהמנוע המקומי — בדיוק אותה שבירה שמצוירת על הגרף,
     // כלומר רק אחת (העדכנית), לפי showDir. בלי זה נראו שני הכיוונים יחד.
-    sC = showDir == -1 ? "▼" + bearStr : showDir == 1 ? "▲" + bullStr : ""
+    sC  = showDir == -1 ? "▼" + bearStr : showDir == 1 ? "▲" + bullStr : ""
+    sC2 = secDir  == -1 ? "▼" + bearStr : secDir  == 1 ? "▲" + bullStr : ""
 
-    clsArr = array.from(cU3, cU2, cU1, tfClass, cD1, cD2)
-    stArr  = array.from(egU3.txt, egU2.txt, egU1.txt, sC, egD1.txt, egD2.txt)
-    dirArr = array.from(egU3.dir, egU2.dir, egU1.dir, showDir, egD1.dir, egD2.dir)
+    clsArr  = array.from(cU3, cU2, cU1, tfClass, cD1, cD2)
+    stArr   = array.from(egU3.txt, egU2.txt, egU1.txt, sC, egD1.txt, egD2.txt)
+    dirArr  = array.from(egU3.dir, egU2.dir, egU1.dir, showDir, egD1.dir, egD2.dir)
+    st2Arr  = array.from(egU3.txt2, egU2.txt2, egU1.txt2, sC2, egD1.txt2, egD2.txt2)
+    dir2Arr = array.from(egU3.dir2, egU2.dir2, egU1.dir2, secDir, egD1.dir2, egD2.dir2)
     // מדרגה שלא נסרקת (מעל 4H, או מתחת לדקה) פשוט יוצאת מהרשימה
     useArr = array.from(useU3, useU2, useU1, true, useD1, useD2)
 
@@ -1237,25 +1314,34 @@ if mtfOn and barstate.islast and tfClass != 0
     row = 0
     mcol = 1
     table.clear(mtfTbl,  0, 0, 1, 7)
-    table.clear(markTbl, 0, 0, 5, 0)
+    table.clear(markTbl, 0, 0, 11, 0)
     for i = 0 to 5
-        c  = array.get(clsArr, i)
-        st = array.get(stArr, i)
-        d  = array.get(dirArr, i)
+        c   = array.get(clsArr, i)
+        st  = array.get(stArr, i)
+        d   = array.get(dirArr, i)
+        st2 = array.get(st2Arr, i)
+        d2  = array.get(dir2Arr, i)
         if array.get(useArr, i) and c != prevC   // הרשימה יורדת, אז די בהשוואה לקודם כדי לנקות כפילויות בקצוות
             // צבע הכיוון של האינדיקטור עצמו — אדום לדובי, ירוק לשורי
-            cl = d == -1 ? colBear : d == 1 ? colBull : mtfColor
+            cl  = d  == -1 ? colBear : d  == 1 ? colBull : mtfColor
+            cl2 = color.new(d2 == -1 ? colBear : d2 == 1 ? colBull : mtfColor, weakFade)
             if st != ""
                 mark := mark + f_tfName(c) + " " + st + "   "
                 // את מסגרת הגרף עצמה לא כותבים בפינה — היא כבר מצוירת על הגרף.
                 // בפאנל ובהתראה היא כן נשארת.
-                if mtfMark and c != tfClass and mcol <= 5
+                if mtfMark and c != tfClass and mcol <= 11
                     table.cell(markTbl, mcol, 0, f_tfName(c) + " " + st, text_color = cl, text_size = size.small, bgcolor = bg)
+                    mcol := mcol + 1
+            // השבירה החלשה של אותה מסגרת — אותו פורמט, בצבע דהוי
+            if st2 != ""
+                mark := mark + f_tfName(c) + " " + st2 + "   "
+                if mtfMark and c != tfClass and mcol <= 11
+                    table.cell(markTbl, mcol, 0, f_tfName(c) + " " + st2, text_color = cl2, text_size = size.small, bgcolor = bg)
                     mcol := mcol + 1
             if mtfPanel
                 nm = (c == tfClass ? "▶ " : "   ") + f_tfName(c)
                 table.cell(mtfTbl, 0, row, nm, text_color = cl, text_size = size.small, bgcolor = bg)
-                table.cell(mtfTbl, 1, row, st == "" ? "—" : st, text_color = cl, text_size = size.small, bgcolor = bg)
+                table.cell(mtfTbl, 1, row, st == "" ? "—" : (st2 == "" ? st : st + "  /  " + st2), text_color = cl, text_size = size.small, bgcolor = bg)
             row := row + 1
             prevC := c
     mark := str.trim(mark)
