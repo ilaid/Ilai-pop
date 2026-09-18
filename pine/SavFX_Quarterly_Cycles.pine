@@ -26,6 +26,14 @@ indicator("Sav FX - Semi / Quarterly Cycles", shorttitle="Sav FX", overlay=false
 //  its own: the chain runs 4 year cycle -> quarter -> week, and the month is
 //  only what the week is numbered inside.
 //
+//  The slow rows read as names and the fast ones as numbers, so the day row says
+//  Wed where the 22.5 min row says 1-3-4: on a high timeframe those cells are far
+//  too narrow to hold a three link chain. "Names Instead Of Numbers" moves the
+//  line between the two, and the numbers can be printed after the name as well.
+//
+//  The weekly chart shows the four year cycle and its quarters, the daily chart
+//  the current year and its quarters, and the week row starts on 12H and below.
+//
 //  Levels that carry no quarter number are drawn without colour and without a
 //  label, and they contribute no link to the chain:
 //    - Friday, the fifth trading day of the week
@@ -50,9 +58,10 @@ show5625   = input.bool(true, "5.625 Minute",       group = g_cyc)
 
 g_lab = "Labels"
 showLabels  = input.bool(true, "Show Labels", group = g_lab)
-labelDepth  = input.int(3, "Levels Per Label", minval = 1, maxval = 3, group = g_lab, tooltip = "How many levels of the hierarchy each cell prints. 3 gives 3-4-2 (grandparent-parent-self), 2 gives 4-2, 1 gives 2.")
+nameRows    = input.string("Down to the session", "Names Instead Of Numbers", options = ["Down to the session", "Down to the day", "Off"], group = g_lab, tooltip = "The slow rows read better as names than as numbers, and their cells are too narrow for a three link chain on a high timeframe. This picks how far down the names go: to the session row (2026, Q3, Week 3, Wed, Asia), only to the daily row, or off for numbers everywhere. The rows below always print numbers.")
+appendNums  = input.bool(false, "Add Numbers After The Name", group = g_lab, tooltip = "Prints both, as Wed 3-3-3. Leave it off where the cell is too narrow to hold the two of them.")
+labelDepth  = input.int(3, "Levels Per Label", minval = 1, maxval = 3, group = g_lab, tooltip = "How many levels of the hierarchy each numbered cell prints. 3 gives 3-4-2 (grandparent-parent-self), 2 gives 4-2, 1 gives 2.")
 sepStr      = input.string("-", "Separator", options = ["-", ".", " "], group = g_lab)
-appendNames = input.bool(false, "Append Day / Session Name", group = g_lab, tooltip = "Adds Mon..Thu on the daily row and Asia/Lon/AM/PM on the 6 hour row, after the numbers.")
 textSizeIn  = input.string("small", "Text Size", options = ["tiny", "small", "normal", "large"], group = g_lab)
 textCol     = input.color(color.new(#000000, 10), "Text Color", group = g_lab)
 
@@ -83,7 +92,7 @@ tfs = timeframe.in_seconds()
 
 en1 = showCyc4   and tfs >= 21600 and tfs <= 10368000   // cell = 1 year    
 en2 = showQtYear and tfs >= 21600 and tfs <= 10368000   // cell = 1 quarter
-en3 = showWeekly and tfs >= 1800  and tfs <= 604800     // cell = 1 week
+en3 = showWeekly and tfs >= 1800  and tfs <= 43200      // cell = 1 week, off on 1D and 1W
 en4 = showDaily  and tfs >= 60    and tfs <= 43200      // cell = 1 trading day
 en5 = show6H     and tfs >= 60    and tfs <= 21600      // cell = 1 session
 en6 = show90     and tfs <= 2700                        // cell = 90 min
@@ -168,6 +177,13 @@ iCyc4  = int((yr + 1) % 4) + 1
 cycBeg = timestamp("GMT-5", yr, 1, 1, 0, 0)
 cycEnd = timestamp("GMT-5", yr + 1, 1, 1, 0, 0)
 
+// how far back the two slow rows keep their cells. The quarters stay inside the
+// current year, and the years stay inside the current four year cycle on the
+// weekly chart, where the whole cycle is the point, or inside the current year
+// below it, where older years are only clutter
+cycFirst = timestamp("GMT-5", yr - (iCyc4 - 1), 1, 1, 0, 0)
+cycTrim  = tfs >= 604800 ? cycFirst : cycBeg
+
 
 // ──────────────────────────── label construction ──────────────────────────────
 var int[] idx = array.new_int(8, na)
@@ -198,7 +214,9 @@ dayName() =>
         2 => "Tue"
         3 => "Wed"
         4 => "Thu"
-        => ""
+        5 => "Fri"
+        6 => "Sat"
+        => "Sun"
 
 sessName() =>
     switch iSess
@@ -207,6 +225,24 @@ sessName() =>
         3 => "AM"
         4 => "PM"
         => ""
+
+// what a row shows when it is named rather than numbered
+nameFor(int lvl) =>
+    switch lvl
+        1 => str.tostring(yr)
+        2 => "Q" + str.tostring(iQtr)
+        3 => na(iWeek) ? "" : "Week " + str.tostring(iWeek)
+        4 => dayName()
+        5 => sessName()
+        => ""
+
+// the rows from this level up carry names, the ones below carry numbers
+namedDepth = nameRows == "Off" ? 0 : nameRows == "Down to the day" ? 4 : 5
+
+cellText(int lvl) =>
+    string nm  = showLabels and lvl <= namedDepth ? nameFor(lvl) : ""
+    string num = lvl <= namedDepth and not appendNums ? "" : chain(lvl)
+    nm + (nm != "" and num != "" ? " " : "") + num
 
 // quarter colour, or the colourless fill for a level with no quarter number
 colFor(int i) =>
@@ -226,38 +262,39 @@ var box[] bx8 = array.new_box()
 // one box per cell: created when a new cell opens, and the row keeps only the
 // last `cellsKept` of them so the slower rows never lose their boxes to the
 // 500 box budget
-cell(box[] store, int left, int right, int top, string txt, color bg) =>
+cell(box[] store, int left, int right, int top, string txt, color bg, int keepFrom) =>
     int prev = array.size(store) > 0 ? box.get_left(array.get(store, array.size(store) - 1)) : na
     if na(prev) or prev != left
         array.push(store, box.new(left = left, top = top, right = right, bottom = top - 1, xloc = xloc.bar_time, bgcolor = bg, border_color = borderCol, border_width = borderW, border_style = line.style_solid, text = txt, text_color = textCol, text_size = textSizeIn))
         if array.size(store) > cellsKept
             box.delete(array.shift(store))
+    // and drop whatever now sits before this row's own cycle
+    while array.size(store) > 1 and box.get_left(array.get(store, 0)) < keepFrom
+        box.delete(array.shift(store))
 
 if en1
-    cell(bx1, cycBeg, cycEnd, y1, chain(1), colFor(iCyc4))
+    cell(bx1, cycBeg, cycEnd, y1, cellText(1), colFor(iCyc4), cycTrim)
 
 if en2
-    cell(bx2, qtrBeg, qtrEnd, y2, chain(2), colFor(iQtr))
+    cell(bx2, qtrBeg, qtrEnd, y2, cellText(2), colFor(iQtr), cycBeg)
 
 if en3
-    cell(bx3, weekStart, weekStart + 5 * MS_DAY, y3, chain(3), colFor(iWeek))
+    cell(bx3, weekStart, weekStart + 5 * MS_DAY, y3, cellText(3), colFor(iWeek), 0)
 
 if en4
-    string t4 = chain(4) + (appendNames and showLabels ? " " + dayName() : "")
-    cell(bx4, dayStart, dayStart + MS_DAY, y4, t4, colFor(iDay))
+    cell(bx4, dayStart, dayStart + MS_DAY, y4, cellText(4), colFor(iDay), 0)
 
 if en5
-    string t5 = chain(5) + (appendNames and showLabels ? " " + sessName() : "")
-    cell(bx5, time - off6, time - off6 + MS_6H, y5, t5, colFor(iSess))
+    cell(bx5, time - off6, time - off6 + MS_6H, y5, cellText(5), colFor(iSess), 0)
 
 if en6
-    cell(bx6, time - off90, time - off90 + MS_90, y6, chain(6), colFor(i90))
+    cell(bx6, time - off90, time - off90 + MS_90, y6, cellText(6), colFor(i90), 0)
 
 if en7
-    cell(bx7, time - off225, time - off225 + MS_225, y7, chain(7), colFor(i225))
+    cell(bx7, time - off225, time - off225 + MS_225, y7, cellText(7), colFor(i225), 0)
 
 if en8
-    cell(bx8, time - off5625, time - off5625 + MS_5625, y8, chain(8), colFor(i5625))
+    cell(bx8, time - off5625, time - off5625 + MS_5625, y8, cellText(8), colFor(i5625), 0)
 
 // the rows are drawn entirely with boxes; this hidden plot only satisfies Pine's
 // "at least one output" rule and is excluded from the pane and the scale
