@@ -14,14 +14,10 @@ indicator("SSMT Fill | Quarterly Theory", overlay = true, max_labels_count = 20,
 //     נכנס עמוק מהאחרים — סיגנל לירידות.
 //   בכל מקרה אחר פשוט מתעלמים ממנו. הוא לא מחזק ולא מחליף — הוא משתתף.
 //
-// שבירה = הנכס המוביל נכנס עמוק יותר מהמפגר. ארבע דרגות:
+// שבירה = הנכס המוביל נכנס עמוק יותר מהמפגר. שלוש דרגות:
 //   F1 — המוביל נגע, המפגר לא נגע בכלל.
 //   F2 — המוביל הגיע ל-CE (50%), המפגר לא.
-//   F3 — המוביל הגיע בדיוק לקצה הרחוק, המפגר לא לקח הכול. המילוי המלא.
-//   F0 — השבירה החלשה: המוביל **עבר** את הקצה הרחוק בפתיל, בלי סגירה מעבר
-//        (אין IFVG). הגאפ שלו כבר נגמר ולכן הרעיון פחות יציב, ולכן היא
-//        מתחת ל-F1 ולא מעל F3. קורה רק כשנר אחד בולע את כל הגאפ בבת אחת:
-//        מילוי הדרגתי כבר רשם F1/F2/F3 בדרך, ודרגה אף פעם לא יורדת.
+//   F3 — המוביל הגיע לקצה הרחוק (או מעבר בפתיל), המפגר לא לקח הכול.
 //
 // כל ביקור בגאפ נמדד מאפס. אם כולם מילאו את הגאפ יחד — אין שבירה, אבל
 // הגאפ נשאר תקף וכניסה חוזרת אליו נמדדת מחדש ויכולה לייצר שבירה.
@@ -95,8 +91,7 @@ grpAlert = "התראות"
 // ההתראה רצה בשרתי TradingView, לא בדפדפן — אפשר להקים אותה על גרף 15 דקות
 // והיא תקפוץ גם כשיושבים על 5 דקות או כשהגרף סגור.
 alertOn     = input.bool(true, "שלח התראה על שבירה חדשה", group = grpAlert)
-// 0 = גם שבירות F0 (המוביל בלע את כל הגאפ) נכנסות להתראה.
-alertMinDeg = input.int(1, "דרגה מינימלית להתראה", minval = 0, maxval = 3, group = grpAlert)
+alertMinDeg = input.int(1, "דרגה מינימלית להתראה", minval = 1, maxval = 3, group = grpAlert)
 
 grpMtf = "מסגרות זמן"
 // המנוע רץ שוב, בנפרד לגמרי, על כל מסגרת זמן אחרת — עם אותם חוקים בדיוק.
@@ -339,7 +334,7 @@ type Gap
     bool   dead     // הפך ל-IFVG — הרעיון מתבטל
     bool   armed    // תת-המחזור שבו נולד הסתיים — רק עכשיו הוא יכול לייצר שבירה
     // ── השבירה של הגאפ הזה. כל גאפ מחזיק את שלו, הן לא מתחרות על מקום אחד ──
-    int    fDeg     // 0 = עוד לא נרשמה שבירה. סולם פנימי 1..4 (F0..F3), עולה בלבד.
+    int    fDeg     // 0 = עוד לא נרשמה שבירה. 1..3, יכול רק לעלות.
     string fLead    // המשתתפים לפי סדר עומק, למשל "NQ+ES+YM"
     int    fSigB    // הנר שבו נרשמה
     int    fSeq     // מונה רץ — הגבוה ביותר הוא זה שמצויר
@@ -391,38 +386,23 @@ method lagIdx(Gap g) =>
                 worst := a
     worst
 
-// דרגת השבירה — הגבוהה ביותר שמתקיימת.
-//
-// הסולם הפנימי הוא 1..4 ולא 0..3, כדי ש-0 יישאר "אין שבירה" בכל הבדיקות.
-// להצגה מורידים 1:  1→F0 · 2→F1 · 3→F2 · 4→F3
-//
-// F0 היא השבירה החלשה: המוביל **בלע את כל הגאפ** ויצא מעבר לקצה הרחוק
-// בפתיל, בלי סגירה מעבר (אין IFVG), בזמן שהמפגר לא לקח את הכול. הגאפ שלו
-// כבר נגמר ולכן הרעיון פחות יציב — ולכן היא מתחת ל-F1 ולא מעל F3.
-// מגיעים ל-F0 רק כשזה קורה בנר אחד: אם המילוי היה הדרגתי, הדרך לקצה כבר
-// רשמה F1/F2/F3, ודרגה אף פעם לא יורדת.
-//
-// נגיעה **בדיוק** בקצה הרחוק נשארת F3 — היא המילוי המלא הקלאסי. רק יציאה
-// מעבר לקצה היא F0. הסף כולל שוליים זעירים כדי שרעש נקודה צפה לא יסווג
-// נגיעה מדויקת כיציאה.
+// דרגת השבירה — הגבוהה ביותר שמתקיימת. 0 = אין שבירה.
 f_degree(float dLead, float dLag) =>
     int deg = 0
-    if dLead > 1.000001 and dLag < 1.0
-        deg := 1
-    else if dLead >= 1.0 and dLag < 1.0
-        deg := 4
-    else if dLead >= 0.5 and dLag < 0.5
+    if dLead >= 1.0 and dLag < 1.0
         deg := 3
-    else if dLead > 0.0 and dLag <= 0.0
+    else if dLead >= 0.5 and dLag < 0.5
         deg := 2
+    else if dLead > 0.0 and dLag <= 0.0
+        deg := 1
     deg
 
 // הדרגה כפי שהיא מוצגת למשתמש
 f_degTxt(int d) =>
-    "F" + str.tostring(d - 1)
+    "F" + str.tostring(d)
 // אותו דבר בלי האות, ועם "-" כשאין שבירה בכלל — לטבלאות האבחון
 f_degNum(int d) =>
-    d == 0 ? "-" : str.tostring(d - 1)
+    d == 0 ? "-" : str.tostring(d)
 
 // הדרגה של הגאפ ברגע הזה, אחרי מגבלות התפקיד של YM.
 method fracDeg(Gap g) =>
@@ -1028,7 +1008,7 @@ if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK and array.
                 gr.fYPos  := gr.dir == 1 ? low - atr * offsetMlt : high + atr * offsetMlt
                 gr.fDeg   := deg
                 gr.fLead  := gr.fracTxt()
-                if alertOn and deg >= alertMinDeg + 1
+                if alertOn and deg >= alertMinDeg
                     string one = "[" + f_tfName() + "] " + syminfo.ticker + " · שבירה " + (gr.dir == 1 ? "שורית" : "דובית") + " " + f_degTxt(deg) + " · " + gr.fLead
                     alertMsg := alertMsg == "" ? one : alertMsg + "\n" + one
 
@@ -1275,10 +1255,10 @@ if mtfOn and barstate.isconfirmed and array.size(allEng) > 0
     for k = 0 to array.size(allEng) - 1
         Engine ek = array.get(allEng, k)
         if f_useSlot(k) and ek.justFired
-            flashTxt  := f_clsName(ek.cls) + " " + (ek.fDir == 1 ? "▲" : "▼") + str.tostring(ek.fDeg - 1)
+            flashTxt  := f_clsName(ek.cls) + " " + (ek.fDir == 1 ? "▲" : "▼") + str.tostring(ek.fDeg)
             flashDir  := ek.fDir
             flashTime := time_close
-            if mtfAlert and alertOn and ek.fDeg >= alertMinDeg + 1
+            if mtfAlert and alertOn and ek.fDeg >= alertMinDeg
                 string one = "[" + f_clsName(ek.cls) + "] " + syminfo.ticker + " · שבירה " + (ek.fDir == 1 ? "שורית" : "דובית") + " " + f_degTxt(ek.fDeg) + " · " + ek.fLead
                 alertMsg := alertMsg == "" ? one : alertMsg + "\n" + one
 
@@ -1344,7 +1324,7 @@ if barstate.islast
             for cc = 7 to 1
                 int cd = array.get(pDir, cc - 1)
                 if cc != tfClass and cd != -9 and cd != 0
-                    table.cell(flashT, cx, flashRow, f_clsName(cc) + (cd == 1 ? " ▲" : " ▼") + str.tostring(array.get(pDeg, cc - 1) - 1) + "  ", bgcolor = color.new(color.black, 100), text_color = cd == 1 ? colBull : colBear, text_size = size.small)
+                    table.cell(flashT, cx, flashRow, f_clsName(cc) + (cd == 1 ? " ▲" : " ▼") + str.tostring(array.get(pDeg, cc - 1)) + "  ", bgcolor = color.new(color.black, 100), text_color = cd == 1 ? colBull : colBear, text_size = size.small)
                     cx := cx + 1
         else if flashTxt != "" and timenow - flashTime <= mtfFlashMin * 60000
             table.cell(flashT, 1, flashRow, flashTxt, bgcolor = color.new(color.black, 100), text_color = flashDir == 1 ? colBull : colBear, text_size = size.small)
@@ -1383,10 +1363,10 @@ if shownSeq != drawnSeq or shownDeg != drawnDeg
         Gap    gd   = array.get(gaps, selIdx)
         color  col  = gd.dir == 1 ? colBull : colBear
         // הדרגה משנה רק את עוצמת המסגרת. המילוי נשאר שקוף באותה מידה כדי
-        // שהנרות מתחתיו יישארו קריאים. F0 היא הכי חיוורת.
-        color  cEdge = color.new(col, gd.fDeg == 4 ? boxBorder : gd.fDeg == 3 ? math.min(boxBorder + 20, 95) : gd.fDeg == 2 ? math.min(boxBorder + 35, 95) : math.min(boxBorder + 45, 95))
-        // הטקסט לא הולך אחרי שקיפות המסגרת — הוא חייב להישאר קריא גם ב-F0.
-        color  cTxt  = color.new(col, gd.fDeg == 4 ? 0 : gd.fDeg == 3 ? 15 : gd.fDeg == 2 ? 30 : 40)
+        // שהנרות מתחתיו יישארו קריאים.
+        color  cEdge = color.new(col, gd.fDeg == 3 ? boxBorder : gd.fDeg == 2 ? math.min(boxBorder + 20, 95) : math.min(boxBorder + 35, 95))
+        // הטקסט לא הולך אחרי שקיפות המסגרת — הוא חייב להישאר קריא גם ב-F1.
+        color  cTxt  = color.new(col, gd.fDeg == 3 ? 0 : gd.fDeg == 2 ? 15 : 30)
         float  gTop = isESc ? gd.esTop : isYMc ? gd.ymTop : gd.nqTop
         float  gBot = isESc ? gd.esBot : isYMc ? gd.ymBot : gd.nqBot
         bool   onChart = not na(gTop)
