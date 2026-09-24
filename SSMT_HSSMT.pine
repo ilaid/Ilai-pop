@@ -1297,14 +1297,14 @@ var table markTbl = table.new(markPos, 12, 1, border_width = 0)
 if mtfOn and barstate.islast and tfClass != 0
     // מסגרת הגרף נלקחת מהמנוע המקומי — בדיוק אותה שבירה שמצוירת על הגרף,
     // כלומר רק אחת (העדכנית), לפי showDir. בלי זה נראו שני הכיוונים יחד.
-    sC  = showDir == -1 ? "▼" + bearStr : showDir == 1 ? "▲" + bullStr : ""
-    sC2 = secDir  == -1 ? "▼" + bearStr : secDir  == 1 ? "▲" + bullStr : ""
+    // בפינה נכתבת **רק השבירה העדכנית** של כל מסגרת. השבירה החלשה עדיין מצוירת
+    // על הגרף בצבע דהוי, אבל לא בכיתוב — כדי שהשורה תישאר קצרה וקריאה.
+    // (הנתונים שלה זמינים ב-egX.txt2 / egX.dir2 אם אי פעם נרצה להחזיר אותה.)
+    sC = showDir == -1 ? "▼" + bearStr : showDir == 1 ? "▲" + bullStr : ""
 
-    clsArr  = array.from(cU3, cU2, cU1, tfClass, cD1, cD2)
-    stArr   = array.from(egU3.txt, egU2.txt, egU1.txt, sC, egD1.txt, egD2.txt)
-    dirArr  = array.from(egU3.dir, egU2.dir, egU1.dir, showDir, egD1.dir, egD2.dir)
-    st2Arr  = array.from(egU3.txt2, egU2.txt2, egU1.txt2, sC2, egD1.txt2, egD2.txt2)
-    dir2Arr = array.from(egU3.dir2, egU2.dir2, egU1.dir2, secDir, egD1.dir2, egD2.dir2)
+    clsArr = array.from(cU3, cU2, cU1, tfClass, cD1, cD2)
+    stArr  = array.from(egU3.txt, egU2.txt, egU1.txt, sC, egD1.txt, egD2.txt)
+    dirArr = array.from(egU3.dir, egU2.dir, egU1.dir, showDir, egD1.dir, egD2.dir)
     // מדרגה שלא נסרקת (מעל 4H, או מתחת לדקה) פשוט יוצאת מהרשימה
     useArr = array.from(useU3, useU2, useU1, true, useD1, useD2)
 
@@ -1316,15 +1316,12 @@ if mtfOn and barstate.islast and tfClass != 0
     table.clear(mtfTbl,  0, 0, 1, 7)
     table.clear(markTbl, 0, 0, 11, 0)
     for i = 0 to 5
-        c   = array.get(clsArr, i)
-        st  = array.get(stArr, i)
-        d   = array.get(dirArr, i)
-        st2 = array.get(st2Arr, i)
-        d2  = array.get(dir2Arr, i)
+        c  = array.get(clsArr, i)
+        st = array.get(stArr, i)
+        d  = array.get(dirArr, i)
         if array.get(useArr, i) and c != prevC   // הרשימה יורדת, אז די בהשוואה לקודם כדי לנקות כפילויות בקצוות
             // צבע הכיוון של האינדיקטור עצמו — אדום לדובי, ירוק לשורי
-            cl  = d  == -1 ? colBear : d  == 1 ? colBull : mtfColor
-            cl2 = color.new(d2 == -1 ? colBear : d2 == 1 ? colBull : mtfColor, weakFade)
+            cl = d == -1 ? colBear : d == 1 ? colBull : mtfColor
             if st != ""
                 mark := mark + f_tfName(c) + " " + st + "   "
                 // את מסגרת הגרף עצמה לא כותבים בפינה — היא כבר מצוירת על הגרף.
@@ -1332,16 +1329,10 @@ if mtfOn and barstate.islast and tfClass != 0
                 if mtfMark and c != tfClass and mcol <= 11
                     table.cell(markTbl, mcol, 0, f_tfName(c) + " " + st, text_color = cl, text_size = size.small, bgcolor = bg)
                     mcol := mcol + 1
-            // השבירה החלשה של אותה מסגרת — אותו פורמט, בצבע דהוי
-            if st2 != ""
-                mark := mark + f_tfName(c) + " " + st2 + "   "
-                if mtfMark and c != tfClass and mcol <= 11
-                    table.cell(markTbl, mcol, 0, f_tfName(c) + " " + st2, text_color = cl2, text_size = size.small, bgcolor = bg)
-                    mcol := mcol + 1
             if mtfPanel
                 nm = (c == tfClass ? "▶ " : "   ") + f_tfName(c)
                 table.cell(mtfTbl, 0, row, nm, text_color = cl, text_size = size.small, bgcolor = bg)
-                table.cell(mtfTbl, 1, row, st == "" ? "—" : (st2 == "" ? st : st + "  /  " + st2), text_color = cl, text_size = size.small, bgcolor = bg)
+                table.cell(mtfTbl, 1, row, st == "" ? "—" : st, text_color = cl, text_size = size.small, bgcolor = bg)
             row := row + 1
             prevC := c
     mark := str.trim(mark)
