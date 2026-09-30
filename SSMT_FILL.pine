@@ -58,6 +58,18 @@ symYM_mic = input.symbol("CBOT_MINI:MYM1!", "YM מיקרו", group = grpSym)
 
 grpGap = "הגדרת גאפ"
 extendBodies = input.bool(true, "הרחב גאפ לגופי הנרות (רווח סגירה/פתיחה)", group = grpGap)
+// הצד של נר 1 בלבד. **כבוי = ההתנהגות הקיימת ולא משתנה כלום.**
+//   כבוי — מרחיבים רק כשנר 2 נפתח **מעל הפתיל** של נר 1, כלומר רווח מחיר
+//          אמיתי שלא נסחר. פתיחה שנופלת בתוך הפתיל לא מרחיבה, כי האזור
+//          הזה כן נסחר — נר 1 עבר בו בדרך.
+//   דלוק — מספיק שנר 2 נפתח מעבר ל**סגירה** של נר 1, גם אם הפתיחה יושבת
+//          בתוך הפתיל. ככה עובדים הרבה אינדיקטורי FVG, והקופסאות יוצאות
+//          רחבות יותר כמעט תמיד.
+// מה זה גורר כשמדליקים: גאפ רחב יותר → קשה יותר להגיע ל-IFVG, כלומר
+// גאפים חיים יותר זמן. וגם העומקים באחוזים יורדים, ולכן פחות F2/F3 ויותר
+// F1 על אותה תנועה בנקודות.
+// הצד של נר 3 לא מושפע — הוא ממילא נבדק מול הסגירה של נר 2.
+extendInWick = input.bool(false, "הרחב גם כשהפתיחה בתוך הפתיל", group = grpGap)
 // כיבוי מחזיר את ההתנהגות הישנה: רק NQ מול ES, YM לא משתתף בכלל.
 useYM        = input.bool(true, "כלול את YM כנכס חלש", group = grpGap)
 // השאר על 0. האסימטריה בין הנכסים היא הסיגנל עצמו — סינון לפי גודל
@@ -667,31 +679,31 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
             float ert = na
             if nd == 1
                 if bullN
-                    nb  := (extendBodies and no1 > nh2) ? nc2 : nh2
+                    nb  := (extendBodies and no1 > (extendInWick ? nc2 : nh2)) ? nc2 : nh2
                     nt  := (extendBodies and nl0 > nc1) ? array.get(n, 0) : nl0
                     nrb := nh2
                     nrt := nl0
                 if bullE
-                    eb  := (extendBodies and eo1 > eh2) ? ec2 : eh2
+                    eb  := (extendBodies and eo1 > (extendInWick ? ec2 : eh2)) ? ec2 : eh2
                     et  := (extendBodies and el0 > ec1) ? array.get(s, 0) : el0
                     erb := eh2
                     ert := el0
                 if bullY
-                    yb := (extendBodies and yo1 > yh2) ? yc2 : yh2
+                    yb := (extendBodies and yo1 > (extendInWick ? yc2 : yh2)) ? yc2 : yh2
                     yt := (extendBodies and yl0 > yc1) ? array.get(y, 0) : yl0
             else
                 if bearN
-                    nt  := (extendBodies and no1 < nl2) ? nc2 : nl2
+                    nt  := (extendBodies and no1 < (extendInWick ? nc2 : nl2)) ? nc2 : nl2
                     nb  := (extendBodies and nh0 < nc1) ? array.get(n, 0) : nh0
                     nrb := nh0
                     nrt := nl2
                 if bearE
-                    et  := (extendBodies and eo1 < el2) ? ec2 : el2
+                    et  := (extendBodies and eo1 < (extendInWick ? ec2 : el2)) ? ec2 : el2
                     eb  := (extendBodies and eh0 < ec1) ? array.get(s, 0) : eh0
                     erb := eh0
                     ert := el2
                 if bearY
-                    yt := (extendBodies and yo1 < yl2) ? yc2 : yl2
+                    yt := (extendBodies and yo1 < (extendInWick ? yc2 : yl2)) ? yc2 : yl2
                     yb := (extendBodies and yh0 < yc1) ? array.get(y, 0) : yh0
             // גאפ שקטן מהסף נפסל לאותו נכס בלבד, ואם נשאר רק אחד — אין גאפ
             if not na(nt) and nt - nb <= minGapPct / 100 * nc0
@@ -888,6 +900,13 @@ if array.size(gaps) > 0
 //            עליון:  low[0]  → open[0]  אם low[0]  > close[1]
 //   דובי  — עליון:  low[2]   → close[2] אם open[1] < low[2]
 //            תחתון: high[0]  → open[0]  אם high[0] < close[1]
+//
+// ההגדרה `הרחב גם כשהפתיחה בתוך הפתיל` מרפה את התנאי של **הצד של נר 1**
+// בלבד: במקום להשוות את open[1] לפתיל של נר 1 משווים אותו לסגירה שלו, כך
+// שגם פתיחה שיושבת בתוך הפתיל מרחיבה. כבוי כברירת מחדל.
+//   שורי  — open[1] > close[2] במקום open[1] > high[2]
+//   דובי  — open[1] < close[2] במקום open[1] < low[2]
+// הצד של נר 3 לא מושפע, הוא ממילא נבדק מול הסגירה של נר 2.
 // ═══════════════════════════════════════════════════════════════════
 
 if barstate.isconfirmed and tfClass != 0 and bar_index > 2
@@ -918,31 +937,31 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
 
         if newDir == 1
             if bullN
-                nb  := (extendBodies and nqO[1] > nqH[2]) ? nqC[2] : nqH[2]
+                nb  := (extendBodies and nqO[1] > (extendInWick ? nqC[2] : nqH[2])) ? nqC[2] : nqH[2]
                 nt  := (extendBodies and nqL    > nqC[1]) ? nqO    : nqL
                 nrb := nqH[2]
                 nrt := nqL
             if bullE
-                eb  := (extendBodies and esO[1] > esH[2]) ? esC[2] : esH[2]
+                eb  := (extendBodies and esO[1] > (extendInWick ? esC[2] : esH[2])) ? esC[2] : esH[2]
                 et  := (extendBodies and esL    > esC[1]) ? esO    : esL
                 erb := esH[2]
                 ert := esL
             if bullY
-                yb := (extendBodies and ymO[1] > ymH[2]) ? ymC[2] : ymH[2]
+                yb := (extendBodies and ymO[1] > (extendInWick ? ymC[2] : ymH[2])) ? ymC[2] : ymH[2]
                 yt := (extendBodies and ymL    > ymC[1]) ? ymO    : ymL
         else
             if bearN
-                nt  := (extendBodies and nqO[1] < nqL[2]) ? nqC[2] : nqL[2]
+                nt  := (extendBodies and nqO[1] < (extendInWick ? nqC[2] : nqL[2])) ? nqC[2] : nqL[2]
                 nb  := (extendBodies and nqH    < nqC[1]) ? nqO    : nqH
                 nrb := nqH
                 nrt := nqL[2]
             if bearE
-                et  := (extendBodies and esO[1] < esL[2]) ? esC[2] : esL[2]
+                et  := (extendBodies and esO[1] < (extendInWick ? esC[2] : esL[2])) ? esC[2] : esL[2]
                 eb  := (extendBodies and esH    < esC[1]) ? esO    : esH
                 erb := esH
                 ert := esL[2]
             if bearY
-                yt := (extendBodies and ymO[1] < ymL[2]) ? ymC[2] : ymL[2]
+                yt := (extendBodies and ymO[1] < (extendInWick ? ymC[2] : ymL[2])) ? ymC[2] : ymL[2]
                 yb := (extendBodies and ymH    < ymC[1]) ? ymO    : ymH
 
         // גאפ שקטן מהסף נפסל לאותו נכס בלבד. אם נשאר רק אחד — אין גאפ.
