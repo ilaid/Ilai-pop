@@ -508,7 +508,7 @@ f_clsName(int c) =>
 // ═══════════════════════════════════════════════════════════════════
 
 type Engine
-    int          cls        // מחלקת מסגרת הזמן (1..7)
+    int          cls        // מחלקת מסגרת הזמן (1..8)
     array<Gap>   gaps
     array<float> hN         // שני הנרות הקודמים של NQ: [o1,h1,l1,c1,o2,h2,l2,c2]
     array<float> hE         // אותו דבר ל-ES
@@ -1432,7 +1432,7 @@ if mtfOn and barstate.isconfirmed
             f_pushLtf(el3, array.get(q3nt, j), array.get(q3no, j), array.get(q3nh, j), array.get(q3nl, j), array.get(q3nc, j), array.get(q3eo, j), array.get(q3eh, j), array.get(q3el, j), array.get(q3ec, j), yo, yh, yl, yc)
 
 // ═══════════════════════════════════════════════════════════════════
-// ריכוז המצב של כל המסגרות לפי מחלקה (אינדקס 0 = 1m ... אינדקס 6 = 1W)
+// ריכוז המצב של כל המסגרות לפי מחלקה (אינדקס 0 = 1m ... אינדקס 7 = חודשי)
 // ═══════════════════════════════════════════════════════════════════
 
 var array<int>    pDir  = array.new_int(8, -9)   // -9 = אין נתונים למסגרת הזאת
@@ -1491,7 +1491,7 @@ if mtfOn and barstate.isconfirmed and array.size(allEng) > 0
                 alertMsg := alertMsg == "" ? one : alertMsg + "\n" + one
 
 // ═══════════════════════════════════════════════════════════════════
-// פאנל מסגרות הזמן — מסודר מלמעלה למטה, 1W ועד 1m
+// פאנל מסגרות הזמן — מסודר מלמעלה למטה, Mo ועד 1m
 // ═══════════════════════════════════════════════════════════════════
 
 f_stTxt(int dir, int deg, bool vol, string lead) =>
