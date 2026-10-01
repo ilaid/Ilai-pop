@@ -43,8 +43,8 @@ indicator("SSMT Fill | Quarterly Theory", overlay = true, max_labels_count = 20,
 // מיפוי תת-מחזור/מיכל לכל מסגרת זמן:
 //   1M  — רבע 22.5m   → מיקרו-סשן    5M  — מיקרו-סשן → סשן
 //   15M — סשן          → יום מסחר      1H  — יום מסחר  → שבוע
-//   4H  — שבוע         → חודש          1D  — רבעון     → שנה
-//   1W  — שנה          → מחזור 4 שנים
+//   4H  — שבוע         → חודש          1D  — רבע-רבעון → רבעון
+//   1W  — רבעון        → שנה           Mo  — שנה       → מחזור 4 שנים
 //
 // הצנרת (זמן, סייקלים, תת-מחזור/מיכל) זהה ל-SSMT+HSSMT.
 // ═══════════════════════════════════════════════════════════════════
@@ -171,9 +171,9 @@ sYM = useMicro ? symYM_mic : symYM_std
 // זיהוי Timeframe
 // ═══════════════════════════════════════════════════════════════════
 
-// 1 = 1M · 2 = 5M · 3 = 15M · 4 = 1H · 5 = 4H · 6 = יומי · 7 = שבועי
+// 1 = 1m · 2 = 5m · 3 = 15m · 4 = 1H · 5 = 4H · 6 = יומי · 7 = שבועי · 8 = חודשי
 tfMin   = timeframe.in_seconds() / 60
-tfClass = tfMin <= 1 ? 1 : tfMin <= 5 ? 2 : tfMin <= 15 ? 3 : tfMin <= 60 ? 4 : tfMin <= 240 ? 5 : tfMin <= 1440 ? 6 : tfMin <= 10080 ? 7 : 0
+tfClass = tfMin <= 1 ? 1 : tfMin <= 5 ? 2 : tfMin <= 15 ? 3 : tfMin <= 60 ? 4 : tfMin <= 240 ? 5 : tfMin <= 1440 ? 6 : tfMin <= 10080 ? 7 : tfMin <= 44640 ? 8 : 0
 
 // ═══════════════════════════════════════════════════════════════════
 // חישובי זמן EST
@@ -244,7 +244,7 @@ sessionId  = tradeDayId * 10 + sessionIdx
 microId    = sessionId * 10 + microIdx
 quarterId  = microId * 10 + quarterIdx
 
-// הרמות שמעל החודש — משמשות את היומי והשבועי.
+// הרמות שמעל החודש — משמשות את היומי, השבועי והחודשי.
 // רבעון = שלושה חודשים קלנדריים: ינו–מרץ · אפר–יוני · יולי–ספט · אוק–דצמ.
 // מחזור 4 שנים = בלוק שמתחיל בשנת בחירות (2024, 2028, ...).
 qOfYear = int(math.ceil(tdMon / 3.0))
@@ -252,11 +252,24 @@ qtrId   = tdYear * 10 + qOfYear
 yearId  = tdYear
 quadId  = int(math.floor(tdYear / 4.0))
 
+// ── רבע-רבעון: הרבעון מחולק לארבעה חלקים שווים בזמן, בערך 23 יום כל אחד ──
+// זה תת-המחזור של הגרף היומי. החלוקה היא בימי לוח מתחילת הרבעון, לא לפי
+// חודשים (3 חודשים לא מתחלקים ב-4), ולכן היא נמדדת מול אורך הרבעון בפועל.
+qStartMon = (qOfYear - 1) * 3 + 1
+qStartT   = timestamp(TZ, tdYear, qStartMon, 1, 0, 0)
+qNextT    = qOfYear == 4 ? timestamp(TZ, tdYear + 1, 1, 1, 0, 0) : timestamp(TZ, tdYear, qStartMon + 3, 1, 0, 0)
+qLenD     = (qNextT - qStartT) / 86400000.0
+qPosD     = (tradeDayTime - qStartT) / 86400000.0
+qqIdx     = math.min(3, math.max(0, int(math.floor(qPosD * 4 / qLenD))))
+qqId      = qtrId * 10 + qqIdx
+
 refCycleId = 0
-if tfClass == 7
+if tfClass == 8
     refCycleId := yearId
-else if tfClass == 6
+else if tfClass == 7
     refCycleId := qtrId
+else if tfClass == 6
+    refCycleId := qqId
 else if tfClass == 5
     refCycleId := weekId
 else if tfClass == 4
@@ -269,10 +282,12 @@ else if tfClass == 1
     refCycleId := quarterId
 
 lifeCycleId = 0
-if tfClass == 7
+if tfClass == 8
     lifeCycleId := quadId
-else if tfClass == 6
+else if tfClass == 7
     lifeCycleId := yearId
+else if tfClass == 6
+    lifeCycleId := qtrId
 else if tfClass == 5
     lifeCycleId := monthId
 else if tfClass == 4
@@ -294,11 +309,12 @@ newLifeCycle = ta.change(lifeCycleId) != 0
 //   5M — המיקרו האחרון של לונדון מול הראשון של NY-AM. חל בכל החלפת סשן,
 //        כולל PM→אסיה של היום הבא וכולל שישי→פתיחת יום ראשון בערב.
 //   1H — יום שני משווה גם לגאפי יום שישי, שנמחקים בסוף יום שני.
-//   1D — Q1 משווה גם לגאפי Q4 של השנה הקודמת, שנמחקים בסוף Q1.
-//   1W — השנה הראשונה במחזור משווה גם לגאפי השנה האחרונה שלפניה.
+//   1D — הרבע הראשון של רבעון משווה גם לרבע האחרון של הרבעון הקודם.
+//   1W — הרבעון הראשון בשנה משווה גם לגאפי Q4 של השנה הקודמת.
+//   Mo — השנה הראשונה במחזור משווה גם לגאפי השנה האחרונה שלפניה.
 // אין זרע ב-15M (סשנים מושווים רק בתוך אותו יום מסחר) ואין ב-4H (שבועות
 // מושווים רק בתוך אותו חודש). לכבות זרע במסגרת = להוריד אותה מהתנאי כאן.
-keepLast = tfClass <= 2 or tfClass == 4 or tfClass == 6 or tfClass == 7
+keepLast = tfClass <= 2 or tfClass == 4 or tfClass >= 6
 
 // ═══════════════════════════════════════════════════════════════════
 // משיכת נתוני שלושת הנכסים (open נדרש להרחבת הגאפ לגופים)
@@ -473,9 +489,10 @@ method fracTxt(Gap g) =>
             t := t + " ✕" + x
     t
 
-// שם קריא למחלקת מסגרת זמן
+// שם קריא למחלקת מסגרת זמן. החודשי הוא "Mo" ולא "1M", כדי שלא יתבלבל עם
+// "1m" של הדקה בשורת הסימון הזעירה בפינה.
 f_clsName(int c) =>
-    c == 7 ? "1W" : c == 6 ? "1D" : c == 5 ? "4H" : c == 4 ? "1H" : c == 3 ? "15m" : c == 2 ? "5m" : c == 1 ? "1m" : "?"
+    c == 8 ? "Mo" : c == 7 ? "1W" : c == 6 ? "1D" : c == 5 ? "4H" : c == 4 ? "1H" : c == 3 ? "15m" : c == 2 ? "5m" : c == 1 ? "1m" : "?"
 
 // ═══════════════════════════════════════════════════════════════════
 // מנוע עצמאי למסגרת זמן אחרת
@@ -559,10 +576,20 @@ f_setCycles(Engine e, int t) =>
     int  ssId = tdId * 10 + sIdx
     int  ucId = ssId * 10 + uIdx
     int  qrId = ucId * 10 + qIdx
-    int  qtId = yy * 10 + int(math.ceil(mm / 3.0))
+    int  qOf  = int(math.ceil(mm / 3.0))
+    int  qtId = yy * 10 + qOf
     int  qdId = int(math.floor(yy / 4.0))
-    int  rf   = c == 7 ? yy   : c == 6 ? qtId : c == 5 ? wkId : c == 4 ? tdId : c == 3 ? ssId : c == 2 ? ucId : qrId
-    int  lf   = c == 7 ? qdId : c == 6 ? yy   : c == 5 ? mnId : c == 4 ? wkId : c == 3 ? tdId : c == 2 ? ssId : ucId
+    // רבע-רבעון, בדיוק כמו qqId של הגרף: הרבעון מחולק לארבעה חלקים שווים
+    // בימי לוח (בערך 23 יום). תת-המחזור של היומי.
+    int   qsM  = (qOf - 1) * 3 + 1
+    int   qsT  = timestamp(TZ, yy, qsM, 1, 0, 0)
+    int   qnT  = qOf == 4 ? timestamp(TZ, yy + 1, 1, 1, 0, 0) : timestamp(TZ, yy, qsM + 3, 1, 0, 0)
+    float qLn  = (qnT - qsT) / 86400000.0
+    float qPs  = (tdt - qsT) / 86400000.0
+    int   qqIx = math.min(3, math.max(0, int(math.floor(qPs * 4 / qLn))))
+    int   qqId = qtId * 10 + qqIx
+    int  rf   = c == 8 ? yy   : c == 7 ? qtId : c == 6 ? qqId : c == 5 ? wkId : c == 4 ? tdId : c == 3 ? ssId : c == 2 ? ucId : qrId
+    int  lf   = c == 8 ? qdId : c == 7 ? yy   : c == 6 ? qtId : c == 5 ? mnId : c == 4 ? wkId : c == 3 ? tdId : c == 2 ? ssId : ucId
     e.curRef  := rf
     e.curLife := lf
     e.curDead := dead
@@ -589,7 +616,7 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
         // ── החלפת מיכל + זרע ──
         // חייב להיות זהה ל-keepLast של הגרף, אחרת השורה בפינה תסתור את
         // מה שרואים על הגרף באותה מסגרת.
-        bool keepL   = e.cls <= 2 or e.cls == 4 or e.cls == 6 or e.cls == 7
+        bool keepL   = e.cls <= 2 or e.cls == 4 or e.cls >= 6
         bool newLife = e.started and lf != e.lifeId
         bool newRef  = e.started and rf != e.refId
         int  prevRef = e.refId
@@ -904,8 +931,8 @@ f_pushLtf(Engine e, int t, float no, float nh, float nl, float nc, float eo, flo
 
 // ═══════════════════════════════════════════════════════════════════
 // איפוס מיכל + מנגנון הזרע
-// (1M: רבע/רבע · 5M: מיקרו/מיקרו · 1H: שני/שישי · 1D: Q1/Q4 ·
-//  1W: שנה ראשונה/אחרונה במחזור. ב-15M וב-4H אין זרע.)
+// (1M: רבע/רבע · 5M: מיקרו/מיקרו · 1H: שני/שישי · 1D: רבע-רבעון ראשון/אחרון ·
+//  1W: Q1/Q4 · Mo: שנה ראשונה/אחרונה במחזור. ב-15M וב-4H אין זרע.)
 // ═══════════════════════════════════════════════════════════════════
 
 var bool seedActive = false
@@ -942,7 +969,7 @@ else if newRefCycle and seedActive
 // דריכה: גאפ נהיה זמין לשבירה רק אחרי שתת-המחזור שבו נולד הסתיים.
 // חזרה לגאפ באותו תת-מחזור שבו נוצר אינה שבירה ואינה נספרת.
 // (1H: תת-מחזור = יום מסחר · 4H: שבוע · 15M: סשן · 5M: מיקרו-סשן · 1M: רבע
-//  יומי: רבעון · שבועי: שנה)
+//  יומי: רבע-רבעון (~23 יום) · שבועי: רבעון · חודשי: שנה)
 //
 // ביקור: כשאף נכס משתתף לא נוגע בגאפ — הביקור נגמר והעומקים מתאפסים. YM
 // נספר גם הוא. כך מילוי משותף בביקור אחד לא חוסם שבירה בביקור הבא.
@@ -1219,7 +1246,8 @@ if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK and array.
 // IFVG על הגאפ שלה, או החלפת מיכל.
 //   15M — שבירה של לונדון מלווה את שאר יום המסחר (NY-AM ו-NY-PM)
 //   1H  — של יום שני, עד סוף השבוע · 4H — של שבוע, עד סוף החודש
-//   1D  — של רבעון, עד סוף השנה · 1W — של שנה, עד סוף מחזור 4 השנים
+//   1D  — של רבע-רבעון, עד סוף הרבעון · 1W — של רבעון, עד סוף השנה
+//   Mo  — של שנה, עד סוף מחזור 4 השנים
 // מבין השבירות החיות מצוירת זו שקרתה אחרונה. שבירה נגדית לא מוחקת את
 // הקודמות — היא רק חדשה יותר ולכן קופצת לתצוגה. אם היא מתה ב-IFVG,
 // הקודמת בכיוון ההפוך חוזרת מעצמה.
@@ -1262,27 +1290,27 @@ if selIdx != -1
 
 mtfOn = (showMtf or mtfAlert or mtfFlash) and tfClass != 0
 
-c1 = math.min(tfClass + 1, 7)
-c2 = math.min(tfClass + 2, 7)
-c3 = math.min(tfClass + 3, 7)
-c4 = math.min(tfClass + 4, 7)
-c5 = math.min(tfClass + 5, 7)
-c6 = math.min(tfClass + 6, 7)
+c1 = math.min(tfClass + 1, 8)
+c2 = math.min(tfClass + 2, 8)
+c3 = math.min(tfClass + 3, 8)
+c4 = math.min(tfClass + 4, 8)
+c5 = math.min(tfClass + 5, 8)
+c6 = math.min(tfClass + 6, 8)
 
 cL1 = math.max(tfClass - 1, 1)
 cL2 = math.max(tfClass - 2, 1)
 cL3 = math.max(tfClass - 3, 1)
 
-tfs1 = c1 == 2 ? "5" : c1 == 3 ? "15" : c1 == 4 ? "60" : c1 == 5 ? "240" : c1 == 6 ? "D" : "W"
-tfs2 = c2 == 2 ? "5" : c2 == 3 ? "15" : c2 == 4 ? "60" : c2 == 5 ? "240" : c2 == 6 ? "D" : "W"
-tfs3 = c3 == 2 ? "5" : c3 == 3 ? "15" : c3 == 4 ? "60" : c3 == 5 ? "240" : c3 == 6 ? "D" : "W"
-tfs4 = c4 == 2 ? "5" : c4 == 3 ? "15" : c4 == 4 ? "60" : c4 == 5 ? "240" : c4 == 6 ? "D" : "W"
-tfs5 = c5 == 2 ? "5" : c5 == 3 ? "15" : c5 == 4 ? "60" : c5 == 5 ? "240" : c5 == 6 ? "D" : "W"
-tfs6 = c6 == 2 ? "5" : c6 == 3 ? "15" : c6 == 4 ? "60" : c6 == 5 ? "240" : c6 == 6 ? "D" : "W"
+tfs1 = c1 == 2 ? "5" : c1 == 3 ? "15" : c1 == 4 ? "60" : c1 == 5 ? "240" : c1 == 6 ? "D" : c1 == 7 ? "W" : "M"
+tfs2 = c2 == 2 ? "5" : c2 == 3 ? "15" : c2 == 4 ? "60" : c2 == 5 ? "240" : c2 == 6 ? "D" : c2 == 7 ? "W" : "M"
+tfs3 = c3 == 2 ? "5" : c3 == 3 ? "15" : c3 == 4 ? "60" : c3 == 5 ? "240" : c3 == 6 ? "D" : c3 == 7 ? "W" : "M"
+tfs4 = c4 == 2 ? "5" : c4 == 3 ? "15" : c4 == 4 ? "60" : c4 == 5 ? "240" : c4 == 6 ? "D" : c4 == 7 ? "W" : "M"
+tfs5 = c5 == 2 ? "5" : c5 == 3 ? "15" : c5 == 4 ? "60" : c5 == 5 ? "240" : c5 == 6 ? "D" : c5 == 7 ? "W" : "M"
+tfs6 = c6 == 2 ? "5" : c6 == 3 ? "15" : c6 == 4 ? "60" : c6 == 5 ? "240" : c6 == 6 ? "D" : c6 == 7 ? "W" : "M"
 
-tfl1 = cL1 == 1 ? "1" : cL1 == 2 ? "5" : cL1 == 3 ? "15" : cL1 == 4 ? "60" : cL1 == 5 ? "240" : "D"
-tfl2 = cL2 == 1 ? "1" : cL2 == 2 ? "5" : cL2 == 3 ? "15" : cL2 == 4 ? "60" : cL2 == 5 ? "240" : "D"
-tfl3 = cL3 == 1 ? "1" : cL3 == 2 ? "5" : cL3 == 3 ? "15" : cL3 == 4 ? "60" : cL3 == 5 ? "240" : "D"
+tfl1 = cL1 == 1 ? "1" : cL1 == 2 ? "5" : cL1 == 3 ? "15" : cL1 == 4 ? "60" : cL1 == 5 ? "240" : cL1 == 6 ? "D" : "W"
+tfl2 = cL2 == 1 ? "1" : cL2 == 2 ? "5" : cL2 == 3 ? "15" : cL2 == 4 ? "60" : cL2 == 5 ? "240" : cL2 == 6 ? "D" : "W"
+tfl3 = cL3 == 1 ? "1" : cL3 == 2 ? "5" : cL3 == 3 ? "15" : cL3 == 4 ? "60" : cL3 == 5 ? "240" : cL3 == 6 ? "D" : "W"
 
 [t1, n1o0, n1h0, n1l0, n1c0, n1o1, n1c1, n1h2, n1l2, n1c2] = request.security(sNQ, tfs1, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
 [t2, n2o0, n2h0, n2l0, n2c0, n2o1, n2c1, n2h2, n2l2, n2c2] = request.security(sNQ, tfs2, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
@@ -1331,12 +1359,12 @@ var Engine el2 = Engine.new(cL2, array.new<Gap>(), array.new_float(8, na), array
 var Engine el3 = Engine.new(cL3, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, false, 0, 0, false)
 
 // אילו מדרגות באמת קיימות ונצעדות
-useH1 = tfClass + 1 <= 7
-useH2 = tfClass + 2 <= 7
-useH3 = tfClass + 3 <= 7
-useH4 = tfClass + 4 <= 7
-useH5 = tfClass + 5 <= 7
-useH6 = tfClass + 6 <= 7
+useH1 = tfClass + 1 <= 8
+useH2 = tfClass + 2 <= 8
+useH3 = tfClass + 3 <= 8
+useH4 = tfClass + 4 <= 8
+useH5 = tfClass + 5 <= 8
+useH6 = tfClass + 6 <= 8
 useL1 = lowerLevels >= 1 and tfClass >= 2
 useL2 = lowerLevels >= 2 and tfClass >= 3
 useL3 = lowerLevels >= 3 and tfClass >= 4
@@ -1407,11 +1435,11 @@ if mtfOn and barstate.isconfirmed
 // ריכוז המצב של כל המסגרות לפי מחלקה (אינדקס 0 = 1m ... אינדקס 6 = 1W)
 // ═══════════════════════════════════════════════════════════════════
 
-var array<int>    pDir  = array.new_int(7, -9)   // -9 = אין נתונים למסגרת הזאת
-var array<int>    pDeg  = array.new_int(7, 0)
-var array<bool>   pVol  = array.new_bool(7, false)
-var array<string> pLead = array.new_string(7, "")
-var array<int>    pTime = array.new_int(7, 0)
+var array<int>    pDir  = array.new_int(8, -9)   // -9 = אין נתונים למסגרת הזאת
+var array<int>    pDeg  = array.new_int(8, 0)
+var array<bool>   pVol  = array.new_bool(8, false)
+var array<string> pLead = array.new_string(8, "")
+var array<int>    pTime = array.new_int(8, 0)
 
 // טריות השבירה של מסגרת הגרף עצמה
 var int chartFSeq  = 0
@@ -1431,7 +1459,7 @@ f_fill(array<int> ad, array<int> ag, array<bool> av, array<string> al, array<int
     array.set(ab, ix, e.fTime)
 
 if barstate.islast and tfClass != 0
-    for ix = 0 to 6
+    for ix = 0 to 7
         array.set(pDir, ix, -9)
     // מסגרת הגרף
     array.set(pDir,  tfClass - 1, selIdx == -1 ? 0 : array.get(gaps, selIdx).dir)
@@ -1476,10 +1504,10 @@ f_mtfRow(table t, int row, string nm, int dir, int deg, bool vol, string lead, b
 
 mtfPosition = mtfPos == "ימין למעלה" ? position.top_right : mtfPos == "ימין באמצע" ? position.middle_right : mtfPos == "שמאל למטה" ? position.bottom_left : mtfPos == "שמאל למעלה" ? position.top_left : position.bottom_right
 
-var table mtfT = table.new(mtfPosition, 2, 8, border_width = 1)
+var table mtfT = table.new(mtfPosition, 2, 9, border_width = 1)
 
 if showMtf and barstate.islast and tfClass != 0
-    for rr = 0 to 7
+    for rr = 0 to 8
         table.cell(mtfT, 0, rr, "", bgcolor = color.new(color.black, 100))
         table.cell(mtfT, 1, rr, "", bgcolor = color.new(color.black, 100))
 
@@ -1487,7 +1515,7 @@ if showMtf and barstate.islast and tfClass != 0
     table.cell(mtfT, 1, 0, "שבירה", bgcolor = color.new(color.gray, 25), text_color = color.white, text_size = size.small)
 
     int rowN = 0
-    for cc = 7 to 1
+    for cc = 8 to 1
         if array.get(pDir, cc - 1) != -9
             rowN := rowN + 1
             f_mtfRow(mtfT, rowN, f_clsName(cc), array.get(pDir, cc - 1), array.get(pDeg, cc - 1), array.get(pVol, cc - 1), array.get(pLead, cc - 1), timenow - array.get(pTime, cc - 1) <= mtfFlashMin * 60000, cc == tfClass)
@@ -1508,11 +1536,11 @@ flashRow = flashTop ? flashLift : 0
 
 // תא נפרד לכל מסגרת ולא מחרוזת אחת, כדי שכל אחת תיצבע לפי הכיוון שלה:
 // ירוק לעליות, אדום לירידות — אותם צבעים של הקופסאות על הגרף.
-var table flashT = table.new(flashPosition, 8, flashLift + 1)
+var table flashT = table.new(flashPosition, 9, flashLift + 1)
 
 if barstate.islast
     for rr = 0 to flashLift
-        for cx = 0 to 7
+        for cx = 0 to 8
             table.cell(flashT, cx, rr, "", bgcolor = color.new(color.black, 100))
         // מרווח בלתי נראה ששומר על גובה השורה
         if rr != flashRow
@@ -1521,7 +1549,7 @@ if barstate.islast
         int cx = 1
         if flashMode == "כל עוד יש שבירה חיה"
             // כל המסגרות האחרות שיש עליהן שבירה חיה, מהגבוהה לנמוכה
-            for cc = 7 to 1
+            for cc = 8 to 1
                 int cd = array.get(pDir, cc - 1)
                 if cc != tfClass and cd != -9 and cd != 0
                     table.cell(flashT, cx, flashRow, f_clsName(cc) + (cd == 1 ? " ▲" : " ▼") + f_degTxt(array.get(pDeg, cc - 1), array.get(pVol, cc - 1)) + "  ", bgcolor = color.new(color.black, 100), text_color = cd == 1 ? colBull : colBear, text_size = size.small)
@@ -1635,7 +1663,7 @@ f_time(int b) =>
     b <= 0 or off < 0 ? "-" : str.format_time(time[off], "HH:mm", TZ)
 // תת-מחזור ומיכל בשמות, לאימות שהמיפוי נכון למסגרת הזמן שנבחרה
 f_cycleNames() =>
-    tfClass == 7 ? "שנה>4 שנים" : tfClass == 6 ? "רבעון>שנה" : tfClass == 5 ? "שבוע>חודש" : tfClass == 4 ? "יום>שבוע" : tfClass == 3 ? "סשן>יום" : tfClass == 2 ? "מיקרו>סשן" : tfClass == 1 ? "רבע>מיקרו" : "לא נתמך"
+    tfClass == 8 ? "שנה>4 שנים" : tfClass == 7 ? "רבעון>שנה" : tfClass == 6 ? "רבע-רבעון>רבעון" : tfClass == 5 ? "שבוע>חודש" : tfClass == 4 ? "יום>שבוע" : tfClass == 3 ? "סשן>יום" : tfClass == 2 ? "מיקרו>סשן" : tfClass == 1 ? "רבע>מיקרו" : "לא נתמך"
 
 var table dbg = table.new(position.top_right, 4, 11, border_width = 1)
 if showDebug and barstate.islast
