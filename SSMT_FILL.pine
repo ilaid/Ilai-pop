@@ -215,7 +215,12 @@ weekId     = monYear * 10000 + monMonth * 100 + monDom
 // monthId הוא זה שקובע מתי המיכל החודשי מתאפס, ולכן הוא **לפי יום שלישי** —
 // אותו עוגן של isDeadWeek ו-qtWeekNum. כך הגבול נופל תמיד בתחילת שבוע, ושבוע
 // שרק יום שני שלו בחודש הקודם נספר נכון לחודש החדש.
-monthId    = tueYear * 100 + tueMonth
+// **שבוע מת הוא מיכל בפני עצמו.** הוא לא שייך לאף חודש לפי כלל 4-מתוך-5,
+// ולכן אסור לו לגרור את החודש הקודם עוד שבוע: הוא מקבל את weekId שלו,
+// והמיכל מתאפס כבר בשני שלו ולא רק בשני של החודש הבא. בלי זה שבירה 4H
+// מ-18.9 הייתה שורדת עד 5.10 רק כי העוגן נפל על 29.9.
+// אין התנגשות: monthId אמיתי הוא שש ספרות (202609) ו-weekId שמונה (20260928).
+monthId    = isDeadWeek ? weekId : tueYear * 100 + tueMonth
 sessionId  = tradeDayId * 10 + sessionIdx
 microId    = sessionId * 10 + microIdx
 quarterId  = microId * 10 + quarterIdx
@@ -553,7 +558,8 @@ f_setCycles(Engine e, int t) =>
     bool dead = tuM != month(thuT, TZ)
     int  tdId = yy * 10000 + mm * 100 + dd
     int  wkId = moY * 10000 + moM * 100 + moD
-    int  mnId = tuY * 100 + tuM
+    // שבוע מת = מיכל נפרד משלו, בדיוק כמו בגרף
+    int  mnId = dead ? wkId : tuY * 100 + tuM
     int  ssId = tdId * 10 + sIdx
     int  ucId = ssId * 10 + uIdx
     int  qrId = ucId * 10 + qIdx
@@ -595,9 +601,12 @@ f_lifeId(int c, int t) =>
     int  dsm  = dw == dayofweek.sunday ? 6 : dw - 2
     int  monT = tdt - dsm * 86400000
     int  tueT = monT + 86400000
+    int  thuT = monT + 3 * 86400000
     int  tdId = yy * 10000 + mm * 100 + dd
     int  wkId = year(monT, TZ) * 10000 + month(monT, TZ) * 100 + dayofmonth(monT, TZ)
-    int  mnId = year(tueT, TZ) * 100 + month(tueT, TZ)
+    // שבוע מת = מיכל נפרד משלו, בדיוק כמו בגרף וב-f_setCycles
+    bool dead = month(tueT, TZ) != month(thuT, TZ)
+    int  mnId = dead ? wkId : year(tueT, TZ) * 100 + month(tueT, TZ)
     int  ssId = tdId * 10 + sIdx
     int  ucId = ssId * 10 + uIdx
     int  qdId = int(math.floor(yy / 4.0))
