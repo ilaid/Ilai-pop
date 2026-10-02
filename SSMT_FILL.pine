@@ -34,7 +34,7 @@ indicator("SSMT Fill | Quarterly Theory", overlay = true, max_labels_count = 20,
 // מיפוי תת-מחזור/מיכל לכל מסגרת זמן:
 //   1M  — רבע 22.5m   → מיקרו-סשן    5M  — מיקרו-סשן → סשן
 //   15M — סשן          → יום מסחר      1H  — יום מסחר  → שבוע
-//   4H  — שבוע         → חודש          1D  — רבע-רבעון → רבעון
+//   4H  — שבוע         → חודש          1D  — רבע-רבעון → שנה
 //   1W  — רבעון        → שנה           Mo  — שנה       → מחזור 4 שנים
 //
 // הצנרת (זמן, סייקלים, תת-מחזור/מיכל) זהה ל-SSMT+HSSMT.
@@ -265,8 +265,10 @@ if tfClass == 8
     lifeCycleId := quadId
 else if tfClass == 7
     lifeCycleId := yearId
+// היומי שומר על מיכל שנתי. מיכל רבעוני היה מוחק את הרשימה ארבע פעמים
+// בשנה, ומיד אחרי כל מחיקה הגרף היומי נשאר על 0 גאפים חיים לשבועות.
 else if tfClass == 6
-    lifeCycleId := qtrId
+    lifeCycleId := yearId
 else if tfClass == 5
     lifeCycleId := monthId
 else if tfClass == 4
@@ -288,7 +290,7 @@ newLifeCycle = ta.change(lifeCycleId) != 0
 //   5M — המיקרו האחרון של לונדון מול הראשון של NY-AM. חל בכל החלפת סשן,
 //        כולל PM→אסיה של היום הבא וכולל שישי→פתיחת יום ראשון בערב.
 //   1H — יום שני משווה גם לגאפי יום שישי, שנמחקים בסוף יום שני.
-//   1D — הרבע הראשון של רבעון משווה גם לרבע האחרון של הרבעון הקודם.
+//   1D — הרבע-רבעון הראשון של השנה משווה גם לאחרון של השנה הקודמת.
 //   1W — הרבעון הראשון בשנה משווה גם לגאפי Q4 של השנה הקודמת.
 //   Mo — השנה הראשונה במחזור משווה גם לגאפי השנה האחרונה שלפניה.
 // אין זרע ב-15M (סשנים מושווים רק בתוך אותו יום מסחר) ואין ב-4H (שבועות
@@ -303,24 +305,32 @@ keepLast = tfClass <= 2 or tfClass == 4 or tfClass >= 6
 [rEsO, rEsH, rEsL, rEsC] = request.security(sES, timeframe.period, [open, high, low, close], lookahead = barmerge.lookahead_off)
 [rYmO, rYmH, rYmL, rYmC] = request.security(sYM, timeframe.period, [open, high, low, close], lookahead = barmerge.lookahead_off)
 
-// לנכס שהגרף מציג לוקחים את נתוני הגרף עצמו ולא את request.security.
-// הסיבה: ההגדרה "Adjust for contract changes" מתקנת אחורה את ההיסטוריה של
-// החוזה הרציף, אבל request.security לא מקבל אותה ומחזיר תמיד סדרה גולמית.
-// בלי זה הגבולות מחושבים בעולם אחד ומצוירים על נרות מעולם אחר, והקופסה
-// יוצאת מוזזת במאות נקודות. שאר הנכסים נמדדים בעולם שלהם, וזה תקין —
-// העומק של כל נכס מנורמל לגאפ שלו, כך שההשוואה נשארת יחסית.
-nqO = isNQc ? open  : rNqO
-nqH = isNQc ? high  : rNqH
-nqL = isNQc ? low   : rNqL
-nqC = isNQc ? close : rNqC
-esO = isESc ? open  : rEsO
-esH = isESc ? high  : rEsH
-esL = isESc ? low   : rEsL
-esC = isESc ? close : rEsC
-ymO = isYMc ? open  : rYmO
-ymH = isYMc ? high  : rYmH
-ymL = isYMc ? low   : rYmL
-ymC = isYMc ? close : rYmC
+// **כל המדידות משלוש הסדרות של request.security, בלי יוצא מן הכלל.**
+// קודם הנכס שהגרף מציג נקרא מהגרף עצמו, והשאר מ-request.security. זה נתן
+// שתי תוצאות שונות לאותה שבירה: על גרף NQ נמדד NQ מהגרף ו-ES מהסדרה, ועל
+// גרף ES בדיוק הפוך. ההגדרה "Adjust for contract changes" מתקנת אחורה את
+// ההיסטוריה של החוזה הרציף ו-request.security לא מקבל אותה, ולכן שתי
+// הסדרות נפרדות בגובהן — והעומקים, ואיתם הדרגה, יצאו שונים. ככה אותה
+// שבירה שבועית הופיעה F3 על MNQ ו-F2 על MES.
+// עכשיו המדידה אחידה בכל גרף, בדיוק כמו המנועים של שאר המסגרות (שתמיד
+// קראו את שלושתם מהסדרה — ולכן הם תמיד הסכימו ביניהם).
+nqO = rNqO
+nqH = rNqH
+nqL = rNqL
+nqC = rNqC
+esO = rEsO
+esH = rEsH
+esL = rEsL
+esC = rEsC
+ymO = rYmO
+ymH = rYmH
+ymL = rYmL
+ymC = rYmC
+
+// ── הגבולות שמצוירים ──
+// המלכודת המקורית בעינה עומדת: קופסה שמצוירת לפי הסדרה הגולמית על גרף
+// מתוקן יוצאת מוזזת במאות נקודות. לכן הגבולות של **הציור בלבד** נלקחים
+// מהגרף עצמו, ונשמרים בנפרד ב-drwBot/drwTop. המדידה לא נוגעת בהם.
 
 // ═══════════════════════════════════════════════════════════════════
 // טיפוס הגאפ הקולקטיבי
@@ -364,6 +374,10 @@ type Gap
     int    fSigB    // הנר שבו נרשמה
     int    fSeq     // מונה רץ — הגבוה ביותר הוא זה שמצויר
     float  fYPos    // גובה התווית
+    // ── גבולות לציור בלבד, בסקאלה של הגרף עצמו ──
+    // na = לנכס שהגרף מציג אין את הגאפ הזה, ואז פשוט אין קופסה.
+    float  drwBot
+    float  drwTop
 
 var array<Gap> gaps = array.new<Gap>()
 var int gapCounter  = 0
@@ -548,7 +562,7 @@ f_setCycles(Engine e, int t) =>
     int  qqIx = math.min(3, math.max(0, int(math.floor(qDiQ * 4.0 / qLn))))
     int  qqId = qtId * 10 + qqIx
     int  rf   = c == 8 ? yy   : c == 7 ? qtId : c == 6 ? qqId : c == 5 ? wkId : c == 4 ? tdId : c == 3 ? ssId : c == 2 ? ucId : qrId
-    int  lf   = c == 8 ? qdId : c == 7 ? yy   : c == 6 ? qtId : c == 5 ? mnId : c == 4 ? wkId : c == 3 ? tdId : c == 2 ? ssId : ucId
+    int  lf   = c == 8 ? qdId : c == 7 ? yy   : c == 6 ? yy   : c == 5 ? mnId : c == 4 ? wkId : c == 3 ? tdId : c == 2 ? ssId : ucId
     e.curRef  := rf
     e.curLife := lf
     e.curDead := dead
@@ -741,7 +755,7 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
             if parts >= 2
                 e.gapCounter := e.gapCounter + 1
                 // התיוג הוא לפי הנר האמצעי, לא לפי הנר המאשר
-                Gap gn = Gap.new(e.gapCounter, nd, nb, nt, eb, et, yb, yt, nrb, nrt, erb, ert, rfMid == 0 ? rf : rfMid, bar_index, tMid == 0 ? tOpen : tMid, bar_index, nd == 1 ? nt : nb, nd == 1 ? et : eb, nd == 1 ? yt : yb, 0, 0, 0, 0, false, false, false, 0, "", 0, 0, na)
+                Gap gn = Gap.new(e.gapCounter, nd, nb, nt, eb, et, yb, yt, nrb, nrt, erb, ert, rfMid == 0 ? rf : rfMid, bar_index, tMid == 0 ? tOpen : tMid, bar_index, nd == 1 ? nt : nb, nd == 1 ? et : eb, nd == 1 ? yt : yb, 0, 0, 0, 0, false, false, false, 0, "", 0, 0, na, na, na)
                 array.push(e.gaps, gn)
                 if array.size(e.gaps) > maxGaps
                     array.shift(e.gaps)
@@ -815,8 +829,8 @@ f_pushLtf(Engine e, int t, float no, float nh, float nl, float nc, float eo, flo
 
 // ═══════════════════════════════════════════════════════════════════
 // איפוס מיכל + מנגנון הזרע
-// (1M: רבע/רבע · 5M: מיקרו/מיקרו · 1H: שני/שישי · 1D: רבע-רבעון ראשון/אחרון ·
-//  1W: Q1/Q4 · Mo: שנה ראשונה/אחרונה במחזור. ב-15M וב-4H אין זרע.)
+// (1M: רבע/רבע · 5M: מיקרו/מיקרו · 1H: שני/שישי · 1D: רבע-רבעון ראשון/אחרון
+//  של השנה · 1W: Q1/Q4 · Mo: שנה ראשונה/אחרונה. ב-15M וב-4H אין זרע.)
 // ═══════════════════════════════════════════════════════════════════
 
 var bool seedActive = false
@@ -992,10 +1006,23 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
 
         int parts = (na(nt) ? 0 : 1) + (na(et) ? 0 : 1) + (na(yt) ? 0 : 1)
         if parts >= 2
+            // ── הגבולות לציור, בסקאלה של הגרף ──
+            // אותן נוסחאות בדיוק, רק על open/high/low/close של הגרף עצמו.
+            // נכנסות רק אם הנכס שהגרף מציג באמת משתתף בגאפ **וגם** הגרף
+            // עצמו רואה שם את אותו FVG. אם לא — אין קופסה, רק תווית.
+            bool legOnChart = (isNQc and not na(nt)) or (isESc and not na(et)) or (isYMc and not na(yt))
+            float cb = na
+            float ct = na
+            if legOnChart and newDir == 1 and low > high[2]
+                cb := (extendBodies and open[1] > high[2]) ? close[2] : high[2]
+                ct := (extendBodies and low      > close[1]) ? open  : low
+            if legOnChart and newDir == -1 and high < low[2]
+                ct := (extendBodies and open[1] < low[2])  ? close[2] : low[2]
+                cb := (extendBodies and high     < close[1]) ? open  : high
             gapCounter += 1
             // תת-המחזור והזמן נלקחים מ-[1] — הנר האמצעי, זה שיצר את הגאפ.
             // הנר השלישי רק מאשר, ואסור שהוא יגרור את הגאפ לתת-המחזור הבא.
-            Gap gn = Gap.new(gapCounter, newDir, nb, nt, eb, et, yb, yt, nrb, nrt, erb, ert, refCycleId[1], bar_index, time[1], bar_index - 2, newDir == 1 ? nt : nb, newDir == 1 ? et : eb, newDir == 1 ? yt : yb, 0, 0, 0, 0, false, false, false, 0, "", 0, 0, na)
+            Gap gn = Gap.new(gapCounter, newDir, nb, nt, eb, et, yb, yt, nrb, nrt, erb, ert, refCycleId[1], bar_index, time[1], bar_index - 2, newDir == 1 ? nt : nb, newDir == 1 ? et : eb, newDir == 1 ? yt : yb, 0, 0, 0, 0, false, false, false, 0, "", 0, 0, na, cb, ct)
             array.push(gaps, gn)
             if array.size(gaps) > maxGaps
                 array.shift(gaps)
@@ -1056,7 +1083,7 @@ if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK and array.
 // IFVG על הגאפ שלה, או החלפת מיכל.
 //   15M — שבירה של לונדון מלווה את שאר יום המסחר (NY-AM ו-NY-PM)
 //   1H  — של יום שני, עד סוף השבוע · 4H — של שבוע, עד סוף החודש
-//   1D  — של רבע-רבעון, עד סוף הרבעון · 1W — של רבעון, עד סוף השנה
+//   1D  — של רבע-רבעון, עד סוף השנה · 1W — של רבעון, עד סוף השנה
 //   Mo  — של שנה, עד סוף מחזור 4 השנים
 // מבין השבירות החיות מצוירת זו שקרתה אחרונה. שבירה נגדית לא מוחקת את
 // הקודמות — היא רק חדשה יותר ולכן קופצת לתצוגה. אם היא מתה ב-IFVG,
@@ -1402,8 +1429,8 @@ if shownSeq != drawnSeq or shownDeg != drawnDeg
         color  cEdge = color.new(col, gd.fDeg == 3 ? boxBorder : gd.fDeg == 2 ? math.min(boxBorder + 20, 95) : math.min(boxBorder + 35, 95))
         // הטקסט לא הולך אחרי שקיפות המסגרת — הוא חייב להישאר קריא גם ב-F1.
         color  cTxt  = color.new(col, gd.fDeg == 3 ? 0 : gd.fDeg == 2 ? 15 : 30)
-        float  gTop = isESc ? gd.esTop : isYMc ? gd.ymTop : gd.nqTop
-        float  gBot = isESc ? gd.esBot : isYMc ? gd.ymBot : gd.nqBot
+        float  gTop = gd.drwTop
+        float  gBot = gd.drwBot
         bool   onChart = not na(gTop)
         float  gMid = (gTop + gBot) / 2
         string txt  = f_degTxt(gd.fDeg) + " " + gd.fLead
@@ -1451,8 +1478,8 @@ if showAllGaps and barstate.islast
         for i = 0 to array.size(gaps) - 1
             Gap gz = array.get(gaps, i)
             if not gz.dead
-                float zTop = isESc ? gz.esTop : isYMc ? gz.ymTop : gz.nqTop
-                float zBot = isESc ? gz.esBot : isYMc ? gz.ymBot : gz.nqBot
+                float zTop = gz.drwTop
+                float zBot = gz.drwBot
                 if not na(zTop)
                     color  zCol = gz.dir == 1 ? colBull : colBear
                     string zTxt = "#" + str.tostring(gz.id) + (gz.armed ? "" : " ✕")
@@ -1470,7 +1497,7 @@ f_time(int b) =>
     b <= 0 or off < 0 ? "-" : str.format_time(time[off], "HH:mm", TZ)
 // תת-מחזור ומיכל בשמות, לאימות שהמיפוי נכון למסגרת הזמן שנבחרה
 f_cycleNames() =>
-    tfClass == 8 ? "שנה>4 שנים" : tfClass == 7 ? "רבעון>שנה" : tfClass == 6 ? "רבע-רבעון>רבעון" : tfClass == 5 ? "שבוע>חודש" : tfClass == 4 ? "יום>שבוע" : tfClass == 3 ? "סשן>יום" : tfClass == 2 ? "מיקרו>סשן" : tfClass == 1 ? "רבע>מיקרו" : "לא נתמך"
+    tfClass == 8 ? "שנה>4 שנים" : tfClass == 7 ? "רבעון>שנה" : tfClass == 6 ? "רבע-רבעון>שנה" : tfClass == 5 ? "שבוע>חודש" : tfClass == 4 ? "יום>שבוע" : tfClass == 3 ? "סשן>יום" : tfClass == 2 ? "מיקרו>סשן" : tfClass == 1 ? "רבע>מיקרו" : "לא נתמך"
 
 var table dbg = table.new(position.top_right, 4, 12, border_width = 1)
 if showDebug and barstate.islast
@@ -1545,12 +1572,12 @@ if showDebug and barstate.islast
     table.cell(dbg, 2, 1, str.tostring(tArmed) + " arm", bgcolor = wc)
     table.cell(dbg, 3, 1, str.tostring(tLive) + " live", bgcolor = wc)
 
-    // הסדרות שמהן נקראים הנתונים. חייבות להתאים למשפחת החוזים של הגרף,
-    // אחרת הגבולות לא יושבים על הנרות שרואים.
+    // שלושתם נמדדים מהסדרה, תמיד — זה מה שמבטיח שאותה שבירה תקבל אותה
+    // דרגה בכל גרף. חייבות להתאים למשפחת החוזים של הגרף.
     table.cell(dbg, 0, 2, "מקור נתונים", bgcolor = hc, text_color = wc)
-    table.cell(dbg, 1, 2, isNQc ? "מהגרף" : (useMicro ? "מיקרו" : "רגיל"), bgcolor = wc)
-    table.cell(dbg, 2, 2, isESc ? "מהגרף" : (useMicro ? "מיקרו" : "רגיל"), bgcolor = wc)
-    table.cell(dbg, 3, 2, not useYM ? "כבוי" : (isYMc ? "מהגרף" : (useMicro ? "מיקרו" : "רגיל")), bgcolor = wc)
+    table.cell(dbg, 1, 2, useMicro ? "מיקרו" : "רגיל", bgcolor = wc)
+    table.cell(dbg, 2, 2, useMicro ? "מיקרו" : "רגיל", bgcolor = wc)
+    table.cell(dbg, 3, 2, not useYM ? "כבוי" : (useMicro ? "מיקרו" : "רגיל"), bgcolor = wc)
 
     table.cell(dbg, 0, 3, "שבירות פעילות", bgcolor = hc, text_color = wc)
     table.cell(dbg, 1, 3, str.tostring(tFrac), bgcolor = wc)
