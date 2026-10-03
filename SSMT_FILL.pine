@@ -1276,6 +1276,25 @@ if barstate.isfirst
 f_useSlot(int k) =>
     k == 0 ? useH1 : k == 1 ? useH2 : k == 2 ? useH3 : k == 3 ? useH4 : k == 4 ? useH5 : k == 5 ? useH6 : k == 6 ? useL1 : k == 7 ? useL2 : useL3
 
+// ── גודל של מערך שעלול להיות na, בלי להתרסק ──
+// request.security_lower_tf על מסגרת לא חוקית (או בלי נתונים) מחזיר מערך
+// **na**, ו-array.size עליו זורק RE10052.
+// **ב-Pine האופרטור `and` לא עושה short-circuit** — שני האגפים מחושבים
+// תמיד, ולכן `useL3 and array.size(q3nc) > 0` התרסק גם כש-useL3 שקרי.
+// `if` מקונן הוא כן זרימת בקרה אמיתית, ולכן הבדיקה חייבת לשבת כאן.
+// -1 = אין מערך בכלל, וכל ההשוואות למטה הן על מספרים שלמים ולכן בטוחות.
+f_aszF(array<float> a) =>
+    int n = -1
+    if not na(a)
+        n := array.size(a)
+    n
+
+f_aszI(array<int> a) =>
+    int n = -1
+    if not na(a)
+        n := array.size(a)
+    n
+
 // הצעד נעשה רק בסגירת נר של הגרף. הסיבה טכנית: בנר חי הסקריפט רץ מחדש בכל
 // טיק ומצב ה-var מוחזר אחורה, ולכן צעד שרץ באמצע הנר היה נספר פעמיים.
 if mtfOn and barstate.isconfirmed
@@ -1299,26 +1318,59 @@ if mtfOn and barstate.isconfirmed
         f_step(eg6, t6, array.from(n6o0, n6h0, n6l0, n6c0, n6o1, n6c1, n6h2, n6l2, n6c2), array.from(s6o0, s6h0, s6l0, s6c0, s6o1, s6c1, s6h2, s6l2, s6c2), array.from(y6o0, y6h0, y6l0, y6c0, y6o1, y6c1, y6h2, y6l2, y6c2))
 
     // תת-נרות: כל נר של המסגרת הנמוכה מוזן בנפרד, לפי הסדר.
-    if useL1 and array.size(q1nc) > 0 and array.size(q1ec) == array.size(q1nc)
-        for j = 0 to array.size(q1nc) - 1
-            float yo = array.size(q1yc) == array.size(q1nc) ? array.get(q1yo, j) : na
-            float yh = array.size(q1yc) == array.size(q1nc) ? array.get(q1yh, j) : na
-            float yl = array.size(q1yc) == array.size(q1nc) ? array.get(q1yl, j) : na
-            float yc = array.size(q1yc) == array.size(q1nc) ? array.get(q1yc, j) : na
+    // הגדלים נמדדים קודם דרך f_asz*, ואחר כך כל התנאים הם על מספרים
+    // שלמים — זה מה שמונע את RE10052 כשהמסגרת לא חוקית והמערך הוא na.
+    // שמות עם קידומת sz — t1/t2/t3 כבר תפוסים לזמן של המנועים שמעל הגרף.
+    int szN1 = f_aszF(q1nc)
+    int szE1 = f_aszF(q1ec)
+    int szY1 = f_aszF(q1yc)
+    int szT1 = f_aszI(q1nt)
+    int szN2 = f_aszF(q2nc)
+    int szE2 = f_aszF(q2ec)
+    int szY2 = f_aszF(q2yc)
+    int szT2 = f_aszI(q2nt)
+    int szN3 = f_aszF(q3nc)
+    int szE3 = f_aszF(q3ec)
+    int szY3 = f_aszF(q3yc)
+    int szT3 = f_aszI(q3nt)
+
+    if useL1 and szN1 > 0 and szE1 == szN1 and szT1 == szN1
+        for j = 0 to szN1 - 1
+            float yo = na
+            float yh = na
+            float yl = na
+            float yc = na
+            // YM נקרא רק כשבאמת יש לו מערך באותו אורך — גם כאן אסור לסמוך
+            // על short-circuit, ולכן זה if ולא ביטוי מותנה.
+            if szY1 == szN1
+                yo := array.get(q1yo, j)
+                yh := array.get(q1yh, j)
+                yl := array.get(q1yl, j)
+                yc := array.get(q1yc, j)
             f_pushLtf(el1, array.get(q1nt, j), array.get(q1no, j), array.get(q1nh, j), array.get(q1nl, j), array.get(q1nc, j), array.get(q1eo, j), array.get(q1eh, j), array.get(q1el, j), array.get(q1ec, j), yo, yh, yl, yc)
-    if useL2 and array.size(q2nc) > 0 and array.size(q2ec) == array.size(q2nc)
-        for j = 0 to array.size(q2nc) - 1
-            float yo = array.size(q2yc) == array.size(q2nc) ? array.get(q2yo, j) : na
-            float yh = array.size(q2yc) == array.size(q2nc) ? array.get(q2yh, j) : na
-            float yl = array.size(q2yc) == array.size(q2nc) ? array.get(q2yl, j) : na
-            float yc = array.size(q2yc) == array.size(q2nc) ? array.get(q2yc, j) : na
+    if useL2 and szN2 > 0 and szE2 == szN2 and szT2 == szN2
+        for j = 0 to szN2 - 1
+            float yo = na
+            float yh = na
+            float yl = na
+            float yc = na
+            if szY2 == szN2
+                yo := array.get(q2yo, j)
+                yh := array.get(q2yh, j)
+                yl := array.get(q2yl, j)
+                yc := array.get(q2yc, j)
             f_pushLtf(el2, array.get(q2nt, j), array.get(q2no, j), array.get(q2nh, j), array.get(q2nl, j), array.get(q2nc, j), array.get(q2eo, j), array.get(q2eh, j), array.get(q2el, j), array.get(q2ec, j), yo, yh, yl, yc)
-    if useL3 and array.size(q3nc) > 0 and array.size(q3ec) == array.size(q3nc)
-        for j = 0 to array.size(q3nc) - 1
-            float yo = array.size(q3yc) == array.size(q3nc) ? array.get(q3yo, j) : na
-            float yh = array.size(q3yc) == array.size(q3nc) ? array.get(q3yh, j) : na
-            float yl = array.size(q3yc) == array.size(q3nc) ? array.get(q3yl, j) : na
-            float yc = array.size(q3yc) == array.size(q3nc) ? array.get(q3yc, j) : na
+    if useL3 and szN3 > 0 and szE3 == szN3 and szT3 == szN3
+        for j = 0 to szN3 - 1
+            float yo = na
+            float yh = na
+            float yl = na
+            float yc = na
+            if szY3 == szN3
+                yo := array.get(q3yo, j)
+                yh := array.get(q3yh, j)
+                yl := array.get(q3yl, j)
+                yc := array.get(q3yc, j)
             f_pushLtf(el3, array.get(q3nt, j), array.get(q3no, j), array.get(q3nh, j), array.get(q3nl, j), array.get(q3nc, j), array.get(q3eo, j), array.get(q3eh, j), array.get(q3el, j), array.get(q3ec, j), yo, yh, yl, yc)
 
 // ═══════════════════════════════════════════════════════════════════
