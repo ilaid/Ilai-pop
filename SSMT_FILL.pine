@@ -87,7 +87,7 @@ showAllGaps = input.bool(false, "הצג את כל הגאפים החיים (תמ�
 // ואז נעלמים מעצמם. ככה רואים מיד את התמונה המלאה בלי להיכנס להגדרות,
 // והגרף נשאר נקי אחרי זה. ההגדרה שמעל נשארת למי שרוצה אותם קבוע.
 autoAllGaps = input.bool(true, "הצצה: כל הגאפים בהחלפת מסגרת (4H ומטה)", group = grpVis)
-autoAllMin  = input.float(1.0, "כמה דקות להשאיר את ההצצה", minval = 0.1, maxval = 60, step = 0.5, group = grpVis)
+autoAllSec  = input.int(20, "כמה שניות להשאיר את ההצצה", minval = 1, maxval = 600, group = grpVis)
 showDebug   = input.bool(false, "הצג טבלת בדיקה", group = grpVis)
 
 grpLogic = "לוגיקה"
@@ -117,7 +117,7 @@ mtfPos       = input.string("ימין למטה", "מיקום הפאנל", option
 // שזה בכלל עובד, בלי לחכות לאירוע.
 mtfFlash     = input.bool(true, "הצג סימון זעיר משאר המסגרות", group = grpMtf)
 flashMode    = input.string("רק כששבירה נולדת", "מתי להציג", options = ["רק כששבירה נולדת", "כל עוד יש שבירה חיה"], group = grpMtf)
-mtfFlashMin  = input.int(10, "כמה דקות להשאיר את הסימון", minval = 1, maxval = 240, group = grpMtf)
+mtfFlashSec  = input.int(30, "כמה שניות להשאיר את הסימון", minval = 1, maxval = 600, group = grpMtf)
 flashPos     = input.string("שמאל למטה", "מיקום הסימון", options = ["שמאל למטה", "שמאל למעלה", "ימין למטה", "ימין למעלה", "אמצע למטה"], group = grpMtf)
 // טריידינגויו מדביק טבלאות של אינדיקטורים שונים באותה פינה זו לצד זו. שורות
 // ריקות מרימות את השורה שלנו מעל השורה של האינדיקטור השני, בלי לשנות כלום
@@ -1181,16 +1181,37 @@ cL1 = math.max(tfClass - 1, 1)
 cL2 = math.max(tfClass - 2, 1)
 cL3 = math.max(tfClass - 3, 1)
 
-tfs1 = c1 == 2 ? "5" : c1 == 3 ? "15" : c1 == 4 ? "60" : c1 == 5 ? "240" : c1 == 6 ? "D" : c1 == 7 ? "W" : "M"
-tfs2 = c2 == 2 ? "5" : c2 == 3 ? "15" : c2 == 4 ? "60" : c2 == 5 ? "240" : c2 == 6 ? "D" : c2 == 7 ? "W" : "M"
-tfs3 = c3 == 2 ? "5" : c3 == 3 ? "15" : c3 == 4 ? "60" : c3 == 5 ? "240" : c3 == 6 ? "D" : c3 == 7 ? "W" : "M"
-tfs4 = c4 == 2 ? "5" : c4 == 3 ? "15" : c4 == 4 ? "60" : c4 == 5 ? "240" : c4 == 6 ? "D" : c4 == 7 ? "W" : "M"
-tfs5 = c5 == 2 ? "5" : c5 == 3 ? "15" : c5 == 4 ? "60" : c5 == 5 ? "240" : c5 == 6 ? "D" : c5 == 7 ? "W" : "M"
-tfs6 = c6 == 2 ? "5" : c6 == 3 ? "15" : c6 == 4 ? "60" : c6 == 5 ? "240" : c6 == 6 ? "D" : c6 == 7 ? "W" : "M"
+// אילו מדרגות באמת קיימות ונצעדות. מחושב כאן ולא למטה, כי זה מה שקובע
+// אילו request.* באמת צריכים להביא נתונים.
+useH1 = tfClass + 1 <= 8
+useH2 = tfClass + 2 <= 8
+useH3 = tfClass + 3 <= 8
+useH4 = tfClass + 4 <= 8
+useH5 = tfClass + 5 <= 8
+useH6 = tfClass + 6 <= 8
+useL1 = lowerLevels >= 1 and tfClass >= 2
+useL2 = lowerLevels >= 2 and tfClass >= 3
+useL3 = lowerLevels >= 3 and tfClass >= 4
 
-tfl1 = cL1 == 1 ? "1" : cL1 == 2 ? "5" : cL1 == 3 ? "15" : cL1 == 4 ? "60" : cL1 == 5 ? "240" : cL1 == 6 ? "D" : "W"
-tfl2 = cL2 == 1 ? "1" : cL2 == 2 ? "5" : cL2 == 3 ? "15" : cL2 == 4 ? "60" : cL2 == 5 ? "240" : cL2 == 6 ? "D" : "W"
-tfl3 = cL3 == 1 ? "1" : cL3 == 2 ? "5" : cL3 == 3 ? "15" : cL3 == 4 ? "60" : cL3 == 5 ? "240" : cL3 == 6 ? "D" : "W"
+// ── ביצועים: לא לבקש נתונים למדרגה שלא תיצעד ──
+// request.security רץ גם כשהתוצאה לא בשימוש, ו-math.min חסם את c3..c6
+// לאותה מחלקה — כלומר על גרף יומי נשלחו ארבע בקשות זהות לנתונים חודשיים
+// לכל נכס, סתם. מדרגה שלא בשימוש מקבלת את מסגרת הגרף עצמה: הסדרה הזאת
+// כבר טעונה, ולכן זה בלי עלות במקום משיכה של מסגרת שלמה נוספת.
+tfs1 = not useH1 ? timeframe.period : c1 == 2 ? "5" : c1 == 3 ? "15" : c1 == 4 ? "60" : c1 == 5 ? "240" : c1 == 6 ? "D" : c1 == 7 ? "W" : "M"
+tfs2 = not useH2 ? timeframe.period : c2 == 2 ? "5" : c2 == 3 ? "15" : c2 == 4 ? "60" : c2 == 5 ? "240" : c2 == 6 ? "D" : c2 == 7 ? "W" : "M"
+tfs3 = not useH3 ? timeframe.period : c3 == 2 ? "5" : c3 == 3 ? "15" : c3 == 4 ? "60" : c3 == 5 ? "240" : c3 == 6 ? "D" : c3 == 7 ? "W" : "M"
+tfs4 = not useH4 ? timeframe.period : c4 == 2 ? "5" : c4 == 3 ? "15" : c4 == 4 ? "60" : c4 == 5 ? "240" : c4 == 6 ? "D" : c4 == 7 ? "W" : "M"
+tfs5 = not useH5 ? timeframe.period : c5 == 2 ? "5" : c5 == 3 ? "15" : c5 == 4 ? "60" : c5 == 5 ? "240" : c5 == 6 ? "D" : c5 == 7 ? "W" : "M"
+tfs6 = not useH6 ? timeframe.period : c6 == 2 ? "5" : c6 == 3 ? "15" : c6 == 4 ? "60" : c6 == 5 ? "240" : c6 == 6 ? "D" : c6 == 7 ? "W" : "M"
+
+// אותו דבר למטה, ושם זה כבד הרבה יותר — security_lower_tf מחזיר מערך
+// תת-נרות לכל נר גרף. מדרגה שלא בשימוש (lowerLevels נמוך, או שאין מתחת
+// לגרף) מקבלת "12M", שהוא תמיד **מעל** הגרף ולכן לא חוקי כאן, ועם
+// ignore_invalid_timeframe הוא נזרק בלי למשוך שום נתון.
+tfl1 = not useL1 ? "12M" : cL1 == 1 ? "1" : cL1 == 2 ? "5" : cL1 == 3 ? "15" : cL1 == 4 ? "60" : cL1 == 5 ? "240" : cL1 == 6 ? "D" : "W"
+tfl2 = not useL2 ? "12M" : cL2 == 1 ? "1" : cL2 == 2 ? "5" : cL2 == 3 ? "15" : cL2 == 4 ? "60" : cL2 == 5 ? "240" : cL2 == 6 ? "D" : "W"
+tfl3 = not useL3 ? "12M" : cL3 == 1 ? "1" : cL3 == 2 ? "5" : cL3 == 3 ? "15" : cL3 == 4 ? "60" : cL3 == 5 ? "240" : cL3 == 6 ? "D" : "W"
 
 [t1, n1o0, n1h0, n1l0, n1c0, n1o1, n1c1, n1h2, n1l2, n1c2] = request.security(sNQ, tfs1, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
 [t2, n2o0, n2h0, n2l0, n2c0, n2o1, n2c1, n2h2, n2l2, n2c2] = request.security(sNQ, tfs2, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
@@ -1237,17 +1258,6 @@ var Engine eg6 = Engine.new(c6, array.new<Gap>(), array.new_float(8, na), array.
 var Engine el1 = Engine.new(cL1, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, 0, 0, false)
 var Engine el2 = Engine.new(cL2, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, 0, 0, false)
 var Engine el3 = Engine.new(cL3, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, 0, 0, false)
-
-// אילו מדרגות באמת קיימות ונצעדות
-useH1 = tfClass + 1 <= 8
-useH2 = tfClass + 2 <= 8
-useH3 = tfClass + 3 <= 8
-useH4 = tfClass + 4 <= 8
-useH5 = tfClass + 5 <= 8
-useH6 = tfClass + 6 <= 8
-useL1 = lowerLevels >= 1 and tfClass >= 2
-useL2 = lowerLevels >= 2 and tfClass >= 3
-useL3 = lowerLevels >= 3 and tfClass >= 4
 
 // כל המנועים ברשימה אחת, באותו סדר של useH1..useL3, כדי שאפשר יהיה לעבור
 // עליהם בלולאה במקום לחזור על אותו קוד תשע פעמים.
@@ -1323,7 +1333,9 @@ if mtfOn and barstate.isconfirmed
 // בצעד הבא של המנוע עצמו, עם כל הלוגיקה של keepL.
 // ═══════════════════════════════════════════════════════════════════
 
-if mtfOn and (barstate.isconfirmed or barstate.islast) and array.size(allEng) > 0
+// רק בנר האחרון: זה מה שמוצג, ואין טעם להריץ תשע בדיקות תאריך על כל נר
+// בהיסטוריה. זה היה חלק נכבד מזמן הטעינה.
+if mtfOn and barstate.islast and array.size(allEng) > 0
     for k = 0 to array.size(allEng) - 1
         Engine ex = array.get(allEng, k)
         if f_useSlot(k) and ex.started and ex.fDeg > 0 and ex.lifeId != f_lifeId(ex.cls, time)
@@ -1423,7 +1435,7 @@ if showMtf and barstate.islast and tfClass != 0
     for cc = 8 to 1
         if array.get(pDir, cc - 1) != -9
             rowN := rowN + 1
-            f_mtfRow(mtfT, rowN, f_clsName(cc), array.get(pDir, cc - 1), array.get(pDeg, cc - 1), array.get(pLead, cc - 1), timenow - array.get(pTime, cc - 1) <= mtfFlashMin * 60000, cc == tfClass)
+            f_mtfRow(mtfT, rowN, f_clsName(cc), array.get(pDir, cc - 1), array.get(pDeg, cc - 1), array.get(pLead, cc - 1), timenow - array.get(pTime, cc - 1) <= mtfFlashSec * 1000, cc == tfClass)
 
 // ── סימון זעיר בפינת המסך כששבירה קרתה במסגרת אחרת ──
 //
@@ -1459,7 +1471,7 @@ if barstate.islast
                 if cc != tfClass and cd != -9 and cd != 0
                     table.cell(flashT, cx, flashRow, f_clsName(cc) + (cd == 1 ? " ▲" : " ▼") + str.tostring(array.get(pDeg, cc - 1)) + "  ", bgcolor = color.new(color.black, 100), text_color = cd == 1 ? colBull : colBear, text_size = size.small)
                     cx := cx + 1
-        else if flashTxt != "" and timenow - flashTime <= mtfFlashMin * 60000 and flashLife == f_lifeId(flashCls, time)
+        else if flashTxt != "" and timenow - flashTime <= mtfFlashSec * 1000 and flashLife == f_lifeId(flashCls, time)
             table.cell(flashT, 1, flashRow, flashTxt, bgcolor = color.new(color.black, 100), text_color = flashDir == 1 ? colBull : colBear, text_size = size.small)
             cx := 2
         // תווית הפתיחה מופיעה רק כשיש מה להגיד, כדי שהשורה תישאר נעלמת
@@ -1544,7 +1556,7 @@ var array<box> dbgBoxes = array.new<box>()
 // זה בדיוק "מתי עברתי מסגרת". timenow על נר היסטורי הוא גם כן השעון הנוכחי,
 // ולכן הערך נקבע פעם אחת ונשאר.
 var int bootT = timenow
-drawAllGaps = showAllGaps or (autoAllGaps and tfClass != 0 and tfClass <= 5 and timenow - bootT <= autoAllMin * 60000)
+drawAllGaps = showAllGaps or (autoAllGaps and tfClass != 0 and tfClass <= 5 and timenow - bootT <= autoAllSec * 1000)
 
 // המחיקה רצה תמיד, גם כשלא מציירים — אחרת ההצצה לא הייתה נעלמת כשהחלון נגמר.
 if barstate.islast
