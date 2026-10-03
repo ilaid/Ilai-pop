@@ -117,7 +117,11 @@ mtfPos       = input.string("ימין למטה", "מיקום הפאנל", option
 // שזה בכלל עובד, בלי לחכות לאירוע.
 mtfFlash     = input.bool(true, "הצג סימון זעיר משאר המסגרות", group = grpMtf)
 flashMode    = input.string("רק כששבירה נולדת", "מתי להציג", options = ["רק כששבירה נולדת", "כל עוד יש שבירה חיה"], group = grpMtf)
-mtfFlashSec  = input.int(30, "כמה שניות להשאיר את הסימון", minval = 1, maxval = 600, group = grpMtf)
+// 15–30 שניות זה הטווח שעובד. הסימון מצויר רק כשהסקריפט רץ מחדש על הנר
+// החי, וזה קורה רק כשמגיע טיק — ולכן חלון של 2–3 שניות קטן מהמרווח בין
+// טיקים בשוק שקט, והסימון או שלא נראה בכלל או שנתקע עד הטיק הבא. מתחת
+// ל-5 שניות ההתנהגות כבר לא צפויה, ולכן זה המינימום.
+mtfFlashSec  = input.int(20, "כמה שניות להשאיר את הסימון", minval = 5, maxval = 300, tooltip = "מומלץ 15–30. הסימון נעלם בטיק הראשון אחרי שהחלון נגמר, ולכן בשוק שקט הוא יכול להישאר עוד כמה שניות.", group = grpMtf)
 flashPos     = input.string("שמאל למטה", "מיקום הסימון", options = ["שמאל למטה", "שמאל למעלה", "ימין למטה", "ימין למעלה", "אמצע למטה"], group = grpMtf)
 // טריידינגויו מדביק טבלאות של אינדיקטורים שונים באותה פינה זו לצד זו. שורות
 // ריקות מרימות את השורה שלנו מעל השורה של האינדיקטור השני, בלי לשנות כלום
@@ -843,7 +847,13 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
             e.fLead    := gd.fLead
             if gd.fSeq > e.fSeq
                 e.fSeq      := gd.fSeq
-                e.fTime     := time_close
+                // שעון הסימון מתחיל ברגע האמיתי שבו הוא נהיה גלוי, לא בזמן
+                // הנומינלי של הנר. בטעינת הסקריפט כל הנרות הסגורים עוברים
+                // כהיסטוריה, ושם time_close הוא לפני דקות — ולכן חלון של
+                // 3 שניות היה פג עוד לפני שהסימון הספיק להיראות פעם אחת.
+                // בהיסטוריה נשאר time_close, כדי ששבירה מלפני שלושה ימים לא
+                // תהבהב כאילו היא נולדה עכשיו בכל פתיחת גרף.
+                e.fTime     := barstate.isrealtime ? timenow : time_close
                 e.justFired := true
     e.fDeg
 
@@ -1413,7 +1423,7 @@ if selIdx != -1
     Gap gfr = array.get(gaps, selIdx)
     if gfr.fSeq > chartFSeq
         chartFSeq  := gfr.fSeq
-        chartFTime := time_close
+        chartFTime := barstate.isrealtime ? timenow : time_close
 
 f_fill(array<int> ad, array<int> ag, array<string> al, array<int> ab, Engine e) =>
     int ix = e.cls - 1
@@ -1452,7 +1462,7 @@ if mtfOn and barstate.isconfirmed and array.size(allEng) > 0
         if f_useSlot(k) and ek.justFired
             flashTxt  := f_clsName(ek.cls) + " " + (ek.fDir == 1 ? "▲" : "▼") + str.tostring(ek.fDeg)
             flashDir  := ek.fDir
-            flashTime := time_close
+            flashTime := barstate.isrealtime ? timenow : time_close
             flashCls  := ek.cls
             flashLife := ek.lifeId
             if mtfAlert and alertOn and ek.fDeg >= alertMinDeg
