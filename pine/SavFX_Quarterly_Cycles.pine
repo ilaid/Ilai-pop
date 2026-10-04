@@ -10,7 +10,7 @@ indicator("Sav FX - Semi / Quarterly Cycles", shorttitle="Sav FX", overlay=false
 //    row              cell          numbers
 //    1 Quadrennial     1 year        which year of the four year cycle, 2023 .. 2026
 //    2 Yearly          1 quarter     which quarter of the year, Q1 Jan-Mar .. Q4 Oct-Dec
-//    3 Quarter Split   22-23 days    which quarter of the quarter, daily chart only
+//    3 Quarter Split   ~16 bars      which quarter of the quarter, daily chart only
 //    4 Weekly          1 week        which week of the month
 //    5 Daily           1 day         which day of the week, Mon 1 .. Thu 4
 //    6 6 Hour          6 hours       which session: Asia 1, London 2, AM 3, PM 4
@@ -24,12 +24,13 @@ indicator("Sav FX - Semi / Quarterly Cycles", shorttitle="Sav FX", overlay=false
 //  read 3-4-1 .. 3-4-4.  "Levels Per Label" sets how many links are printed, and
 //  a level that carries no number is skipped, so the chain keeps its length.
 //
-//  The quarter split is the quarter's three months divided in four, counted in
-//  whole days off however many days those months hold: Jan-Mar is 90 days and
-//  splits 22 23 22 23, Apr-Jun is 91 and splits 22 23 23 23, Jul-Sep and Oct-Dec
-//  are 92 and split evenly into 23. The calendar month is three per quarter, not
-//  four, so it carries no number of its own and is only what the week is
-//  numbered inside. The split row is numbered Q1 to Q4 like the quarter above it.
+//  The quarter split is the quarter's three months divided in four by MARKET
+//  days. Counting calendar days made the cells 14 to 17 bars wide, because a
+//  quarter holds 90 to 92 days but only 61 to 65 of them are opens: 1 January is
+//  not one. Counted in market days Q1 2026 is 64 of them and every cell holds
+//  16. The calendar month is three per quarter, not four, so it carries no
+//  number of its own and is only what the week is numbered inside. The split row
+//  is numbered Q1 to Q4 like the quarter above it.
 //
 //  Every cell measures its edges off the open of the bar it starts on, in whole
 //  days, rather than off a calendar midnight: a midnight falls inside a bar, and
@@ -65,7 +66,7 @@ indicator("Sav FX - Semi / Quarterly Cycles", shorttitle="Sav FX", overlay=false
 g_cyc = "Time Cycles"
 showCyc4   = input.bool(true, "Quadrennial Cycles", group = g_cyc, tooltip = "One cell per year: which year of the four year cycle it is. 2023 opens the cycle and 2026 closes it, so 2023 is year 1 and 2026 is year 4.")
 showQtYear = input.bool(true, "Yearly Cycles",      group = g_cyc, tooltip = "One cell per quarter: which quarter of the year it is. Q1 Jan-Mar, Q2 Apr-Jun, Q3 Jul-Sep, Q4 Oct-Dec. April opens Q2, which is the true open of the year.")
-showSplit  = input.bool(true, "Quarter Split",      group = g_cyc, tooltip = "One cell per quarter of a quarter, on the daily chart only. The quarter's three months are divided in four and counted in whole days, so Jan-Mar splits 22 23 22 23, Apr-Jun splits 22 23 23 23, and Jul-Sep and Oct-Dec split evenly into 23.")
+showSplit  = input.bool(true, "Quarter Split",      group = g_cyc, tooltip = "One cell per quarter of a quarter, on the daily chart only. The quarter's three months are divided in four by market days rather than calendar days, so each cell holds about 16 of them: Q1 2026 is 64 market days and splits 16 16 16 16. A public holiday can leave a cell one bar short, since Pine is not handed the exchange's holiday calendar.")
 showWeekly = input.bool(true, "Weekly Cycles",      group = g_cyc, tooltip = "One cell per week: which week of the month it is. A week belongs to the month holding its Tuesday.")
 showDaily  = input.bool(true, "Daily Cycles",       group = g_cyc, tooltip = "One cell per trading day: which day of the week it is, Mon 1 .. Thu 4. Friday carries no number.")
 show6H     = input.bool(true, "6 Hour Cycles",      group = g_cyc, tooltip = "One cell per session: Asia 1, London 2, AM 3, PM 4.")
@@ -204,11 +205,31 @@ yNoon  = timestamp(yr, 1, 1, 12, 0, 0)
 yDays  = int(math.round((timestamp(yr + 1, 1, 1, 12, 0, 0) - yNoon) / MS_DAY))
 dayInY = math.max(0, math.min(yDays - 1, int(math.round((tdayMid - yNoon) / MS_DAY))))
 
-// the three months of the quarter, divided in four. The length is counted in
-// whole days off however many days those months actually hold, so a boundary
-// always falls between two days rather than halfway through one: Jan-Mar is 90
-// days and splits 22 23 22 23, Apr-Jun is 91 and splits 22 23 23 23, Jul-Sep
-// and Oct-Dec are 92 and split 23 23 23 23
+// Monday 0 .. Sunday 6
+dowMon(int t) =>
+    int d = dayofweek(t)
+    d == 1 ? 6 : d - 2
+
+// how many Mon-Fri days sit in the n days that open on weekday w0. Closed form,
+// so it costs the same whether the span is a day or a quarter
+wdCount(int w0, int n) =>
+    int c = int(math.floor(n / 7)) * 5
+    int r = n % 7
+    for i = 0 to 5
+        if i < r and (w0 + i) % 7 < 5
+            c := c + 1
+    c
+
+// the day offset of market day number k, counting off the quarter's first day
+wdOffset(int first, int w, int k) =>
+    first + int(math.floor((w + k) / 5)) * 7 + (w + k) % 5 - w
+
+// The quarter runs from the first of its first month to the last of its third,
+// and its three months are divided in four by MARKET days, not calendar days:
+// 1 January is not an open, so counting calendar days put a third of the cells
+// 14 bars wide and a third 17. Counted this way Q1 2026 is 64 market days and
+// every cell holds 16 of them. A public holiday can still leave a cell a bar
+// short, since Pine is not given the exchange's holiday calendar.
 qFirstM = (iQtr - 1) * 3 + 1
 qNoon   = timestamp(yr, qFirstM, 1, 12, 0, 0)
 qNoonEnd = iQtr == 4 ? timestamp(yr + 1, 1, 1, 12, 0, 0) : timestamp(yr, qFirstM + 3, 1, 12, 0, 0)
@@ -217,13 +238,19 @@ qNoonEnd = iQtr == 4 ? timestamp(yr + 1, 1, 1, 12, 0, 0) : timestamp(yr, qFirstM
 qDays  = int(math.round((qNoonEnd - qNoon) / MS_DAY))
 dayInQ = math.max(0, math.min(qDays - 1, int(math.round((tdayMid - qNoon) / MS_DAY))))
 
-b1 = int(math.floor(qDays     / 4))
-b2 = int(math.floor(qDays * 2 / 4))
-b3 = int(math.floor(qDays * 3 / 4))
+qW0    = dowMon(qNoon)                   // weekday the quarter opens on
+qFirst = qW0 < 5 ? 0 : 7 - qW0           // days to its first market day
+qW     = (qW0 + qFirst) % 7              // 0 .. 4
+qWd    = wdCount(qW0, qDays)             // market days in the whole quarter
+dW     = wdCount(qW0, dayInQ)            // market days before this bar
 
-iSplit = en3 ? (dayInQ < b1 ? 1 : dayInQ < b2 ? 2 : dayInQ < b3 ? 3 : 4) : na
-sDay0  = dayInQ < b1 ? 0  : dayInQ < b2 ? b1 : dayInQ < b3 ? b2 : b3
-sDay1  = dayInQ < b1 ? b1 : dayInQ < b2 ? b2 : dayInQ < b3 ? b3 : qDays
+v1 = int(math.floor(qWd     / 4))
+v2 = int(math.floor(qWd * 2 / 4))
+v3 = int(math.floor(qWd * 3 / 4))
+
+iSplit = en3 ? (dW < v1 ? 1 : dW < v2 ? 2 : dW < v3 ? 3 : 4) : na
+sDay0  = dW < v1 ? 0 : dW < v2 ? wdOffset(qFirst, qW, v1) : dW < v3 ? wdOffset(qFirst, qW, v2) : wdOffset(qFirst, qW, v3)
+sDay1  = dW < v1 ? wdOffset(qFirst, qW, v1) : dW < v2 ? wdOffset(qFirst, qW, v2) : dW < v3 ? wdOffset(qFirst, qW, v3) : qDays
 
 // Edges are measured off the open of the bar the cell starts on, in whole days,
 // never off a calendar midnight. A midnight lands inside a bar, and a box edge
