@@ -10,7 +10,7 @@ indicator("Sav FX - Semi / Quarterly Cycles", shorttitle="Sav FX", overlay=false
 //    row              cell          numbers
 //    1 Quadrennial     1 year        which year of the four year cycle, 2023 .. 2026
 //    2 Yearly          1 quarter     which quarter of the year, Q1 Jan-Mar .. Q4 Oct-Dec
-//    3 Quarter Split   ~23 days      which quarter of the quarter, daily chart only
+//    3 Quarter Split   22-23 days    which quarter of the quarter, daily chart only
 //    4 Weekly          1 week        which week of the month
 //    5 Daily           1 day         which day of the week, Mon 1 .. Thu 4
 //    6 6 Hour          6 hours       which session: Asia 1, London 2, AM 3, PM 4
@@ -60,7 +60,7 @@ indicator("Sav FX - Semi / Quarterly Cycles", shorttitle="Sav FX", overlay=false
 g_cyc = "Time Cycles"
 showCyc4   = input.bool(true, "Quadrennial Cycles", group = g_cyc, tooltip = "One cell per year: which year of the four year cycle it is. 2023 opens the cycle and 2026 closes it, so 2023 is year 1 and 2026 is year 4.")
 showQtYear = input.bool(true, "Yearly Cycles",      group = g_cyc, tooltip = "One cell per quarter: which quarter of the year it is. Q1 Jan-Mar, Q2 Apr-Jun, Q3 Jul-Sep, Q4 Oct-Dec. April opens Q2, which is the true open of the year.")
-showSplit  = input.bool(true, "Quarter Split",      group = g_cyc, tooltip = "One cell per quarter of a quarter, on the daily chart only. The length is the quarter's own length divided by four: 22.5 days in Q1, 22.75 in Q2, 23 in Q3 and Q4.")
+showSplit  = input.bool(true, "Quarter Split",      group = g_cyc, tooltip = "One cell per quarter of a quarter, on the daily chart only. The quarter's three months are divided in four and counted in whole days, so Jan-Mar splits 22 23 22 23, Apr-Jun splits 22 23 23 23, and Jul-Sep and Oct-Dec split evenly into 23.")
 showWeekly = input.bool(true, "Weekly Cycles",      group = g_cyc, tooltip = "One cell per week: which week of the month it is. A week belongs to the month holding its Tuesday.")
 showDaily  = input.bool(true, "Daily Cycles",       group = g_cyc, tooltip = "One cell per trading day: which day of the week it is, Mon 1 .. Thu 4. Friday carries no number.")
 show6H     = input.bool(true, "6 Hour Cycles",      group = g_cyc, tooltip = "One cell per session: Asia 1, London 2, AM 3, PM 4.")
