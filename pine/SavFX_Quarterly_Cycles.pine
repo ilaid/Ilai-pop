@@ -35,7 +35,10 @@ indicator("Sav FX - Semi / Quarterly Cycles", shorttitle="Sav FX", overlay=false
 //  Every cell measures its edges off the open of the bar it starts on, in whole
 //  days, rather than off a calendar midnight: a midnight falls inside a bar, and
 //  a box edge inside a bar is pushed on to the next one, which across a weekend
-//  moves it three days.
+//  moves it three days. The year, quarter and split rows then step half a bar
+//  back, so the edge lands in the gap between two candles instead of through the
+//  middle of one, and a quarter holds its last day whole without reaching into
+//  the month after it.
 //
 //  The slow rows read as names and the fast ones as numbers, so the day row says
 //  Wed where the 22.5 min row says 1-3-4: on a high timeframe those cells are far
@@ -258,12 +261,20 @@ sDay1  = dW < v1 ? wdOffset(qFirst, qW, v1) : dW < v2 ? wdOffset(qFirst, qW, v2)
 // three days out: Friday 24 July would draw on Monday the 27th. Measured this
 // way the edge sits exactly on the bar that opens the cell, and the same number
 // of days forward lands exactly where the next cell opens.
-cycLeft   = dayStart - dayInY * MS_DAY
-cycRight  = dayStart + (yDays - dayInY) * MS_DAY
-qtrLeft   = dayStart - dayInQ * MS_DAY
-qtrRight  = dayStart + (qDays - dayInQ) * MS_DAY
-splitLeft = dayStart - (dayInQ - sDay0) * MS_DAY
-splitRight = dayStart + (sDay1 - dayInQ) * MS_DAY
+//
+// Then half a bar back. A bar's time is drawn at the middle of its candle, so an
+// edge sitting on the opening bar's time cuts that candle in half and leaves one
+// half in the cell before: Q1 reached into the candle of 1 April, a fourth month.
+// Half a bar back drops the edge into the gap between the two candles, so the
+// quarter holds the whole of 31 March and nothing of 1 April.
+halfBar = tfs * 500
+
+cycLeft   = dayStart - dayInY * MS_DAY - halfBar
+cycRight  = dayStart + (yDays - dayInY) * MS_DAY - halfBar
+qtrLeft   = dayStart - dayInQ * MS_DAY - halfBar
+qtrRight  = dayStart + (qDays - dayInQ) * MS_DAY - halfBar
+splitLeft = dayStart - (dayInQ - sDay0) * MS_DAY - halfBar
+splitRight = dayStart + (sDay1 - dayInQ) * MS_DAY - halfBar
 
 // a cell is new when its own number changes, not when its left edge moves, so
 // the edges above are read once, on the bar that opens it
