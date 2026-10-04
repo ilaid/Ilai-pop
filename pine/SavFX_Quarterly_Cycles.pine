@@ -29,7 +29,12 @@ indicator("Sav FX - Semi / Quarterly Cycles", shorttitle="Sav FX", overlay=false
 //  splits 22 23 22 23, Apr-Jun is 91 and splits 22 23 23 23, Jul-Sep and Oct-Dec
 //  are 92 and split evenly into 23. The calendar month is three per quarter, not
 //  four, so it carries no number of its own and is only what the week is
-//  numbered inside.
+//  numbered inside. The split row is numbered Q1 to Q4 like the quarter above it.
+//
+//  Every cell measures its edges off the open of the bar it starts on, in whole
+//  days, rather than off a calendar midnight: a midnight falls inside a bar, and
+//  a box edge inside a bar is pushed on to the next one, which across a weekend
+//  moves it three days.
 //
 //  The slow rows read as names and the fast ones as numbers, so the day row says
 //  Wed where the 22.5 min row says 1-3-4: on a high timeframe those cells are far
@@ -188,15 +193,16 @@ yr  = year(tday)
 
 // plain calendar quarters: Q1 Jan-Mar, Q2 Apr-Jun, Q3 Jul-Sep, Q4 Oct-Dec.
 // April is not a year boundary, it opens Q2 and with it the true open of the year
-iQtr   = int(math.floor((mth - 1) / 3)) + 1
-qtrBeg = timestamp("GMT-5", yr, (iQtr - 1) * 3 + 1, 1, 0, 0)
-qtrEnd = iQtr == 4 ? timestamp("GMT-5", yr + 1, 1, 1, 0, 0) : timestamp("GMT-5", yr, iQtr * 3 + 1, 1, 0, 0)
+iQtr = int(math.floor((mth - 1) / 3)) + 1
 
 // the four year cycle runs 2023 2024 2025 2026: 2023 opens it, 2026 closes it.
 // 2023 is 3 mod 4, so (yr + 1) mod 4 numbers it without ever going negative
 iCyc4  = int((yr + 1) % 4) + 1
 cycBeg = timestamp("GMT-5", yr, 1, 1, 0, 0)
-cycEnd = timestamp("GMT-5", yr + 1, 1, 1, 0, 0)
+
+yNoon  = timestamp(yr, 1, 1, 12, 0, 0)
+yDays  = int(math.round((timestamp(yr + 1, 1, 1, 12, 0, 0) - yNoon) / MS_DAY))
+dayInY = math.max(0, math.min(yDays - 1, int(math.round((tdayMid - yNoon) / MS_DAY))))
 
 // the three months of the quarter, divided in four. The length is counted in
 // whole days off however many days those months actually hold, so a boundary
@@ -219,15 +225,31 @@ iSplit = en3 ? (dayInQ < b1 ? 1 : dayInQ < b2 ? 2 : dayInQ < b3 ? 3 : 4) : na
 sDay0  = dayInQ < b1 ? 0  : dayInQ < b2 ? b1 : dayInQ < b3 ? b2 : b3
 sDay1  = dayInQ < b1 ? b1 : dayInQ < b2 ? b2 : dayInQ < b3 ? b3 : qDays
 
-// anchored on the quarter's own left edge, so the four cells tile it exactly
-splitBeg = qtrBeg + sDay0 * MS_DAY
-splitEnd = qtrBeg + sDay1 * MS_DAY
+// Edges are measured off the open of the bar the cell starts on, in whole days,
+// never off a calendar midnight. A midnight lands inside a bar, and a box edge
+// inside a bar is pushed to the next one, which over a weekend throws the edge
+// three days out: Friday 24 July would draw on Monday the 27th. Measured this
+// way the edge sits exactly on the bar that opens the cell, and the same number
+// of days forward lands exactly where the next cell opens.
+cycLeft   = dayStart - dayInY * MS_DAY
+cycRight  = dayStart + (yDays - dayInY) * MS_DAY
+qtrLeft   = dayStart - dayInQ * MS_DAY
+qtrRight  = dayStart + (qDays - dayInQ) * MS_DAY
+splitLeft = dayStart - (dayInQ - sDay0) * MS_DAY
+splitRight = dayStart + (sDay1 - dayInQ) * MS_DAY
+
+// a cell is new when its own number changes, not when its left edge moves, so
+// the edges above are read once, on the bar that opens it
+cycId   = yr
+qtrId   = yr * 10 + iQtr
+splitId = yr * 100 + iQtr * 10 + nz(iSplit, 0)
 
 // how far back the slow rows keep their cells: inside the current four year
 // cycle from the weekly chart up, where the whole cycle is the point, and inside
 // the current year below it, where older years are only clutter
 cycFirst = timestamp("GMT-5", yr - (iCyc4 - 1), 1, 1, 0, 0)
-slowTrim = tfs >= 604800 ? cycFirst : cycBeg
+// two days of slack, because a cell opens on the evening before its first date
+slowTrim = (tfs >= 604800 ? cycFirst : cycBeg) - 2 * MS_DAY
 
 
 // ──────────────────────────── label construction ──────────────────────────────
@@ -279,15 +301,16 @@ nameFor(int lvl) =>
     switch lvl
         1 => str.tostring(yr)
         2 => "Q" + str.tostring(iQtr)
+        3 => na(iSplit) ? "" : "Q" + str.tostring(iSplit)
         4 => na(iWeek) ? "" : "Week " + str.tostring(iWeek)
         5 => dayName()
         6 => sessName()
         => ""
 
-// names reach down to this level, except the quarter split, which has no name
+// names reach down to this level, numbers take over below it
 namedDepth = nameRows == "Off" ? 0 : nameRows == "Down to the day" ? 5 : 6
 numbered(int lvl) =>
-    lvl == 3 or lvl > namedDepth
+    lvl > namedDepth
 
 cellText(int lvl) =>
     string nm  = showLabels and not numbered(lvl) ? nameFor(lvl) : ""
@@ -319,9 +342,8 @@ var box[] bx9 = array.new_box()
 // one box per cell: created when a new cell opens, and the row keeps only the
 // last `cellsKept` of them so the slower rows never lose their boxes to the
 // 500 box budget
-cell(box[] store, int left, int right, int top, string txt, color bg, int keepFrom) =>
-    int prev = array.size(store) > 0 ? box.get_left(array.get(store, array.size(store) - 1)) : na
-    if na(prev) or prev != left
+cell(box[] store, bool fresh, int left, int right, int top, string txt, color bg, int keepFrom) =>
+    if fresh or array.size(store) == 0
         array.push(store, box.new(left = left, top = top, right = right, bottom = top - 1, xloc = xloc.bar_time, bgcolor = bg, border_color = borderCol, border_width = borderW, border_style = line.style_solid, text = txt, text_color = textCol, text_size = textSizeIn))
         if array.size(store) > cellsKept
             box.delete(array.shift(store))
@@ -329,32 +351,37 @@ cell(box[] store, int left, int right, int top, string txt, color bg, int keepFr
     while array.size(store) > 1 and box.get_left(array.get(store, 0)) < keepFrom
         box.delete(array.shift(store))
 
+l6   = time - off6
+l90  = time - off90
+l225 = time - off225
+l562 = time - off5625
+
 if en1
-    cell(bx1, cycBeg, cycEnd, y1, cellText(1), fillFor(1, iCyc4), slowTrim)
+    cell(bx1, cycId != cycId[1], cycLeft, cycRight, y1, cellText(1), fillFor(1, iCyc4), slowTrim)
 
 if en2
-    cell(bx2, qtrBeg, qtrEnd, y2, cellText(2), fillFor(2, iQtr), slowTrim)
+    cell(bx2, qtrId != qtrId[1], qtrLeft, qtrRight, y2, cellText(2), fillFor(2, iQtr), slowTrim)
 
 if en3
-    cell(bx3, splitBeg, splitEnd, y3, cellText(3), fillFor(3, iSplit), slowTrim)
+    cell(bx3, splitId != splitId[1], splitLeft, splitRight, y3, cellText(3), fillFor(3, iSplit), slowTrim)
 
 if en4
-    cell(bx4, weekStart, weekStart + 5 * MS_DAY, y4, cellText(4), fillFor(4, iWeek), 0)
+    cell(bx4, weekStart != weekStart[1], weekStart, weekStart + 5 * MS_DAY, y4, cellText(4), fillFor(4, iWeek), 0)
 
 if en5
-    cell(bx5, dayStart, dayStart + MS_DAY, y5, cellText(5), fillFor(5, iDay), 0)
+    cell(bx5, dayStart != dayStart[1], dayStart, dayStart + MS_DAY, y5, cellText(5), fillFor(5, iDay), 0)
 
 if en6
-    cell(bx6, time - off6, time - off6 + MS_6H, y6, cellText(6), fillFor(6, iSess), 0)
+    cell(bx6, l6 != l6[1], l6, l6 + MS_6H, y6, cellText(6), fillFor(6, iSess), 0)
 
 if en7
-    cell(bx7, time - off90, time - off90 + MS_90, y7, cellText(7), fillFor(7, i90), 0)
+    cell(bx7, l90 != l90[1], l90, l90 + MS_90, y7, cellText(7), fillFor(7, i90), 0)
 
 if en8
-    cell(bx8, time - off225, time - off225 + MS_225, y8, cellText(8), fillFor(8, i225), 0)
+    cell(bx8, l225 != l225[1], l225, l225 + MS_225, y8, cellText(8), fillFor(8, i225), 0)
 
 if en9
-    cell(bx9, time - off5625, time - off5625 + MS_5625, y9, cellText(9), fillFor(9, i5625), 0)
+    cell(bx9, l562 != l562[1], l562, l562 + MS_5625, y9, cellText(9), fillFor(9, i5625), 0)
 
 // the rows are drawn entirely with boxes; this hidden plot only satisfies Pine's
 // "at least one output" rule and is excluded from the pane and the scale
