@@ -75,7 +75,7 @@ show5625   = input.bool(true, "5.625 Minute",       group = g_cyc)
 
 g_lab = "Labels"
 showLabels  = input.bool(true, "Show Labels", group = g_lab)
-nameRows    = input.string("Down to the session", "Names Instead Of Numbers", options = ["Down to the session", "Down to the day", "Off"], group = g_lab, tooltip = "The slow rows read better as names than as numbers, and their cells are too narrow for a three link chain on a high timeframe. This picks how far down the names go: to the session row (2026, Q3, Week 3, Wed, Asia), only to the daily row, or off for numbers everywhere. The quarter split row and everything below the line always print numbers.")
+nameRows    = input.string("Down to the session", "Names Instead Of Numbers", options = ["Down to the session", "Down to the day", "Off"], group = g_lab, tooltip = "The slow rows read better as names than as numbers, and their cells are too narrow for a three link chain on a high timeframe. This picks how far down the names go: to the session row (2026, Q3, Week 3, Wed, Asia), only to the daily row, or off for numbers everywhere. Everything below the line prints numbers.")
 appendNums  = input.bool(false, "Add Numbers After The Name", group = g_lab, tooltip = "Prints both, as Wed 3-3-3. Leave it off where the cell is too narrow to hold the two of them.")
 labelDepth  = input.int(3, "Levels Per Label", minval = 1, maxval = 3, group = g_lab, tooltip = "How many levels of the hierarchy each numbered cell prints. 3 gives 3-4-2 (grandparent-parent-self), 2 gives 4-2, 1 gives 2.")
 sepStr      = input.string("-", "Separator", options = ["-", ".", " "], group = g_lab)
