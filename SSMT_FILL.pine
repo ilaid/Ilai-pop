@@ -1187,7 +1187,7 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
     bool fBearE = esH < esL[2]
     bool fBearY = okY and ymH < ymL[2]
 
-    // VI בין נר [1] לנר [0], ורק כשהרווח הולך עם הנר שסגר אותו
+    // VI בין נר [1] לנר [0], לפי הכיוון של הרווח עצמו — חייב להיות זהה למנוע
     bool vBullN = volImbOn and nqO > nqC[1] and (not viDirOn or nqC[1] > nqO[1])
     bool vBullE = volImbOn and esO > esC[1] and (not viDirOn or esC[1] > esO[1])
     bool vBullY = volImbOn and okY and ymO > ymC[1] and (not viDirOn or ymC[1] > ymO[1])
