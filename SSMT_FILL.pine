@@ -58,12 +58,14 @@ symYM_mic = input.symbol("CBOT_MINI:MYM1!", "YM מיקרו", group = grpSym)
 
 grpGap = "הגדרת גאפ"
 extendBodies = input.bool(true, "הרחב גאפ לגופי הנרות (רווח סגירה/פתיחה)", group = grpGap)
-// סוג גאפ שני, על **שני נרות** ולא על שלושה: נר נסגר ב-24100 והנר שאחריו
-// נפתח ב-24102 — שתי הנקודות האלה לא נסחרו ברגע המעבר, וזה גאפ שמיש.
-// בחוזים רציפים פתיחה שווה לסגירה הקודמת כמעט תמיד, ולכן גאפ כזה נדיר
-// ומשמעותי: הוא מופיע בעיקר במעברי סשן ובתנועות מהירות.
-// מסומן V בהצצה, כדי להבדיל אותו מה-FVG של שלושת הנרות.
-volImbOn     = input.bool(true, "זהה גם גאפ סגירה/פתיחה בין שני נרות", tooltip = "Volume Imbalance — הרווח בין הסגירה של נר לפתיחה של הנר שאחריו. מסומן V בהצצה.", group = grpGap)
+// סוג גאפ שני, על **שני נרות** ולא על שלושה: נר נסגר ב-24200 והנר שאחריו
+// נפתח ב-24201 — שתי הנקודות האלה לא נסחרו ברגע המעבר, וזה גאפ שמיש.
+// **רק כשהרווח הולך באותו כיוון של שני הנרות**: רווח כלפי מעלה נספר רק
+// כששני הנרות עולים. נר עולה שנסגר ב-24200 והבא נפתח ב-24199 הוא רווח
+// שסותר את התנועה — רעש, ולכן נפסל.
+// VI ו-FVG נספרים יחד לאותו גאפ קולקטיבי: NQ עם VI ו-ES עם FVG באותו נר
+// זה גאפ תקף. מסומן V בהצצה רק כשאף נכס משתתף לא נתן FVG.
+volImbOn     = input.bool(true, "זהה גם גאפ סגירה/פתיחה בין שני נרות", tooltip = "Volume Imbalance — הרווח בין הסגירה של נר לפתיחה של הנר שאחריו, כששניהם באותו כיוון. נספר יחד עם FVG רגיל לאותו גאפ קולקטיבי, ומסומן V בהצצה כשכל הרגליים הן VI.", group = grpGap)
 // כיבוי מחזיר את ההתנהגות הישנה: רק NQ מול ES, YM לא משתתף בכלל.
 useYM        = input.bool(true, "כלול את YM כנכס חלש", group = grpGap)
 // השאר על 0. האסימטריה בין הנכסים היא הסיגנל עצמו — סינון לפי גודל
@@ -794,16 +796,39 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
         float yl2 = array.get(y, 7)
         float yc2 = array.get(y, 8)
 
+        float no0 = array.get(n, 0)
+        float eo0 = array.get(s, 0)
+        float yo0 = array.get(y, 0)
+
         bool okN = not na(nh2) and not na(no1) and not na(nc0)
         bool okE = not na(eh2) and not na(eo1) and not na(ec0)
         bool okY = useYM and not na(yh2) and not na(yo1) and not na(yc0)
 
-        bool bullN = okN and nl0 > nh2
-        bool bullE = okE and el0 > eh2
-        bool bullY = okY and yl0 > yh2
-        bool bearN = okN and nh0 < nl2
-        bool bearE = okE and eh0 < el2
-        bool bearY = okY and yh0 < yl2
+        // FVG של שלושה נרות — הפתיל של נר 1 והפתיל של נר 3 לא נוגעים
+        bool fBullN = okN and nl0 > nh2
+        bool fBullE = okE and el0 > eh2
+        bool fBullY = okY and yl0 > yh2
+        bool fBearN = okN and nh0 < nl2
+        bool fBearE = okE and eh0 < el2
+        bool fBearY = okY and yh0 < yl2
+
+        // VI של שני נרות — נר 2 ונר 3 של אותה שלישייה (אינדקסים 4,5 ו-0,3).
+        // **חייב להיות באותו כיוון של שני הנרות שיצרו אותו**: רווח כלפי
+        // מעלה נחשב רק כששני הנרות עולים. חייב להיות זהה לגרף.
+        bool vBullN = volImbOn and okN and no0 > nc1 and nc1 > no1 and nc0 > no0
+        bool vBullE = volImbOn and okE and eo0 > ec1 and ec1 > eo1 and ec0 > eo0
+        bool vBullY = volImbOn and okY and yo0 > yc1 and yc1 > yo1 and yc0 > yo0
+        bool vBearN = volImbOn and okN and no0 < nc1 and nc1 < no1 and nc0 < no0
+        bool vBearE = volImbOn and okE and eo0 < ec1 and ec1 < eo1 and ec0 < eo0
+        bool vBearY = volImbOn and okY and yo0 < yc1 and yc1 < yo1 and yc0 < yo0
+
+        // שני הסוגים נספרים יחד — גאפ קולקטיבי יכול להיות FVG ב-NQ ו-VI ב-ES
+        bool bullN = fBullN or vBullN
+        bool bullE = fBullE or vBullE
+        bool bullY = fBullY or vBullY
+        bool bearN = fBearN or vBearN
+        bool bearE = fBearE or vBearE
+        bool bearY = fBearY or vBearY
 
         int cBull = (bullN ? 1 : 0) + (bullE ? 1 : 0) + (bullY ? 1 : 0)
         int cBear = (bearN ? 1 : 0) + (bearE ? 1 : 0) + (bearY ? 1 : 0)
@@ -820,34 +845,53 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
             float nrt = na
             float erb = na
             float ert = na
+            // FVG קודם — הוא המבנה הגדול; VI רק כשאין FVG לאותו נכס
             if nd == 1
-                if bullN
+                if fBullN
                     nb  := (extendBodies and no1 > nh2) ? nc2 : nh2
-                    nt  := (extendBodies and nl0 > nc1) ? array.get(n, 0) : nl0
+                    nt  := (extendBodies and nl0 > nc1) ? no0 : nl0
                     nrb := nh2
                     nrt := nl0
-                if bullE
+                else if vBullN
+                    nb  := nc1
+                    nt  := no0
+                if fBullE
                     eb  := (extendBodies and eo1 > eh2) ? ec2 : eh2
-                    et  := (extendBodies and el0 > ec1) ? array.get(s, 0) : el0
+                    et  := (extendBodies and el0 > ec1) ? eo0 : el0
                     erb := eh2
                     ert := el0
-                if bullY
+                else if vBullE
+                    eb  := ec1
+                    et  := eo0
+                if fBullY
                     yb := (extendBodies and yo1 > yh2) ? yc2 : yh2
-                    yt := (extendBodies and yl0 > yc1) ? array.get(y, 0) : yl0
+                    yt := (extendBodies and yl0 > yc1) ? yo0 : yl0
+                else if vBullY
+                    yb := yc1
+                    yt := yo0
             else
-                if bearN
+                if fBearN
                     nt  := (extendBodies and no1 < nl2) ? nc2 : nl2
-                    nb  := (extendBodies and nh0 < nc1) ? array.get(n, 0) : nh0
+                    nb  := (extendBodies and nh0 < nc1) ? no0 : nh0
                     nrb := nh0
                     nrt := nl2
-                if bearE
+                else if vBearN
+                    nt  := nc1
+                    nb  := no0
+                if fBearE
                     et  := (extendBodies and eo1 < el2) ? ec2 : el2
-                    eb  := (extendBodies and eh0 < ec1) ? array.get(s, 0) : eh0
+                    eb  := (extendBodies and eh0 < ec1) ? eo0 : eh0
                     erb := eh0
                     ert := el2
-                if bearY
+                else if vBearE
+                    et  := ec1
+                    eb  := eo0
+                if fBearY
                     yt := (extendBodies and yo1 < yl2) ? yc2 : yl2
-                    yb := (extendBodies and yh0 < yc1) ? array.get(y, 0) : yh0
+                    yb := (extendBodies and yh0 < yc1) ? yo0 : yh0
+                else if vBearY
+                    yt := yc1
+                    yb := yo0
             // גאפ שקטן מהסף נפסל לאותו נכס בלבד, ואם נשאר רק אחד — אין גאפ
             if not na(nt) and nt - nb <= minGapPct / 100 * nc0
                 nb := na
@@ -861,73 +905,14 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
             int parts = (na(nt) ? 0 : 1) + (na(et) ? 0 : 1) + (na(yt) ? 0 : 1)
             if parts >= 2
                 e.gapCounter := e.gapCounter + 1
-                // התיוג הוא לפי הנר האמצעי, לא לפי הנר המאשר
-                Gap gn = Gap.new(e.gapCounter, nd, nb, nt, eb, et, yb, yt, nrb, nrt, erb, ert, rfMid == 0 ? rf : rfMid, bar_index, tMid == 0 ? tOpen : tMid, bar_index, nd == 1 ? nt : nb, nd == 1 ? et : eb, nd == 1 ? yt : yb, 0, 0, 0, 0, false, false, false, false, 0, "", 0, 0, na, na, na)
+                // האם רגל משתתפת כלשהי היא FVG. אם כן — התיוג לפי הנר
+                // האמצעי של השלישייה; אם הגאפ כולו VI — לפי הנר הנוכחי,
+                // כי שם הריק נוצר ברגע שהנר נפתח.
+                bool anyFvg = (not na(nt) and (nd == 1 ? fBullN : fBearN)) or (not na(et) and (nd == 1 ? fBullE : fBearE)) or (not na(yt) and (nd == 1 ? fBullY : fBearY))
+                int  gRef   = anyFvg ? (rfMid == 0 ? rf : rfMid) : rf
+                int  gWhen  = anyFvg ? (tMid == 0 ? tOpen : tMid) : tOpen
+                Gap gn = Gap.new(e.gapCounter, nd, nb, nt, eb, et, yb, yt, nrb, nrt, erb, ert, gRef, bar_index, gWhen, bar_index, nd == 1 ? nt : nb, nd == 1 ? et : eb, nd == 1 ? yt : yb, 0, 0, 0, 0, false, false, false, not anyFvg, 0, "", 0, 0, na, na, na)
                 array.push(e.gaps, gn)
-                if array.size(e.gaps) > maxGaps
-                    array.shift(e.gaps)
-
-        // ── גאפ סגירה/פתיחה בין שני נרות (Volume Imbalance) ──
-        // שני נרות בלבד: הסגירה של נר 1 מול הפתיחה של נר 2. חייב להיות
-        // זהה לגרף. כאן זה אינדקס 5 (c1) מול אינדקס 0 (o0).
-        float no0 = array.get(n, 0)
-        float eo0 = array.get(s, 0)
-        float yo0 = array.get(y, 0)
-        bool okVN = not na(nc1) and not na(no0)
-        bool okVE = not na(ec1) and not na(eo0)
-        bool okVY = useYM and not na(yc1) and not na(yo0)
-        bool viBN = volImbOn and okVN and no0 > nc1
-        bool viBE = volImbOn and okVE and eo0 > ec1
-        bool viBY = volImbOn and okVY and yo0 > yc1
-        bool viSN = volImbOn and okVN and no0 < nc1
-        bool viSE = volImbOn and okVE and eo0 < ec1
-        bool viSY = volImbOn and okVY and yo0 < yc1
-        int  cVB  = (viBN ? 1 : 0) + (viBE ? 1 : 0) + (viBY ? 1 : 0)
-        int  cVS  = (viSN ? 1 : 0) + (viSE ? 1 : 0) + (viSY ? 1 : 0)
-        int  vd   = cVB >= 2 ? 1 : cVS >= 2 ? -1 : 0
-
-        if vd != 0
-            float vnb = na
-            float vnt = na
-            float veb = na
-            float vet = na
-            float vyb = na
-            float vyt = na
-            if vd == 1
-                if viBN
-                    vnb := nc1
-                    vnt := no0
-                if viBE
-                    veb := ec1
-                    vet := eo0
-                if viBY
-                    vyb := yc1
-                    vyt := yo0
-            else
-                if viSN
-                    vnb := no0
-                    vnt := nc1
-                if viSE
-                    veb := eo0
-                    vet := ec1
-                if viSY
-                    vyb := yo0
-                    vyt := yc1
-            if not na(vnt) and vnt - vnb <= minGapPct / 100 * nc0
-                vnb := na
-                vnt := na
-            if not na(vet) and vet - veb <= minGapPct / 100 * ec0
-                veb := na
-                vet := na
-            if not na(vyt) and vyt - vyb <= minGapPct / 100 * yc0
-                vyb := na
-                vyt := na
-            int vParts = (na(vnt) ? 0 : 1) + (na(vet) ? 0 : 1) + (na(vyt) ? 0 : 1)
-            if vParts >= 2
-                e.gapCounter := e.gapCounter + 1
-                // הריק נוצר ברגע שנר 2 נפתח, ולכן התיוג הוא לפי הנר הנוכחי
-                Gap gv2 = Gap.new(e.gapCounter, vd, vnb, vnt, veb, vet, vyb, vyt, na, na, na, na, rf, bar_index, tOpen, bar_index, vd == 1 ? vnt : vnb, vd == 1 ? vet : veb, vd == 1 ? vyt : vyb, 0, 0, 0, 0, false, false, false, true, 0, "", 0, 0, na, na, na)
-                array.push(e.gaps, gv2)
                 if array.size(e.gaps) > maxGaps
                     array.shift(e.gaps)
 
@@ -1102,26 +1087,61 @@ if array.size(gaps) > 0
                         gu.dead := true
 
 // ═══════════════════════════════════════════════════════════════════
-// זיהוי גאפ קולקטיבי — FVG באותו כיוון, באותו נר, בלפחות שני נכסים
+// זיהוי גאפ קולקטיבי — באותו כיוון, באותו נר, בלפחות שני נכסים
 //
 // נרות: 1 = [2] · 2 = [1] · 3 = [0]
 //
-// הגבול נמדד בפתיל, ומורחב לגוף רק כשיש באותו צד רווח אמיתי שלא נסחר —
-// כלומר הנר הבא נפתח מעבר לפתיל של הנר הקודם, ולא רק מעבר לסגירה שלו.
-// (סגירה ופתיחה שנבדלות בטיק אחד בתוך הפתיל אינן רווח ולא מרחיבות כלום.)
-//   שורי  — תחתון: high[2] → close[2] אם open[1] > high[2]
-//            עליון:  low[0]  → open[0]  אם low[0]  > close[1]
-//   דובי  — עליון:  low[2]   → close[2] אם open[1] < low[2]
-//            תחתון: high[0]  → open[0]  אם high[0] < close[1]
+// **שני סוגי גאפ, ושניהם נספרים יחד לאותו גאפ קולקטיבי.** הוא יכול להיות
+// FVG ב-NQ ו-VI ב-ES — מה שחשוב זה אותו כיוון ואותו נר.
+//
+// 1) **FVG של שלושה נרות** — הפתיל של נר 1 והפתיל של נר 3 לא נוגעים.
+//    הגבול נמדד בפתיל, ומורחב לגוף רק כשיש באותו צד רווח אמיתי שלא נסחר —
+//    כלומר הנר הבא נפתח מעבר לפתיל של הנר הקודם, ולא רק מעבר לסגירה שלו.
+//    (סגירה ופתיחה שנבדלות בטיק אחד בתוך הפתיל אינן רווח.)
+//      שורי  — תחתון: high[2] → close[2] אם open[1] > high[2]
+//               עליון:  low[0]  → open[0]  אם low[0]  > close[1]
+//      דובי  — עליון:  low[2]   → close[2] אם open[1] < low[2]
+//               תחתון: high[0]  → open[0]  אם high[0] < close[1]
+//
+// 2) **VI של שני נרות** (`volImbOn`) — נר [1] נסגר ב-24200 ונר [0] נפתח
+//    ב-24201. הגבולות הם הסגירה והפתיחה עצמן, בלי הרחבה ובלי פתילים.
+//    **חייב להיות באותו כיוון של שני הנרות שיצרו אותו**: רווח כלפי מעלה
+//    נספר רק כששני הנרות עולים. נר עולה שנסגר ב-24200 והבא נפתח ב-24199
+//    הוא רווח שסותר את התנועה — רעש, לא חוסר איזון, ולכן נפסל.
+//
+// FVG קודם לכל נכס, ו-VI נכנס רק כשאין לאותו נכס FVG. אם אף רגל משתתפת
+// אינה FVG הגאפ הוא `volImb`, ואז התיוג הוא לפי הנר הנוכחי — שם הריק
+// נוצר — ולא לפי הנר האמצעי של השלישייה.
+//
+// **נר בלי פתיל אינו מקרה מיוחד.** נר שנסגר ב-24100 בלי פתיל למעלה —
+// ה-high שלו **הוא** הסגירה שלו, ולכן low[0] > high[2] תופס כרגיל
+// והגבול התחתון יוצא בדיוק על הסגירה. אין כאן מה להוסיף.
 // ═══════════════════════════════════════════════════════════════════
 
 if barstate.isconfirmed and tfClass != 0 and bar_index > 2
-    bool bullN = nqL > nqH[2]
-    bool bullE = esL > esH[2]
-    bool bullY = useYM and not na(ymH[2]) and ymL > ymH[2]
-    bool bearN = nqH < nqL[2]
-    bool bearE = esH < esL[2]
-    bool bearY = useYM and not na(ymL[2]) and ymH < ymL[2]
+    bool okY = useYM and not na(ymH[2]) and not na(ymL[2])
+
+    bool fBullN = nqL > nqH[2]
+    bool fBullE = esL > esH[2]
+    bool fBullY = okY and ymL > ymH[2]
+    bool fBearN = nqH < nqL[2]
+    bool fBearE = esH < esL[2]
+    bool fBearY = okY and ymH < ymL[2]
+
+    // VI בין נר [1] לנר [0], ורק כששניהם באותו כיוון של הרווח
+    bool vBullN = volImbOn and nqO > nqC[1] and nqC[1] > nqO[1] and nqC > nqO
+    bool vBullE = volImbOn and esO > esC[1] and esC[1] > esO[1] and esC > esO
+    bool vBullY = volImbOn and okY and ymO > ymC[1] and ymC[1] > ymO[1] and ymC > ymO
+    bool vBearN = volImbOn and nqO < nqC[1] and nqC[1] < nqO[1] and nqC < nqO
+    bool vBearE = volImbOn and esO < esC[1] and esC[1] < esO[1] and esC < esO
+    bool vBearY = volImbOn and okY and ymO < ymC[1] and ymC[1] < ymO[1] and ymC < ymO
+
+    bool bullN = fBullN or vBullN
+    bool bullE = fBullE or vBullE
+    bool bullY = fBullY or vBullY
+    bool bearN = fBearN or vBearN
+    bool bearE = fBearE or vBearE
+    bool bearY = fBearY or vBearY
 
     int cBull = (bullN ? 1 : 0) + (bullE ? 1 : 0) + (bullY ? 1 : 0)
     int cBear = (bearN ? 1 : 0) + (bearE ? 1 : 0) + (bearY ? 1 : 0)
@@ -1141,34 +1161,53 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
         float erb = na
         float ert = na
 
+        // FVG קודם — הוא המבנה הגדול; VI רק כשאין FVG לאותו נכס
         if newDir == 1
-            if bullN
+            if fBullN
                 nb  := (extendBodies and nqO[1] > nqH[2]) ? nqC[2] : nqH[2]
                 nt  := (extendBodies and nqL    > nqC[1]) ? nqO    : nqL
                 nrb := nqH[2]
                 nrt := nqL
-            if bullE
+            else if vBullN
+                nb  := nqC[1]
+                nt  := nqO
+            if fBullE
                 eb  := (extendBodies and esO[1] > esH[2]) ? esC[2] : esH[2]
                 et  := (extendBodies and esL    > esC[1]) ? esO    : esL
                 erb := esH[2]
                 ert := esL
-            if bullY
+            else if vBullE
+                eb  := esC[1]
+                et  := esO
+            if fBullY
                 yb := (extendBodies and ymO[1] > ymH[2]) ? ymC[2] : ymH[2]
                 yt := (extendBodies and ymL    > ymC[1]) ? ymO    : ymL
+            else if vBullY
+                yb := ymC[1]
+                yt := ymO
         else
-            if bearN
+            if fBearN
                 nt  := (extendBodies and nqO[1] < nqL[2]) ? nqC[2] : nqL[2]
                 nb  := (extendBodies and nqH    < nqC[1]) ? nqO    : nqH
                 nrb := nqH
                 nrt := nqL[2]
-            if bearE
+            else if vBearN
+                nt  := nqC[1]
+                nb  := nqO
+            if fBearE
                 et  := (extendBodies and esO[1] < esL[2]) ? esC[2] : esL[2]
                 eb  := (extendBodies and esH    < esC[1]) ? esO    : esH
                 erb := esH
                 ert := esL[2]
-            if bearY
+            else if vBearE
+                et  := esC[1]
+                eb  := esO
+            if fBearY
                 yt := (extendBodies and ymO[1] < ymL[2]) ? ymC[2] : ymL[2]
                 yb := (extendBodies and ymH    < ymC[1]) ? ymO    : ymH
+            else if vBearY
+                yt := ymC[1]
+                yb := ymO
 
         // גאפ שקטן מהסף נפסל לאותו נכס בלבד. אם נשאר רק אחד — אין גאפ.
         if not na(nt) and nt - nb <= minGapPct / 100 * nqC
@@ -1186,112 +1225,31 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
             // ── הגבולות לציור, בסקאלה של הגרף ──
             // אותן נוסחאות בדיוק, רק על open/high/low/close של הגרף עצמו.
             // נכנסות רק אם הנכס שהגרף מציג באמת משתתף בגאפ **וגם** הגרף
-            // עצמו רואה שם את אותו FVG. אם לא — אין קופסה, רק תווית.
+            // עצמו רואה שם את אותו גאפ. אם לא — אין קופסה, רק תווית.
             bool legOnChart = (isNQc and not na(nt)) or (isESc and not na(et)) or (isYMc and not na(yt))
             float cb = na
             float ct = na
-            if legOnChart and newDir == 1 and low > high[2]
-                cb := (extendBodies and open[1] > high[2]) ? close[2] : high[2]
-                ct := (extendBodies and low      > close[1]) ? open  : low
-            if legOnChart and newDir == -1 and high < low[2]
-                ct := (extendBodies and open[1] < low[2])  ? close[2] : low[2]
-                cb := (extendBodies and high     < close[1]) ? open  : high
+            if legOnChart and newDir == 1
+                if low > high[2]
+                    cb := (extendBodies and open[1] > high[2]) ? close[2] : high[2]
+                    ct := (extendBodies and low      > close[1]) ? open  : low
+                else if volImbOn and open > close[1] and close[1] > open[1] and close > open
+                    cb := close[1]
+                    ct := open
+            if legOnChart and newDir == -1
+                if high < low[2]
+                    ct := (extendBodies and open[1] < low[2])  ? close[2] : low[2]
+                    cb := (extendBodies and high     < close[1]) ? open  : high
+                else if volImbOn and open < close[1] and close[1] < open[1] and close < open
+                    ct := close[1]
+                    cb := open
+            // האם רגל משתתפת כלשהי היא FVG. אם כן — התיוג לפי הנר האמצעי
+            // של השלישייה; אם הגאפ כולו VI — לפי הנר הנוכחי, כי שם נוצר
+            // הריק, ואז גם הקופסה מתחילה נר אחד אחורה ולא שניים.
+            bool anyFvg = (not na(nt) and (newDir == 1 ? fBullN : fBearN)) or (not na(et) and (newDir == 1 ? fBullE : fBearE)) or (not na(yt) and (newDir == 1 ? fBullY : fBearY))
             gapCounter += 1
-            // תת-המחזור והזמן נלקחים מ-[1] — הנר האמצעי, זה שיצר את הגאפ.
-            // הנר השלישי רק מאשר, ואסור שהוא יגרור את הגאפ לתת-המחזור הבא.
-            Gap gn = Gap.new(gapCounter, newDir, nb, nt, eb, et, yb, yt, nrb, nrt, erb, ert, refCycleId[1], bar_index, time[1], bar_index - 2, newDir == 1 ? nt : nb, newDir == 1 ? et : eb, newDir == 1 ? yt : yb, 0, 0, 0, 0, false, false, false, false, 0, "", 0, 0, na, cb, ct)
+            Gap gn = Gap.new(gapCounter, newDir, nb, nt, eb, et, yb, yt, nrb, nrt, erb, ert, anyFvg ? refCycleId[1] : refCycleId, bar_index, anyFvg ? time[1] : time, anyFvg ? bar_index - 2 : bar_index - 1, newDir == 1 ? nt : nb, newDir == 1 ? et : eb, newDir == 1 ? yt : yb, 0, 0, 0, 0, false, false, false, not anyFvg, 0, "", 0, 0, na, cb, ct)
             array.push(gaps, gn)
-            if array.size(gaps) > maxGaps
-                array.shift(gaps)
-
-// ═══════════════════════════════════════════════════════════════════
-// גאפ סגירה/פתיחה בין שני נרות — Volume Imbalance
-//
-// **שני נרות, לא שלושה.** נר נסגר ב-24100 והנר שאחריו נפתח ב-24102 —
-// שתי הנקודות האלה לא נסחרו ברגע המעבר, וזה גאפ שמיש בדיוק כמו FVG.
-// הגבולות הם הסגירה והפתיחה עצמן; אין מה להרחיב ואין פתילים במשחק.
-//
-// הריק נוצר ברגע שהנר השני נפתח, ולכן הגאפ מתויג לתת-המחזור של **הנר
-// הנוכחי** (ולא של הקודם כמו ב-FVG, שם הנר האמצעי הוא זה שיצר אותו).
-//
-// בחוזים רציפים הפתיחה שווה לסגירה הקודמת כמעט תמיד, ולכן גאפ כזה נדיר
-// ומופיע בעיקר במעברי סשן ובתנועות מהירות. מכאן והלאה הוא מתנהג בדיוק
-// כמו כל גאפ אחר: דריכה, ביקורים, עומקים, דרגות ו-IFVG.
-// ═══════════════════════════════════════════════════════════════════
-
-if barstate.isconfirmed and tfClass != 0 and bar_index > 1
-    bool okVN = not na(nqC[1]) and not na(nqO)
-    bool okVE = not na(esC[1]) and not na(esO)
-    bool okVY = useYM and not na(ymC[1]) and not na(ymO)
-    bool viBN = volImbOn and okVN and nqO > nqC[1]
-    bool viBE = volImbOn and okVE and esO > esC[1]
-    bool viBY = volImbOn and okVY and ymO > ymC[1]
-    bool viSN = volImbOn and okVN and nqO < nqC[1]
-    bool viSE = volImbOn and okVE and esO < esC[1]
-    bool viSY = volImbOn and okVY and ymO < ymC[1]
-
-    int cVB = (viBN ? 1 : 0) + (viBE ? 1 : 0) + (viBY ? 1 : 0)
-    int cVS = (viSN ? 1 : 0) + (viSE ? 1 : 0) + (viSY ? 1 : 0)
-    int viDir = cVB >= 2 ? 1 : cVS >= 2 ? -1 : 0
-
-    if viDir != 0
-        float vnb = na
-        float vnt = na
-        float veb = na
-        float vet = na
-        float vyb = na
-        float vyt = na
-
-        if viDir == 1
-            if viBN
-                vnb := nqC[1]
-                vnt := nqO
-            if viBE
-                veb := esC[1]
-                vet := esO
-            if viBY
-                vyb := ymC[1]
-                vyt := ymO
-        else
-            if viSN
-                vnb := nqO
-                vnt := nqC[1]
-            if viSE
-                veb := esO
-                vet := esC[1]
-            if viSY
-                vyb := ymO
-                vyt := ymC[1]
-
-        // אותו סף גודל של ה-FVG, לכל נכס בנפרד
-        if not na(vnt) and vnt - vnb <= minGapPct / 100 * nqC
-            vnb := na
-            vnt := na
-        if not na(vet) and vet - veb <= minGapPct / 100 * esC
-            veb := na
-            vet := na
-        if not na(vyt) and vyt - vyb <= minGapPct / 100 * ymC
-            vyb := na
-            vyt := na
-
-        int vParts = (na(vnt) ? 0 : 1) + (na(vet) ? 0 : 1) + (na(vyt) ? 0 : 1)
-        if vParts >= 2
-            // הגבולות לציור, מהגרף עצמו — אותה הפרדה של "Adjust for
-            // contract changes". רק אם הנכס שהגרף מציג משתתף, והגרף עצמו
-            // רואה שם את אותו רווח סגירה/פתיחה.
-            bool vOnChart = (isNQc and not na(vnt)) or (isESc and not na(vet)) or (isYMc and not na(vyt))
-            float vcb = na
-            float vct = na
-            if vOnChart and viDir == 1 and open > close[1]
-                vcb := close[1]
-                vct := open
-            if vOnChart and viDir == -1 and open < close[1]
-                vcb := open
-                vct := close[1]
-            gapCounter += 1
-            // origin = הנר הקודם, כדי שהקופסה תתחיל על הסגירה שיצרה את הריק
-            Gap gv2 = Gap.new(gapCounter, viDir, vnb, vnt, veb, vet, vyb, vyt, na, na, na, na, refCycleId, bar_index, time, bar_index - 1, viDir == 1 ? vnt : vnb, viDir == 1 ? vet : veb, viDir == 1 ? vyt : vyb, 0, 0, 0, 0, false, false, false, true, 0, "", 0, 0, na, vcb, vct)
-            array.push(gaps, gv2)
             if array.size(gaps) > maxGaps
                 array.shift(gaps)
 
