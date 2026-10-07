@@ -58,6 +58,12 @@ symYM_mic = input.symbol("CBOT_MINI:MYM1!", "YM מיקרו", group = grpSym)
 
 grpGap = "הגדרת גאפ"
 extendBodies = input.bool(true, "הרחב גאפ לגופי הנרות (רווח סגירה/פתיחה)", group = grpGap)
+// סוג זיהוי שני: גם כשהפתילים של נר 1 ונר 3 נוגעים, אם ה**גופים** לא נוגעים
+// יש שם רווח שמיש. זה בדיוק המצב שבו לנר 1 או לנר 3 אין פתיל בצד הרלוונטי,
+// וזה גם כל רווח בין סגירה של נר אחד לגוף של נר אחר.
+// הגבולות של גאפ כזה הם הגופים עצמם, בלי הרחבה — המרחב הזה כן נסחר בפתיל,
+// ולכן הוא גאפ חלש יותר מגאפ פתילים ואין מה להרחיב אותו.
+bodyFvg      = input.bool(true, "זהה גם FVG בגופים (הפתילים נוגעים)", tooltip = "גאפ כזה מסומן ב-B בהצצה. כבה אם אתה רוצה רק את גאפי הפתילים הקלאסיים.", group = grpGap)
 // כיבוי מחזיר את ההתנהגות הישנה: רק NQ מול ES, YM לא משתתף בכלל.
 useYM        = input.bool(true, "כלול את YM כנכס חלש", group = grpGap)
 // השאר על 0. האסימטריה בין הנכסים היא הסיגנל עצמו — סינון לפי גודל
@@ -385,6 +391,9 @@ type Gap
     bool   inVisit  // האם אנחנו כרגע בתוך ביקור
     bool   dead     // הפך ל-IFVG — הרעיון מתבטל
     bool   armed    // תת-המחזור שבו נולד הסתיים — רק עכשיו הוא יכול לייצר שבירה
+    // אף אחד מהנכסים המשתתפים לא נתן FVG בפתילים — הגאפ כולו בגופים.
+    // משמש רק לכיתוב (B בהצצה); הלוגיקה לא מבדילה בין השניים.
+    bool   bodyOnly
     // ── השבירה של הגאפ הזה. כל גאפ מחזיק את שלו, הן לא מתחרות על מקום אחד ──
     int    fDeg     // 0 = עוד לא נרשמה שבירה. 1..3, יכול רק לעלות.
     string fLead    // המשתתפים לפי סדר עומק, למשל "NQ+ES+YM"
@@ -784,17 +793,50 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
         float yh2 = array.get(y, 6)
         float yl2 = array.get(y, 7)
         float yc2 = array.get(y, 8)
+        // הפתיחה של נר 1 — נדרשת לגוף שלו, ולכן נמשכת מהמסגרת כמו כל השאר
+        float no2 = array.get(n, 9)
+        float eo2 = array.get(s, 9)
+        float yo2 = array.get(y, 9)
 
         bool okN = not na(nh2) and not na(no1) and not na(nc0)
         bool okE = not na(eh2) and not na(eo1) and not na(ec0)
         bool okY = useYM and not na(yh2) and not na(yo1) and not na(yc0)
 
-        bool bullN = okN and nl0 > nh2
-        bool bullE = okE and el0 > eh2
-        bool bullY = okY and yl0 > yh2
-        bool bearN = okN and nh0 < nl2
-        bool bearE = okE and eh0 < el2
-        bool bearY = okY and yh0 < yl2
+        // גבולות הגוף: נר 1 מהשלישייה (אינדקסים 8,9) ונר 3 (אינדקסים 0,3)
+        float nB1T = math.max(no2, nc2)
+        float nB1B = math.min(no2, nc2)
+        float nB3T = math.max(array.get(n, 0), nc0)
+        float nB3B = math.min(array.get(n, 0), nc0)
+        float eB1T = math.max(eo2, ec2)
+        float eB1B = math.min(eo2, ec2)
+        float eB3T = math.max(array.get(s, 0), ec0)
+        float eB3B = math.min(array.get(s, 0), ec0)
+        float yB1T = math.max(yo2, yc2)
+        float yB1B = math.min(yo2, yc2)
+        float yB3T = math.max(array.get(y, 0), yc0)
+        float yB3B = math.min(array.get(y, 0), yc0)
+
+        // FVG בפתילים — החלל לא נסחר בכלל
+        bool wBullN = okN and nl0 > nh2
+        bool wBullE = okE and el0 > eh2
+        bool wBullY = okY and yl0 > yh2
+        bool wBearN = okN and nh0 < nl2
+        bool wBearE = okE and eh0 < el2
+        bool wBearY = okY and yh0 < yl2
+        // FVG בגופים — הפתילים נוגעים אבל הגופים לא. חייב להיות זהה לגרף.
+        bool bBullN = bodyFvg and okN and not na(no2) and nB3B > nB1T
+        bool bBullE = bodyFvg and okE and not na(eo2) and eB3B > eB1T
+        bool bBullY = bodyFvg and okY and not na(yo2) and yB3B > yB1T
+        bool bBearN = bodyFvg and okN and not na(no2) and nB3T < nB1B
+        bool bBearE = bodyFvg and okE and not na(eo2) and eB3T < eB1B
+        bool bBearY = bodyFvg and okY and not na(yo2) and yB3T < yB1B
+
+        bool bullN = wBullN or bBullN
+        bool bullE = wBullE or bBullE
+        bool bullY = wBullY or bBullY
+        bool bearN = wBearN or bBearN
+        bool bearE = wBearE or bBearE
+        bool bearY = wBearY or bBearY
 
         int cBull = (bullN ? 1 : 0) + (bullE ? 1 : 0) + (bullY ? 1 : 0)
         int cBear = (bearN ? 1 : 0) + (bearE ? 1 : 0) + (bearY ? 1 : 0)
@@ -811,34 +853,62 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
             float nrt = na
             float erb = na
             float ert = na
+            // גאפ פתילים מקבל את הגבולות המורחבים; גאפ גופים מקבל את הגופים
+            // עצמם, בלי הרחבה — המרחב שלו כן נסחר בפתיל.
             if nd == 1
-                if bullN
+                if wBullN
                     nb  := (extendBodies and no1 > nh2) ? nc2 : nh2
                     nt  := (extendBodies and nl0 > nc1) ? array.get(n, 0) : nl0
                     nrb := nh2
                     nrt := nl0
-                if bullE
+                else if bBullN
+                    nb  := nB1T
+                    nt  := nB3B
+                    nrb := nB1T
+                    nrt := nB3B
+                if wBullE
                     eb  := (extendBodies and eo1 > eh2) ? ec2 : eh2
                     et  := (extendBodies and el0 > ec1) ? array.get(s, 0) : el0
                     erb := eh2
                     ert := el0
-                if bullY
+                else if bBullE
+                    eb  := eB1T
+                    et  := eB3B
+                    erb := eB1T
+                    ert := eB3B
+                if wBullY
                     yb := (extendBodies and yo1 > yh2) ? yc2 : yh2
                     yt := (extendBodies and yl0 > yc1) ? array.get(y, 0) : yl0
+                else if bBullY
+                    yb := yB1T
+                    yt := yB3B
             else
-                if bearN
+                if wBearN
                     nt  := (extendBodies and no1 < nl2) ? nc2 : nl2
                     nb  := (extendBodies and nh0 < nc1) ? array.get(n, 0) : nh0
                     nrb := nh0
                     nrt := nl2
-                if bearE
+                else if bBearN
+                    nt  := nB1B
+                    nb  := nB3T
+                    nrb := nB3T
+                    nrt := nB1B
+                if wBearE
                     et  := (extendBodies and eo1 < el2) ? ec2 : el2
                     eb  := (extendBodies and eh0 < ec1) ? array.get(s, 0) : eh0
                     erb := eh0
                     ert := el2
-                if bearY
+                else if bBearE
+                    et  := eB1B
+                    eb  := eB3T
+                    erb := eB3T
+                    ert := eB1B
+                if wBearY
                     yt := (extendBodies and yo1 < yl2) ? yc2 : yl2
                     yb := (extendBodies and yh0 < yc1) ? array.get(y, 0) : yh0
+                else if bBearY
+                    yt := yB1B
+                    yb := yB3T
             // גאפ שקטן מהסף נפסל לאותו נכס בלבד, ואם נשאר רק אחד — אין גאפ
             if not na(nt) and nt - nb <= minGapPct / 100 * nc0
                 nb := na
@@ -852,8 +922,10 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
             int parts = (na(nt) ? 0 : 1) + (na(et) ? 0 : 1) + (na(yt) ? 0 : 1)
             if parts >= 2
                 e.gapCounter := e.gapCounter + 1
+                // האם מישהו מהנכסים ששרדו את הסף נתן גאפ פתילים
+                bool anyWick = (not na(nt) and (nd == 1 ? wBullN : wBearN)) or (not na(et) and (nd == 1 ? wBullE : wBearE)) or (not na(yt) and (nd == 1 ? wBullY : wBearY))
                 // התיוג הוא לפי הנר האמצעי, לא לפי הנר המאשר
-                Gap gn = Gap.new(e.gapCounter, nd, nb, nt, eb, et, yb, yt, nrb, nrt, erb, ert, rfMid == 0 ? rf : rfMid, bar_index, tMid == 0 ? tOpen : tMid, bar_index, nd == 1 ? nt : nb, nd == 1 ? et : eb, nd == 1 ? yt : yb, 0, 0, 0, 0, false, false, false, 0, "", 0, 0, na, na, na)
+                Gap gn = Gap.new(e.gapCounter, nd, nb, nt, eb, et, yb, yt, nrb, nrt, erb, ert, rfMid == 0 ? rf : rfMid, bar_index, tMid == 0 ? tOpen : tMid, bar_index, nd == 1 ? nt : nb, nd == 1 ? et : eb, nd == 1 ? yt : yb, 0, 0, 0, 0, false, false, false, not anyWick, 0, "", 0, 0, na, na, na)
                 array.push(e.gaps, gn)
                 if array.size(e.gaps) > maxGaps
                     array.shift(e.gaps)
@@ -912,7 +984,8 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
 // מחזיק בעצמו את שני הנרות הקודמים ומזיז אותם אחרי כל צעד.
 f_pushLtf(Engine e, int t, float no, float nh, float nl, float nc, float eo, float eh, float el, float ec, float yo, float yh, float yl, float yc) =>
     if not na(t) and t != e.lastT and (not na(nc) or not na(ec))
-        f_step(e, t, array.from(no, nh, nl, nc, array.get(e.hN, 0), array.get(e.hN, 3), array.get(e.hN, 5), array.get(e.hN, 6), array.get(e.hN, 7)), array.from(eo, eh, el, ec, array.get(e.hE, 0), array.get(e.hE, 3), array.get(e.hE, 5), array.get(e.hE, 6), array.get(e.hE, 7)), array.from(yo, yh, yl, yc, array.get(e.hY, 0), array.get(e.hY, 3), array.get(e.hY, 5), array.get(e.hY, 6), array.get(e.hY, 7)))
+        // אינדקס 9 = הפתיחה של נר 1 בשלישייה, h*[4] — נדרש ל-FVG בגופים.
+        f_step(e, t, array.from(no, nh, nl, nc, array.get(e.hN, 0), array.get(e.hN, 3), array.get(e.hN, 5), array.get(e.hN, 6), array.get(e.hN, 7), array.get(e.hN, 4)), array.from(eo, eh, el, ec, array.get(e.hE, 0), array.get(e.hE, 3), array.get(e.hE, 5), array.get(e.hE, 6), array.get(e.hE, 7), array.get(e.hE, 4)), array.from(yo, yh, yl, yc, array.get(e.hY, 0), array.get(e.hY, 3), array.get(e.hY, 5), array.get(e.hY, 6), array.get(e.hY, 7), array.get(e.hY, 4)))
         for q = 0 to 3
             array.set(e.hN, q + 4, array.get(e.hN, q))
             array.set(e.hE, q + 4, array.get(e.hE, q))
@@ -1033,22 +1106,66 @@ if array.size(gaps) > 0
 //
 // נרות: 1 = [2] · 2 = [1] · 3 = [0]
 //
-// הגבול נמדד בפתיל, ומורחב לגוף רק כשיש באותו צד רווח אמיתי שלא נסחר —
-// כלומר הנר הבא נפתח מעבר לפתיל של הנר הקודם, ולא רק מעבר לסגירה שלו.
-// (סגירה ופתיחה שנבדלות בטיק אחד בתוך הפתיל אינן רווח ולא מרחיבות כלום.)
-//   שורי  — תחתון: high[2] → close[2] אם open[1] > high[2]
-//            עליון:  low[0]  → open[0]  אם low[0]  > close[1]
-//   דובי  — עליון:  low[2]   → close[2] אם open[1] < low[2]
-//            תחתון: high[0]  → open[0]  אם high[0] < close[1]
+// **שני סוגי גאפ, ולכל אחד גבולות משלו.**
+//
+// 1) FVG בפתילים — הפתיל של נר 1 והפתיל של נר 3 לא נוגעים. החלל ביניהם לא
+//    נסחר בכלל. הגבול נמדד בפתיל, ומורחב לגוף רק כשיש באותו צד רווח אמיתי
+//    שלא נסחר — כלומר הנר הבא נפתח מעבר לפתיל של הנר הקודם, ולא רק מעבר
+//    לסגירה שלו. (סגירה ופתיחה שנבדלות בטיק אחד בתוך הפתיל אינן רווח.)
+//      שורי  — תחתון: high[2] → close[2] אם open[1] > high[2]
+//               עליון:  low[0]  → open[0]  אם low[0]  > close[1]
+//      דובי  — עליון:  low[2]   → close[2] אם open[1] < low[2]
+//               תחתון: high[0]  → open[0]  אם high[0] < close[1]
+//
+// 2) FVG בגופים (`bodyFvg`) — הפתילים כן נוגעים, אבל ה**גופים** לא. זה
+//    המצב שבו לנר 1 או לנר 3 אין פתיל בצד הרלוונטי, וזה גם כל רווח בין
+//    סגירה של נר אחד לגוף של נר אחר. הגבולות הם הגופים עצמם, **בלי
+//    הרחבה**: המרחב הזה כן נסחר בפתיל, ולכן הגאפ חלש יותר ואין מה להרחיב.
+//      שורי — תחתון: גוף-עליון של נר 1 · עליון: גוף-תחתון של נר 3
+//      דובי — עליון: גוף-תחתון של נר 1 · תחתון: גוף-עליון של נר 3
+//
+// גאפ פתילים גורר תמיד גם גאפ גופים, ולכן הבדיקה בפתילים קודמת והגופים הם
+// רק נפילה אחורה. כל נכס נבדק בנפרד: גאפ קולקטיבי יכול להיות פתילים ב-NQ
+// וגופים ב-ES. אם אף נכס משתתף לא נתן גאפ פתילים, הגאפ מסומן `bodyOnly`.
 // ═══════════════════════════════════════════════════════════════════
 
 if barstate.isconfirmed and tfClass != 0 and bar_index > 2
-    bool bullN = nqL > nqH[2]
-    bool bullE = esL > esH[2]
-    bool bullY = useYM and not na(ymH[2]) and ymL > ymH[2]
-    bool bearN = nqH < nqL[2]
-    bool bearE = esH < esL[2]
-    bool bearY = useYM and not na(ymL[2]) and ymH < ymL[2]
+    // גבולות הגוף של נר 1 ושל נר 3
+    float nB1T = math.max(nqO[2], nqC[2])
+    float nB1B = math.min(nqO[2], nqC[2])
+    float nB3T = math.max(nqO, nqC)
+    float nB3B = math.min(nqO, nqC)
+    float eB1T = math.max(esO[2], esC[2])
+    float eB1B = math.min(esO[2], esC[2])
+    float eB3T = math.max(esO, esC)
+    float eB3B = math.min(esO, esC)
+    float yB1T = math.max(ymO[2], ymC[2])
+    float yB1B = math.min(ymO[2], ymC[2])
+    float yB3T = math.max(ymO, ymC)
+    float yB3B = math.min(ymO, ymC)
+
+    bool okY = useYM and not na(ymH[2]) and not na(ymL[2])
+
+    bool wBullN = nqL > nqH[2]
+    bool wBullE = esL > esH[2]
+    bool wBullY = okY and ymL > ymH[2]
+    bool wBearN = nqH < nqL[2]
+    bool wBearE = esH < esL[2]
+    bool wBearY = okY and ymH < ymL[2]
+
+    bool bBullN = bodyFvg and nB3B > nB1T
+    bool bBullE = bodyFvg and eB3B > eB1T
+    bool bBullY = bodyFvg and okY and yB3B > yB1T
+    bool bBearN = bodyFvg and nB3T < nB1B
+    bool bBearE = bodyFvg and eB3T < eB1B
+    bool bBearY = bodyFvg and okY and yB3T < yB1B
+
+    bool bullN = wBullN or bBullN
+    bool bullE = wBullE or bBullE
+    bool bullY = wBullY or bBullY
+    bool bearN = wBearN or bBearN
+    bool bearE = wBearE or bBearE
+    bool bearY = wBearY or bBearY
 
     int cBull = (bullN ? 1 : 0) + (bullE ? 1 : 0) + (bullY ? 1 : 0)
     int cBear = (bearN ? 1 : 0) + (bearE ? 1 : 0) + (bearY ? 1 : 0)
@@ -1068,34 +1185,61 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
         float erb = na
         float ert = na
 
+        // גאפ פתילים מקבל את הגבולות המורחבים; גאפ גופים את הגופים עצמם.
         if newDir == 1
-            if bullN
+            if wBullN
                 nb  := (extendBodies and nqO[1] > nqH[2]) ? nqC[2] : nqH[2]
                 nt  := (extendBodies and nqL    > nqC[1]) ? nqO    : nqL
                 nrb := nqH[2]
                 nrt := nqL
-            if bullE
+            else if bBullN
+                nb  := nB1T
+                nt  := nB3B
+                nrb := nB1T
+                nrt := nB3B
+            if wBullE
                 eb  := (extendBodies and esO[1] > esH[2]) ? esC[2] : esH[2]
                 et  := (extendBodies and esL    > esC[1]) ? esO    : esL
                 erb := esH[2]
                 ert := esL
-            if bullY
+            else if bBullE
+                eb  := eB1T
+                et  := eB3B
+                erb := eB1T
+                ert := eB3B
+            if wBullY
                 yb := (extendBodies and ymO[1] > ymH[2]) ? ymC[2] : ymH[2]
                 yt := (extendBodies and ymL    > ymC[1]) ? ymO    : ymL
+            else if bBullY
+                yb := yB1T
+                yt := yB3B
         else
-            if bearN
+            if wBearN
                 nt  := (extendBodies and nqO[1] < nqL[2]) ? nqC[2] : nqL[2]
                 nb  := (extendBodies and nqH    < nqC[1]) ? nqO    : nqH
                 nrb := nqH
                 nrt := nqL[2]
-            if bearE
+            else if bBearN
+                nt  := nB1B
+                nb  := nB3T
+                nrb := nB3T
+                nrt := nB1B
+            if wBearE
                 et  := (extendBodies and esO[1] < esL[2]) ? esC[2] : esL[2]
                 eb  := (extendBodies and esH    < esC[1]) ? esO    : esH
                 erb := esH
                 ert := esL[2]
-            if bearY
+            else if bBearE
+                et  := eB1B
+                eb  := eB3T
+                erb := eB3T
+                ert := eB1B
+            if wBearY
                 yt := (extendBodies and ymO[1] < ymL[2]) ? ymC[2] : ymL[2]
                 yb := (extendBodies and ymH    < ymC[1]) ? ymO    : ymH
+            else if bBearY
+                yt := yB1B
+                yb := yB3T
 
         // גאפ שקטן מהסף נפסל לאותו נכס בלבד. אם נשאר רק אחד — אין גאפ.
         if not na(nt) and nt - nb <= minGapPct / 100 * nqC
@@ -1115,18 +1259,33 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
             // נכנסות רק אם הנכס שהגרף מציג באמת משתתף בגאפ **וגם** הגרף
             // עצמו רואה שם את אותו FVG. אם לא — אין קופסה, רק תווית.
             bool legOnChart = (isNQc and not na(nt)) or (isESc and not na(et)) or (isYMc and not na(yt))
+            // גבולות הגוף בסקאלה של הגרף, לנפילה אחורה של גאפ גופים
+            float cB1T = math.max(open[2], close[2])
+            float cB1B = math.min(open[2], close[2])
+            float cB3T = math.max(open, close)
+            float cB3B = math.min(open, close)
             float cb = na
             float ct = na
-            if legOnChart and newDir == 1 and low > high[2]
-                cb := (extendBodies and open[1] > high[2]) ? close[2] : high[2]
-                ct := (extendBodies and low      > close[1]) ? open  : low
-            if legOnChart and newDir == -1 and high < low[2]
-                ct := (extendBodies and open[1] < low[2])  ? close[2] : low[2]
-                cb := (extendBodies and high     < close[1]) ? open  : high
+            if legOnChart and newDir == 1
+                if low > high[2]
+                    cb := (extendBodies and open[1] > high[2]) ? close[2] : high[2]
+                    ct := (extendBodies and low      > close[1]) ? open  : low
+                else if bodyFvg and cB3B > cB1T
+                    cb := cB1T
+                    ct := cB3B
+            if legOnChart and newDir == -1
+                if high < low[2]
+                    ct := (extendBodies and open[1] < low[2])  ? close[2] : low[2]
+                    cb := (extendBodies and high     < close[1]) ? open  : high
+                else if bodyFvg and cB3T < cB1B
+                    ct := cB1B
+                    cb := cB3T
+            // האם מישהו מהנכסים ששרדו את הסף נתן גאפ פתילים
+            bool anyWick = (not na(nt) and (newDir == 1 ? wBullN : wBearN)) or (not na(et) and (newDir == 1 ? wBullE : wBearE)) or (not na(yt) and (newDir == 1 ? wBullY : wBearY))
             gapCounter += 1
             // תת-המחזור והזמן נלקחים מ-[1] — הנר האמצעי, זה שיצר את הגאפ.
             // הנר השלישי רק מאשר, ואסור שהוא יגרור את הגאפ לתת-המחזור הבא.
-            Gap gn = Gap.new(gapCounter, newDir, nb, nt, eb, et, yb, yt, nrb, nrt, erb, ert, refCycleId[1], bar_index, time[1], bar_index - 2, newDir == 1 ? nt : nb, newDir == 1 ? et : eb, newDir == 1 ? yt : yb, 0, 0, 0, 0, false, false, false, 0, "", 0, 0, na, cb, ct)
+            Gap gn = Gap.new(gapCounter, newDir, nb, nt, eb, et, yb, yt, nrb, nrt, erb, ert, refCycleId[1], bar_index, time[1], bar_index - 2, newDir == 1 ? nt : nb, newDir == 1 ? et : eb, newDir == 1 ? yt : yb, 0, 0, 0, 0, false, false, false, not anyWick, 0, "", 0, 0, na, cb, ct)
             array.push(gaps, gn)
             if array.size(gaps) > maxGaps
                 array.shift(gaps)
@@ -1274,26 +1433,26 @@ tfl1 = not useL1 ? "12M" : cL1 == 1 ? "1" : cL1 == 2 ? "5" : cL1 == 3 ? "15" : c
 tfl2 = not useL2 ? "12M" : cL2 == 1 ? "1" : cL2 == 2 ? "5" : cL2 == 3 ? "15" : cL2 == 4 ? "60" : cL2 == 5 ? "240" : cL2 == 6 ? "D" : "W"
 tfl3 = not useL3 ? "12M" : cL3 == 1 ? "1" : cL3 == 2 ? "5" : cL3 == 3 ? "15" : cL3 == 4 ? "60" : cL3 == 5 ? "240" : cL3 == 6 ? "D" : "W"
 
-[t1, n1o0, n1h0, n1l0, n1c0, n1o1, n1c1, n1h2, n1l2, n1c2] = request.security(sNQ, tfs1, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
-[t2, n2o0, n2h0, n2l0, n2c0, n2o1, n2c1, n2h2, n2l2, n2c2] = request.security(sNQ, tfs2, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
-[t3, n3o0, n3h0, n3l0, n3c0, n3o1, n3c1, n3h2, n3l2, n3c2] = request.security(sNQ, tfs3, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
-[t4, n4o0, n4h0, n4l0, n4c0, n4o1, n4c1, n4h2, n4l2, n4c2] = request.security(sNQ, tfs4, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
-[t5, n5o0, n5h0, n5l0, n5c0, n5o1, n5c1, n5h2, n5l2, n5c2] = request.security(sNQ, tfs5, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
-[t6, n6o0, n6h0, n6l0, n6c0, n6o1, n6c1, n6h2, n6l2, n6c2] = request.security(sNQ, tfs6, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
+[t1, n1o0, n1h0, n1l0, n1c0, n1o1, n1c1, n1h2, n1l2, n1c2, n1o2] = request.security(sNQ, tfs1, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[t2, n2o0, n2h0, n2l0, n2c0, n2o1, n2c1, n2h2, n2l2, n2c2, n2o2] = request.security(sNQ, tfs2, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[t3, n3o0, n3h0, n3l0, n3c0, n3o1, n3c1, n3h2, n3l2, n3c2, n3o2] = request.security(sNQ, tfs3, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[t4, n4o0, n4h0, n4l0, n4c0, n4o1, n4c1, n4h2, n4l2, n4c2, n4o2] = request.security(sNQ, tfs4, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[t5, n5o0, n5h0, n5l0, n5c0, n5o1, n5c1, n5h2, n5l2, n5c2, n5o2] = request.security(sNQ, tfs5, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[t6, n6o0, n6h0, n6l0, n6c0, n6o1, n6c1, n6h2, n6l2, n6c2, n6o2] = request.security(sNQ, tfs6, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
 
-[u1, s1o0, s1h0, s1l0, s1c0, s1o1, s1c1, s1h2, s1l2, s1c2] = request.security(sES, tfs1, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
-[u2, s2o0, s2h0, s2l0, s2c0, s2o1, s2c1, s2h2, s2l2, s2c2] = request.security(sES, tfs2, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
-[u3, s3o0, s3h0, s3l0, s3c0, s3o1, s3c1, s3h2, s3l2, s3c2] = request.security(sES, tfs3, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
-[u4, s4o0, s4h0, s4l0, s4c0, s4o1, s4c1, s4h2, s4l2, s4c2] = request.security(sES, tfs4, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
-[u5, s5o0, s5h0, s5l0, s5c0, s5o1, s5c1, s5h2, s5l2, s5c2] = request.security(sES, tfs5, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
-[u6, s6o0, s6h0, s6l0, s6c0, s6o1, s6c1, s6h2, s6l2, s6c2] = request.security(sES, tfs6, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
+[u1, s1o0, s1h0, s1l0, s1c0, s1o1, s1c1, s1h2, s1l2, s1c2, s1o2] = request.security(sES, tfs1, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[u2, s2o0, s2h0, s2l0, s2c0, s2o1, s2c1, s2h2, s2l2, s2c2, s2o2] = request.security(sES, tfs2, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[u3, s3o0, s3h0, s3l0, s3c0, s3o1, s3c1, s3h2, s3l2, s3c2, s3o2] = request.security(sES, tfs3, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[u4, s4o0, s4h0, s4l0, s4c0, s4o1, s4c1, s4h2, s4l2, s4c2, s4o2] = request.security(sES, tfs4, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[u5, s5o0, s5h0, s5l0, s5c0, s5o1, s5c1, s5h2, s5l2, s5c2, s5o2] = request.security(sES, tfs5, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[u6, s6o0, s6h0, s6l0, s6c0, s6o1, s6c1, s6h2, s6l2, s6c2, s6o2] = request.security(sES, tfs6, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
 
-[v1, y1o0, y1h0, y1l0, y1c0, y1o1, y1c1, y1h2, y1l2, y1c2] = request.security(sYM, tfs1, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
-[v2, y2o0, y2h0, y2l0, y2c0, y2o1, y2c1, y2h2, y2l2, y2c2] = request.security(sYM, tfs2, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
-[v3, y3o0, y3h0, y3l0, y3c0, y3o1, y3c1, y3h2, y3l2, y3c2] = request.security(sYM, tfs3, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
-[v4, y4o0, y4h0, y4l0, y4c0, y4o1, y4c1, y4h2, y4l2, y4c2] = request.security(sYM, tfs4, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
-[v5, y5o0, y5h0, y5l0, y5c0, y5o1, y5c1, y5h2, y5l2, y5c2] = request.security(sYM, tfs5, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
-[v6, y6o0, y6h0, y6l0, y6c0, y6o1, y6c1, y6h2, y6l2, y6c2] = request.security(sYM, tfs6, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
+[v1, y1o0, y1h0, y1l0, y1c0, y1o1, y1c1, y1h2, y1l2, y1c2, y1o2] = request.security(sYM, tfs1, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[v2, y2o0, y2h0, y2l0, y2c0, y2o1, y2c1, y2h2, y2l2, y2c2, y2o2] = request.security(sYM, tfs2, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[v3, y3o0, y3h0, y3l0, y3c0, y3o1, y3c1, y3h2, y3l2, y3c2, y3o2] = request.security(sYM, tfs3, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[v4, y4o0, y4h0, y4l0, y4c0, y4o1, y4c1, y4h2, y4l2, y4c2, y4o2] = request.security(sYM, tfs4, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[v5, y5o0, y5h0, y5l0, y5c0, y5o1, y5c1, y5h2, y5l2, y5c2, y5o2] = request.security(sYM, tfs5, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[v6, y6o0, y6h0, y6l0, y6c0, y6o1, y6c1, y6h2, y6l2, y6c2, y6o2] = request.security(sYM, tfs6, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
 
 // ignore_invalid_timeframe מחזיר na במקום לעצור את הסקריפט כשהמדרגה הזאת
 // לא באמת מתחת לגרף (למשל גרף דקה, שאין מתחתיו כלום).
@@ -1366,17 +1525,17 @@ if mtfOn and barstate.isconfirmed
             Engine er = array.get(allEng, k)
             er.justFired := false
     if useH1
-        f_step(eg1, t1, array.from(n1o0, n1h0, n1l0, n1c0, n1o1, n1c1, n1h2, n1l2, n1c2), array.from(s1o0, s1h0, s1l0, s1c0, s1o1, s1c1, s1h2, s1l2, s1c2), array.from(y1o0, y1h0, y1l0, y1c0, y1o1, y1c1, y1h2, y1l2, y1c2))
+        f_step(eg1, t1, array.from(n1o0, n1h0, n1l0, n1c0, n1o1, n1c1, n1h2, n1l2, n1c2, n1o2), array.from(s1o0, s1h0, s1l0, s1c0, s1o1, s1c1, s1h2, s1l2, s1c2, s1o2), array.from(y1o0, y1h0, y1l0, y1c0, y1o1, y1c1, y1h2, y1l2, y1c2, y1o2))
     if useH2
-        f_step(eg2, t2, array.from(n2o0, n2h0, n2l0, n2c0, n2o1, n2c1, n2h2, n2l2, n2c2), array.from(s2o0, s2h0, s2l0, s2c0, s2o1, s2c1, s2h2, s2l2, s2c2), array.from(y2o0, y2h0, y2l0, y2c0, y2o1, y2c1, y2h2, y2l2, y2c2))
+        f_step(eg2, t2, array.from(n2o0, n2h0, n2l0, n2c0, n2o1, n2c1, n2h2, n2l2, n2c2, n2o2), array.from(s2o0, s2h0, s2l0, s2c0, s2o1, s2c1, s2h2, s2l2, s2c2, s2o2), array.from(y2o0, y2h0, y2l0, y2c0, y2o1, y2c1, y2h2, y2l2, y2c2, y2o2))
     if useH3
-        f_step(eg3, t3, array.from(n3o0, n3h0, n3l0, n3c0, n3o1, n3c1, n3h2, n3l2, n3c2), array.from(s3o0, s3h0, s3l0, s3c0, s3o1, s3c1, s3h2, s3l2, s3c2), array.from(y3o0, y3h0, y3l0, y3c0, y3o1, y3c1, y3h2, y3l2, y3c2))
+        f_step(eg3, t3, array.from(n3o0, n3h0, n3l0, n3c0, n3o1, n3c1, n3h2, n3l2, n3c2, n3o2), array.from(s3o0, s3h0, s3l0, s3c0, s3o1, s3c1, s3h2, s3l2, s3c2, s3o2), array.from(y3o0, y3h0, y3l0, y3c0, y3o1, y3c1, y3h2, y3l2, y3c2, y3o2))
     if useH4
-        f_step(eg4, t4, array.from(n4o0, n4h0, n4l0, n4c0, n4o1, n4c1, n4h2, n4l2, n4c2), array.from(s4o0, s4h0, s4l0, s4c0, s4o1, s4c1, s4h2, s4l2, s4c2), array.from(y4o0, y4h0, y4l0, y4c0, y4o1, y4c1, y4h2, y4l2, y4c2))
+        f_step(eg4, t4, array.from(n4o0, n4h0, n4l0, n4c0, n4o1, n4c1, n4h2, n4l2, n4c2, n4o2), array.from(s4o0, s4h0, s4l0, s4c0, s4o1, s4c1, s4h2, s4l2, s4c2, s4o2), array.from(y4o0, y4h0, y4l0, y4c0, y4o1, y4c1, y4h2, y4l2, y4c2, y4o2))
     if useH5
-        f_step(eg5, t5, array.from(n5o0, n5h0, n5l0, n5c0, n5o1, n5c1, n5h2, n5l2, n5c2), array.from(s5o0, s5h0, s5l0, s5c0, s5o1, s5c1, s5h2, s5l2, s5c2), array.from(y5o0, y5h0, y5l0, y5c0, y5o1, y5c1, y5h2, y5l2, y5c2))
+        f_step(eg5, t5, array.from(n5o0, n5h0, n5l0, n5c0, n5o1, n5c1, n5h2, n5l2, n5c2, n5o2), array.from(s5o0, s5h0, s5l0, s5c0, s5o1, s5c1, s5h2, s5l2, s5c2, s5o2), array.from(y5o0, y5h0, y5l0, y5c0, y5o1, y5c1, y5h2, y5l2, y5c2, y5o2))
     if useH6
-        f_step(eg6, t6, array.from(n6o0, n6h0, n6l0, n6c0, n6o1, n6c1, n6h2, n6l2, n6c2), array.from(s6o0, s6h0, s6l0, s6c0, s6o1, s6c1, s6h2, s6l2, s6c2), array.from(y6o0, y6h0, y6l0, y6c0, y6o1, y6c1, y6h2, y6l2, y6c2))
+        f_step(eg6, t6, array.from(n6o0, n6h0, n6l0, n6c0, n6o1, n6c1, n6h2, n6l2, n6c2, n6o2), array.from(s6o0, s6h0, s6l0, s6c0, s6o1, s6c1, s6h2, s6l2, s6c2, s6o2), array.from(y6o0, y6h0, y6l0, y6c0, y6o1, y6c1, y6h2, y6l2, y6c2, y6o2))
 
     // תת-נרות: כל נר של המסגרת הנמוכה מוזן בנפרד, לפי הסדר.
     // הגדלים נמדדים קודם דרך f_asz*, ואחר כך כל התנאים הם על מספרים
@@ -1694,7 +1853,8 @@ if barstate.islast
                 float zBot = gz.drwBot
                 if not na(zTop)
                     color  zCol = gz.dir == 1 ? colBull : colBear
-                    string zTxt = "#" + str.tostring(gz.id) + " " + f_subName(tfClass, gz.birthT)
+                    // B = גאפ גופים בלבד, בלי אף רגל של גאפ פתילים
+                    string zTxt = "#" + str.tostring(gz.id) + " " + f_subName(tfClass, gz.birthT) + (gz.bodyOnly ? " B" : "")
                     array.push(dbgBoxes, box.new(gz.origin, zTop, bar_index, zBot, border_color = color.new(zCol, 35), border_width = 1, bgcolor = color.new(zCol, 94), text = zTxt, text_color = color.new(zCol, 20), text_size = size.tiny, text_halign = text.align_left, text_valign = text.align_top))
 
 // ═══════════════════════════════════════════════════════════════════
