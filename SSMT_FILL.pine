@@ -813,14 +813,16 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
         bool fBearY = okY and yh0 < yl2
 
         // VI של שני נרות — נר 2 ונר 3 של אותה שלישייה (אינדקסים 4,5 ו-0,3).
-        // **חייב להיות באותו כיוון של שני הנרות שיצרו אותו**: רווח כלפי
-        // מעלה נחשב רק כששני הנרות עולים. חייב להיות זהה לגרף.
-        bool vBullN = volImbOn and okN and no0 > nc1 and nc1 > no1 and nc0 > no0
-        bool vBullE = volImbOn and okE and eo0 > ec1 and ec1 > eo1 and ec0 > eo0
-        bool vBullY = volImbOn and okY and yo0 > yc1 and yc1 > yo1 and yc0 > yo0
-        bool vBearN = volImbOn and okN and no0 < nc1 and nc1 < no1 and nc0 < no0
-        bool vBearE = volImbOn and okE and eo0 < ec1 and ec1 < eo1 and ec0 < eo0
-        bool vBearY = volImbOn and okY and yo0 < yc1 and yc1 < yo1 and yc0 < yo0
+        // **הרווח חייב ללכת עם הנר שסגר אותו**: רווח כלפי מעלה נספר רק
+        // כשהנר שנסגר היה עולה. **רק הנר הראשון** — הנר השני רק נפתח
+        // ברגע שהריק נוצר, ואסור לשפוט את הגאפ לפי איך שהוא ייסגר אחר כך.
+        // חייב להיות זהה לגרף.
+        bool vBullN = volImbOn and okN and no0 > nc1 and nc1 > no1
+        bool vBullE = volImbOn and okE and eo0 > ec1 and ec1 > eo1
+        bool vBullY = volImbOn and okY and yo0 > yc1 and yc1 > yo1
+        bool vBearN = volImbOn and okN and no0 < nc1 and nc1 < no1
+        bool vBearE = volImbOn and okE and eo0 < ec1 and ec1 < eo1
+        bool vBearY = volImbOn and okY and yo0 < yc1 and yc1 < yo1
 
         // שני הסוגים נספרים יחד — גאפ קולקטיבי יכול להיות FVG ב-NQ ו-VI ב-ES
         bool bullN = fBullN or vBullN
@@ -1133,13 +1135,13 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
     bool fBearE = esH < esL[2]
     bool fBearY = okY and ymH < ymL[2]
 
-    // VI בין נר [1] לנר [0], ורק כששניהם באותו כיוון של הרווח
-    bool vBullN = volImbOn and nqO > nqC[1] and nqC[1] > nqO[1] and nqC > nqO
-    bool vBullE = volImbOn and esO > esC[1] and esC[1] > esO[1] and esC > esO
-    bool vBullY = volImbOn and okY and ymO > ymC[1] and ymC[1] > ymO[1] and ymC > ymO
-    bool vBearN = volImbOn and nqO < nqC[1] and nqC[1] < nqO[1] and nqC < nqO
-    bool vBearE = volImbOn and esO < esC[1] and esC[1] < esO[1] and esC < esO
-    bool vBearY = volImbOn and okY and ymO < ymC[1] and ymC[1] < ymO[1] and ymC < ymO
+    // VI בין נר [1] לנר [0], ורק כשהרווח הולך עם הנר שסגר אותו
+    bool vBullN = volImbOn and nqO > nqC[1] and nqC[1] > nqO[1]
+    bool vBullE = volImbOn and esO > esC[1] and esC[1] > esO[1]
+    bool vBullY = volImbOn and okY and ymO > ymC[1] and ymC[1] > ymO[1]
+    bool vBearN = volImbOn and nqO < nqC[1] and nqC[1] < nqO[1]
+    bool vBearE = volImbOn and esO < esC[1] and esC[1] < esO[1]
+    bool vBearY = volImbOn and okY and ymO < ymC[1] and ymC[1] < ymO[1]
 
     bool bullN = fBullN or vBullN
     bool bullE = fBullE or vBullE
@@ -1149,12 +1151,17 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
     bool bearY = fBearY or vBearY
 
     // ── אבחון: מה כל נכס נתן בנר האחרון שנסגר ──
-    // זה מה שעונה על "למה לא נוצר כאן גאפ". F = FVG של שלושה נרות,
-    // V = גאפ סגירה/פתיחה, "-" = כלום. צריך **שניים** מתוך השלושה באותו
-    // כיוון; נכס בודד, מכל סוג שהוא, לא מספיק ושום דבר לא נרשם.
-    dgN := fBullN ? "F+" : fBearN ? "F-" : vBullN ? "V+" : vBearN ? "V-" : "·"
-    dgE := fBullE ? "F+" : fBearE ? "F-" : vBullE ? "V+" : vBearE ? "V-" : "·"
-    dgY := fBullY ? "F+" : fBearY ? "F-" : vBullY ? "V+" : vBearY ? "V-" : "·"
+    // זה מה שעונה על "למה לא נוצר כאן גאפ":
+    //   F+ / F-  FVG של שלושה נרות
+    //   V+ / V-  גאפ סגירה/פתיחה שנספר
+    //   v+ / v-  **באות קטנה**: היה רווח בין הסגירה לפתיחה, אבל הוא סותר
+    //            את הנר שסגר אותו ולכן נפסל. זה מפריד "אין רווח" מ"יש
+    //            רווח שנפסל", וזה בדיוק ההבדל שהיה קשה לראות.
+    //   ·        כלום.
+    // צריך **שניים** מתוך השלושה באותו כיוון; נכס בודד לא מספיק.
+    dgN := fBullN ? "F+" : fBearN ? "F-" : vBullN ? "V+" : vBearN ? "V-" : nqO > nqC[1] ? "v+" : nqO < nqC[1] ? "v-" : "·"
+    dgE := fBullE ? "F+" : fBearE ? "F-" : vBullE ? "V+" : vBearE ? "V-" : esO > esC[1] ? "v+" : esO < esC[1] ? "v-" : "·"
+    dgY := fBullY ? "F+" : fBearY ? "F-" : vBullY ? "V+" : vBearY ? "V-" : ymO > ymC[1] ? "v+" : ymO < ymC[1] ? "v-" : "·"
 
     int cBull = (bullN ? 1 : 0) + (bullE ? 1 : 0) + (bullY ? 1 : 0)
     int cBear = (bearN ? 1 : 0) + (bearE ? 1 : 0) + (bearY ? 1 : 0)
@@ -1246,14 +1253,14 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
                 if low > high[2]
                     cb := (extendBodies and open[1] > high[2]) ? close[2] : high[2]
                     ct := (extendBodies and low      > close[1]) ? open  : low
-                else if volImbOn and open > close[1] and close[1] > open[1] and close > open
+                else if volImbOn and open > close[1] and close[1] > open[1]
                     cb := close[1]
                     ct := open
             if legOnChart and newDir == -1
                 if high < low[2]
                     ct := (extendBodies and open[1] < low[2])  ? close[2] : low[2]
                     cb := (extendBodies and high     < close[1]) ? open  : high
-                else if volImbOn and open < close[1] and close[1] < open[1] and close < open
+                else if volImbOn and open < close[1] and close[1] < open[1]
                     ct := close[1]
                     cb := open
             // האם רגל משתתפת כלשהי היא FVG. אם כן — התיוג לפי הנר האמצעי
