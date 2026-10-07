@@ -65,7 +65,21 @@ extendBodies = input.bool(true, "הרחב גאפ לגופי הנרות (רווח
 // שסותר את התנועה — רעש, ולכן נפסל.
 // VI ו-FVG נספרים יחד לאותו גאפ קולקטיבי: NQ עם VI ו-ES עם FVG באותו נר
 // זה גאפ תקף. מסומן V בהצצה רק כשאף נכס משתתף לא נתן FVG.
-volImbOn     = input.bool(true, "זהה גם גאפ סגירה/פתיחה בין שני נרות", tooltip = "Volume Imbalance — הרווח בין הסגירה של נר לפתיחה של הנר שאחריו, כששניהם באותו כיוון. נספר יחד עם FVG רגיל לאותו גאפ קולקטיבי, ומסומן V בהצצה כשכל הרגליים הן VI.", group = grpGap)
+volImbOn     = input.bool(true, "זהה גם גאפ סגירה/פתיחה בין שני נרות", tooltip = "Volume Imbalance — הרווח בין הסגירה של נר לפתיחה של הנר שאחריו. נספר יחד עם FVG רגיל לאותו גאפ קולקטיבי, ומסומן V בהצצה כשכל הרגליים הן VI.", group = grpGap)
+// הפילטר הזה דרש שהרווח ילך עם הנר שסגר אותו (רווח כלפי מעלה רק אחרי נר
+// עולה). הוא היה דלוק וחסם את רוב ה-VI האמיתיים על הגרף, ולכן הוא כבוי
+// עכשיו — בדיוק כמו הגרסה הראשונה. בשורת האבחון רווח שנפסל בגללו מופיע
+// באות קטנה (v+/v-), כך שאפשר לראות מה הוא עושה לפני שמדליקים.
+viDirOn      = input.bool(false, "דרוש שה-VI ילך עם הנר שסגר אותו", tooltip = "דלוק: רווח כלפי מעלה נספר רק אחרי נר עולה, וכלפי מטה רק אחרי נר יורד. כבוי (ברירת מחדל): כל רווח סגירה/פתיחה נספר לפי הכיוון שלו עצמו.", group = grpGap)
+// ── פער הגודל המרבי בין רגלי אותו גאפ ──
+// העומק של כל נכס מנורמל לגאפ של עצמו, ולכן רגל בת שלושה טיקים מגיעה
+// ל-100% ברגע שנוגעים בה בזמן שרגל של מאה נקודות עדיין ב-20%. גאפ שמערבב
+// VI זעיר עם FVG גדול נותן לכן F3 מיידי על רעש — וזה מה שהציף את הרשימה
+// ב-F3 ודחק את השבירות האמיתיות. רגל שקטנה פי X מהגדולה ביותר (ביחס
+// למחיר של הנכס שלה, כי NQ ו-ES לא באותה סקאלה) נזרקת מהגאפ.
+// זה על **גודל** ולא על סוג — VI עדיין יכול להשתלב עם FVG, כל עוד שניהם
+// באותו סדר גודל. 1 = כבוי לגמרי.
+legRatio     = input.float(20.0, "פער גודל מרבי בין רגלי הגאפ (פי)", minval = 1.0, maxval = 500.0, step = 1.0, tooltip = "1 = כבוי. 20 שומר על גאפ שכל רגליו באותו סדר גודל וזורק רגל שהיא טיק בודד מול FVG של מאה נקודות.", group = grpGap)
 // כיבוי מחזיר את ההתנהגות הישנה: רק NQ מול ES, YM לא משתתף בכלל.
 useYM        = input.bool(true, "כלול את YM כנכס חלש", group = grpGap)
 // השאר על 0. האסימטריה בין הנכסים היא הסיגנל עצמו — סינון לפי גודל
@@ -412,6 +426,24 @@ var int gapCounter  = 0
 
 f_name(int a) =>
     a == 0 ? "NQ" : a == 1 ? "ES" : "YM"
+
+// ── הרשימה מלאה: מי יוצא ──
+// array.shift הוציא תמיד את הגאפ ה**ישן ביותר**, ולכן גאפ אמיתי מיום שני
+// שנושא שבירה חיה הוצא כדי לפנות מקום לגאפ בן שלושה טיקים שמת מיד אחריו.
+// סדר הפינוי עכשיו הוא לפי ערך: קודם המת הישן ביותר (הוא כבר לא משחק),
+// אחריו הישן ביותר בלי שבירה, ורק אם לכולם יש שבירה — הישן ביותר.
+// האיבר ב-0 הוא הישן ביותר, כי הדחיפה תמיד לסוף.
+f_trim(array<Gap> a) =>
+    if array.size(a) > maxGaps
+        int k = -1
+        for i = 0 to array.size(a) - 1
+            if k == -1 and array.get(a, i).dead
+                k := i
+        if k == -1
+            for i = 0 to array.size(a) - 1
+                if k == -1 and array.get(a, i).fDeg == 0
+                    k := i
+        array.remove(a, k == -1 ? 0 : k)
 
 // עומק החדירה של נכס לתוך הגאפ שלו, כאחוז מהגאפ שלו (פתיל).
 // ההשוואה בין הנכסים היא תמיד יחסית — כל נכס מול הגאפ שלו.
@@ -817,12 +849,12 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
         // כשהנר שנסגר היה עולה. **רק הנר הראשון** — הנר השני רק נפתח
         // ברגע שהריק נוצר, ואסור לשפוט את הגאפ לפי איך שהוא ייסגר אחר כך.
         // חייב להיות זהה לגרף.
-        bool vBullN = volImbOn and okN and no0 > nc1 and nc1 > no1
-        bool vBullE = volImbOn and okE and eo0 > ec1 and ec1 > eo1
-        bool vBullY = volImbOn and okY and yo0 > yc1 and yc1 > yo1
-        bool vBearN = volImbOn and okN and no0 < nc1 and nc1 < no1
-        bool vBearE = volImbOn and okE and eo0 < ec1 and ec1 < eo1
-        bool vBearY = volImbOn and okY and yo0 < yc1 and yc1 < yo1
+        bool vBullN = volImbOn and okN and no0 > nc1 and (not viDirOn or nc1 > no1)
+        bool vBullE = volImbOn and okE and eo0 > ec1 and (not viDirOn or ec1 > eo1)
+        bool vBullY = volImbOn and okY and yo0 > yc1 and (not viDirOn or yc1 > yo1)
+        bool vBearN = volImbOn and okN and no0 < nc1 and (not viDirOn or nc1 < no1)
+        bool vBearE = volImbOn and okE and eo0 < ec1 and (not viDirOn or ec1 < eo1)
+        bool vBearY = volImbOn and okY and yo0 < yc1 and (not viDirOn or yc1 < yo1)
 
         // שני הסוגים נספרים יחד — גאפ קולקטיבי יכול להיות FVG ב-NQ ו-VI ב-ES
         bool bullN = fBullN or vBullN
@@ -904,6 +936,21 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
             if not na(yt) and yt - yb <= minGapPct / 100 * yc0
                 yb := na
                 yt := na
+            // רגל שקטנה מדי מול הגדולה ביותר יוצאת — זהה לגרף
+            float rn = na(nt) ? na : (nt - nb) / nc0
+            float re = na(et) ? na : (et - eb) / ec0
+            float ry = na(yt) ? na : (yt - yb) / yc0
+            float rMax = math.max(nz(rn, 0), math.max(nz(re, 0), nz(ry, 0)))
+            if legRatio > 1 and rMax > 0
+                if not na(rn) and rn * legRatio < rMax
+                    nb := na
+                    nt := na
+                if not na(re) and re * legRatio < rMax
+                    eb := na
+                    et := na
+                if not na(ry) and ry * legRatio < rMax
+                    yb := na
+                    yt := na
             int parts = (na(nt) ? 0 : 1) + (na(et) ? 0 : 1) + (na(yt) ? 0 : 1)
             if parts >= 2
                 e.gapCounter := e.gapCounter + 1
@@ -915,8 +962,7 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
                 int  gWhen  = anyFvg ? (tMid == 0 ? tOpen : tMid) : tOpen
                 Gap gn = Gap.new(e.gapCounter, nd, nb, nt, eb, et, yb, yt, nrb, nrt, erb, ert, gRef, bar_index, gWhen, bar_index, nd == 1 ? nt : nb, nd == 1 ? et : eb, nd == 1 ? yt : yb, 0, 0, 0, 0, false, false, false, not anyFvg, 0, "", 0, 0, na, na, na)
                 array.push(e.gaps, gn)
-                if array.size(e.gaps) > maxGaps
-                    array.shift(e.gaps)
+                f_trim(e.gaps)
 
         // ── רישום שבירות ──
         bool blockDW  = e.cls == 5 and blockDeadWeek and deadW
@@ -1136,12 +1182,12 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
     bool fBearY = okY and ymH < ymL[2]
 
     // VI בין נר [1] לנר [0], ורק כשהרווח הולך עם הנר שסגר אותו
-    bool vBullN = volImbOn and nqO > nqC[1] and nqC[1] > nqO[1]
-    bool vBullE = volImbOn and esO > esC[1] and esC[1] > esO[1]
-    bool vBullY = volImbOn and okY and ymO > ymC[1] and ymC[1] > ymO[1]
-    bool vBearN = volImbOn and nqO < nqC[1] and nqC[1] < nqO[1]
-    bool vBearE = volImbOn and esO < esC[1] and esC[1] < esO[1]
-    bool vBearY = volImbOn and okY and ymO < ymC[1] and ymC[1] < ymO[1]
+    bool vBullN = volImbOn and nqO > nqC[1] and (not viDirOn or nqC[1] > nqO[1])
+    bool vBullE = volImbOn and esO > esC[1] and (not viDirOn or esC[1] > esO[1])
+    bool vBullY = volImbOn and okY and ymO > ymC[1] and (not viDirOn or ymC[1] > ymO[1])
+    bool vBearN = volImbOn and nqO < nqC[1] and (not viDirOn or nqC[1] < nqO[1])
+    bool vBearE = volImbOn and esO < esC[1] and (not viDirOn or esC[1] < esO[1])
+    bool vBearY = volImbOn and okY and ymO < ymC[1] and (not viDirOn or ymC[1] < ymO[1])
 
     bool bullN = fBullN or vBullN
     bool bullE = fBullE or vBullE
@@ -1229,6 +1275,11 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
                 yt := ymC[1]
                 yb := ymO
 
+        // מי נתן רגל לפני כל הפילטרים — לשורת האבחון
+        bool hadN = not na(nt)
+        bool hadE = not na(et)
+        bool hadY = not na(yt)
+
         // גאפ שקטן מהסף נפסל לאותו נכס בלבד. אם נשאר רק אחד — אין גאפ.
         if not na(nt) and nt - nb <= minGapPct / 100 * nqC
             nb := na
@@ -1239,6 +1290,36 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
         if not na(yt) and yt - yb <= minGapPct / 100 * ymC
             yb := na
             yt := na
+
+        // ── פער הגודל בין הרגליים ──
+        // העומק מנורמל לגאפ של כל נכס, ולכן רגל זעירה מגיעה ל-100% ברגע
+        // שנוגעים בה בזמן שרגל גדולה עדיין ב-20%: היא תמיד "המוביל" והשנייה
+        // תמיד "המפגר", וכל גאפ מעורב כזה יוצר F3 מיידי על רעש. הגובה נמדד
+        // ביחס למחיר של הנכס עצמו, כי NQ סביב 31,000 ו-ES סביב 7,800.
+        // חל על כל סוגי הרגליים — גם FVG מול FVG עם פער גודל קיצוני.
+        float rn = na(nt) ? na : (nt - nb) / nqC
+        float re = na(et) ? na : (et - eb) / esC
+        float ry = na(yt) ? na : (yt - yb) / ymC
+        float rMax = math.max(nz(rn, 0), math.max(nz(re, 0), nz(ry, 0)))
+        if legRatio > 1 and rMax > 0
+            if not na(rn) and rn * legRatio < rMax
+                nb := na
+                nt := na
+            if not na(re) and re * legRatio < rMax
+                eb := na
+                et := na
+            if not na(ry) and ry * legRatio < rMax
+                yb := na
+                yt := na
+
+        // רגל שהייתה קיימת ונזרקה (סף גודל או פער גודל) יורדת לאות קטנה
+        // בשורת האבחון, כך שרואים שהיא הייתה שם ולמה היא לא נספרה.
+        if hadN and na(nt)
+            dgN := str.lower(dgN)
+        if hadE and na(et)
+            dgE := str.lower(dgE)
+        if hadY and na(yt)
+            dgY := str.lower(dgY)
 
         int parts = (na(nt) ? 0 : 1) + (na(et) ? 0 : 1) + (na(yt) ? 0 : 1)
         if parts >= 2
@@ -1253,14 +1334,14 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
                 if low > high[2]
                     cb := (extendBodies and open[1] > high[2]) ? close[2] : high[2]
                     ct := (extendBodies and low      > close[1]) ? open  : low
-                else if volImbOn and open > close[1] and close[1] > open[1]
+                else if volImbOn and open > close[1] and (not viDirOn or close[1] > open[1])
                     cb := close[1]
                     ct := open
             if legOnChart and newDir == -1
                 if high < low[2]
                     ct := (extendBodies and open[1] < low[2])  ? close[2] : low[2]
                     cb := (extendBodies and high     < close[1]) ? open  : high
-                else if volImbOn and open < close[1] and close[1] < open[1]
+                else if volImbOn and open < close[1] and (not viDirOn or close[1] < open[1])
                     ct := close[1]
                     cb := open
             // האם רגל משתתפת כלשהי היא FVG. אם כן — התיוג לפי הנר האמצעי
@@ -1270,8 +1351,7 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
             gapCounter += 1
             Gap gn = Gap.new(gapCounter, newDir, nb, nt, eb, et, yb, yt, nrb, nrt, erb, ert, anyFvg ? refCycleId[1] : refCycleId, bar_index, anyFvg ? time[1] : time, anyFvg ? bar_index - 2 : bar_index - 1, newDir == 1 ? nt : nb, newDir == 1 ? et : eb, newDir == 1 ? yt : yb, 0, 0, 0, 0, false, false, false, not anyFvg, 0, "", 0, 0, na, cb, ct)
             array.push(gaps, gn)
-            if array.size(gaps) > maxGaps
-                array.shift(gaps)
+            f_trim(gaps)
 
 // ═══════════════════════════════════════════════════════════════════
 // חסימות
