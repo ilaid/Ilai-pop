@@ -1118,6 +1118,11 @@ if array.size(gaps) > 0
 // והגבול התחתון יוצא בדיוק על הסגירה. אין כאן מה להוסיף.
 // ═══════════════════════════════════════════════════════════════════
 
+// מה כל נכס נתן בנר האחרון שנסגר — נשמר לטבלת הבדיקה
+var string dgN = "·"
+var string dgE = "·"
+var string dgY = "·"
+
 if barstate.isconfirmed and tfClass != 0 and bar_index > 2
     bool okY = useYM and not na(ymH[2]) and not na(ymL[2])
 
@@ -1142,6 +1147,14 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
     bool bearN = fBearN or vBearN
     bool bearE = fBearE or vBearE
     bool bearY = fBearY or vBearY
+
+    // ── אבחון: מה כל נכס נתן בנר האחרון שנסגר ──
+    // זה מה שעונה על "למה לא נוצר כאן גאפ". F = FVG של שלושה נרות,
+    // V = גאפ סגירה/פתיחה, "-" = כלום. צריך **שניים** מתוך השלושה באותו
+    // כיוון; נכס בודד, מכל סוג שהוא, לא מספיק ושום דבר לא נרשם.
+    dgN := fBullN ? "F+" : fBearN ? "F-" : vBullN ? "V+" : vBearN ? "V-" : "·"
+    dgE := fBullE ? "F+" : fBearE ? "F-" : vBullE ? "V+" : vBearE ? "V-" : "·"
+    dgY := fBullY ? "F+" : fBearY ? "F-" : vBullY ? "V+" : vBearY ? "V-" : "·"
 
     int cBull = (bullN ? 1 : 0) + (bullE ? 1 : 0) + (bullY ? 1 : 0)
     int cBear = (bearN ? 1 : 0) + (bearE ? 1 : 0) + (bearY ? 1 : 0)
@@ -1834,7 +1847,7 @@ f_time(int b) =>
 f_cycleNames() =>
     tfClass == 8 ? "שנה>4 שנים" : tfClass == 7 ? "רבעון>שנה" : tfClass == 6 ? "רבע-רבעון>שנה" : tfClass == 5 ? "שבוע>חודש" : tfClass == 4 ? "יום>שבוע" : tfClass == 3 ? "סשן>יום" : tfClass == 2 ? "מיקרו>סשן" : tfClass == 1 ? "רבע>מיקרו" : "לא נתמך"
 
-var table dbg = table.new(position.top_right, 4, 12, border_width = 1)
+var table dbg = table.new(position.top_right, 4, 13, border_width = 1)
 if showDebug and barstate.islast
     hc = color.gray
     wc = color.white
@@ -1963,6 +1976,15 @@ if showDebug and barstate.islast
     table.cell(dbg, 1, 11, str.tostring(refCycleId), bgcolor = wc)
     table.cell(dbg, 2, 11, str.tostring(lifeCycleId), bgcolor = wc)
     table.cell(dbg, 3, 11, "רבע " + str.tostring(qqIdx + 1) + "/4 · יום " + str.tostring(qDayInQ + 1) + "/" + str.tostring(qLenD), bgcolor = wc)
+
+    // מה כל נכס נתן בנר האחרון שנסגר. F = FVG של שלושה נרות · V = גאפ
+    // סגירה/פתיחה · + שורי · - דובי · · כלום.
+    // **צריך שניים מהשלושה באותו כיוון.** שורה שנראית "V+ · ·" מסבירה
+    // בדיוק למה לא נוצר גאפ: רק נכס אחד נתן משהו.
+    table.cell(dbg, 0, 12, "גאפ בנר האחרון", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 12, dgN, bgcolor = wc)
+    table.cell(dbg, 2, 12, dgE, bgcolor = wc)
+    table.cell(dbg, 3, 12, not useYM ? "כבוי" : dgY, bgcolor = wc)
 
 // ═══════════════════════════════════════════════════════════════════
 // אבחון המנועים — מה כל מסגרת באמת מחזיקה
