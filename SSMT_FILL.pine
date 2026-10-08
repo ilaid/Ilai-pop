@@ -101,6 +101,10 @@ showAllGaps = input.bool(false, "הצג את הגאפים הדרוכים (תמי
 // והגרף נשאר נקי אחרי זה. ההגדרה שמעל נשארת למי שרוצה אותם קבוע.
 autoAllGaps = input.bool(true, "הצצה: הגאפים הדרוכים בהחלפת מסגרת (4H ומטה)", group = grpVis)
 autoAllSec  = input.int(20, "כמה שניות להשאיר את ההצצה", minval = 1, maxval = 600, group = grpVis)
+// לאבחון בלבד: מצייר גם את הגאפים שבוטלו ב-IFVG, באפור ועם ✕. זה מה שעונה
+// על "הגאפ הזה בכלל נוצר?" — אם הוא לא מופיע גם ככה, הוא פשוט לא נוצר
+// (לא היו שני נכסים באותו כיוון באותו נר). כבוי כברירת מחדל.
+showDeadGaps = input.bool(false, "הצג גם גאפים שבוטלו ב-IFVG (✕)", tooltip = "לאבחון: גאפ אפור עם ✕ נוצר אבל נסגר נר מעבר לו. אם הגאפ שאתה מחפש לא מופיע גם עם זה דלוק — הוא לא נוצר מלכתחילה.", group = grpVis)
 showDebug   = input.bool(false, "הצג טבלת בדיקה", group = grpVis)
 
 grpLogic = "לוגיקה"
@@ -1861,13 +1865,14 @@ if barstate.islast
             Gap gz = array.get(gaps, i)
             // armed הוא כל התנאי: גאפ שתת-המחזור שלו עוד לא נגמר אינו
             // מועמד לשבירה, ולכן אין לו מה לעשות על המסך.
-            if not gz.dead and gz.armed
+            // showDeadGaps מוסיף לאבחון גם את מי שבוטל ב-IFVG, באפור.
+            if (not gz.dead and gz.armed) or (showDeadGaps and gz.dead)
                 float zTop = gz.drwTop
                 float zBot = gz.drwBot
                 if not na(zTop)
-                    color  zCol = gz.dir == 1 ? colBull : colBear
+                    color  zCol = gz.dead ? color.gray : gz.dir == 1 ? colBull : colBear
                     // V = גאפ סגירה/פתיחה בין שני נרות, ולא FVG של שלושה
-                    string zTxt = "#" + str.tostring(gz.id) + " " + f_subName(tfClass, gz.birthT) + (gz.volImb ? " V" : "")
+                    string zTxt = "#" + str.tostring(gz.id) + " " + f_subName(tfClass, gz.birthT) + (gz.volImb ? " V" : "") + (gz.dead ? " ✕" : "")
                     array.push(dbgBoxes, box.new(gz.origin, zTop, bar_index, zBot, border_color = color.new(zCol, 35), border_width = 1, bgcolor = color.new(zCol, 94), text = zTxt, text_color = color.new(zCol, 20), text_size = size.tiny, text_halign = text.align_left, text_valign = text.align_top))
 
 // ═══════════════════════════════════════════════════════════════════
@@ -2023,6 +2028,45 @@ if showDebug and barstate.islast
     table.cell(dbg, 1, 12, dgN, bgcolor = wc)
     table.cell(dbg, 2, 12, dgE, bgcolor = wc)
     table.cell(dbg, 3, 12, not useYM ? "כבוי" : dgY, bgcolor = wc)
+
+// ═══════════════════════════════════════════════════════════════════
+// רשימת הגאפים של מסגרת הגרף — "האם הגאפ הזה בכלל קיים?"
+//
+// הטבלה הראשית מראה **גאפ אחד בלבד**, וההצצה על הגרף נעלמת אחרי כמה
+// שניות, ולכן לא הייתה שום דרך לענות על "הגאפ מיום שלישי — הוא לא נוצר,
+// הוא מת, או שהוא חי ופשוט אין עליו שבירה?". שלוש התשובות דורשות תיקון
+// שונה לגמרי, וזה מה שמפריד ביניהן.
+//
+// שמונת הגאפים האחרונים של המיכל הנוכחי, מהחדש לישן:
+//   #id ותת-המחזור שבו נולד (V = VI בלבד) · כיוון · deg שנרשם (deg עכשיו)
+//   · המצב: arm = דרוך ומחכה · wait = תת-המחזור שלו עוד לא נגמר ·
+//   IFVG = נסגר נר מעבר לו והוא בוטל.
+//
+// "deg נרשם 2 (3)" = נרשמה F2 ועכשיו העומקים כבר נותנים F3 — היא תתעדכן
+// בסגירת הנר. "- (-)" על גאפ arm = הוא חי, דרוך, ופשוט אין סטייה.
+// ═══════════════════════════════════════════════════════════════════
+
+var table gdbg = table.new(position.middle_right, 4, 9, border_width = 1)
+if showDebug and barstate.islast
+    color ghc = color.gray
+    color gwc = color.white
+    for rr = 0 to 8
+        for cx = 0 to 3
+            table.cell(gdbg, cx, rr, "", bgcolor = color.new(color.black, 100))
+    table.cell(gdbg, 0, 0, "גאפי " + f_clsName(tfClass), bgcolor = ghc, text_color = gwc, text_size = size.tiny)
+    table.cell(gdbg, 1, 0, "כיוון", bgcolor = ghc, text_color = gwc, text_size = size.tiny)
+    table.cell(gdbg, 2, 0, "deg", bgcolor = ghc, text_color = gwc, text_size = size.tiny)
+    table.cell(gdbg, 3, 0, "מצב", bgcolor = ghc, text_color = gwc, text_size = size.tiny)
+    int grw = 0
+    if array.size(gaps) > 0
+        for i = array.size(gaps) - 1 to 0
+            if grw < 8
+                Gap gl = array.get(gaps, i)
+                grw += 1
+                table.cell(gdbg, 0, grw, "#" + str.tostring(gl.id) + " " + f_subName(tfClass, gl.birthT) + (gl.volImb ? " V" : ""), bgcolor = gwc, text_size = size.tiny)
+                table.cell(gdbg, 1, grw, gl.dir == 1 ? "▲" : "▼", bgcolor = gwc, text_color = gl.dir == 1 ? colBull : colBear, text_size = size.tiny)
+                table.cell(gdbg, 2, grw, f_degNum(gl.fDeg) + " (" + f_degNum(gl.fracDeg()) + ")", bgcolor = gwc, text_size = size.tiny)
+                table.cell(gdbg, 3, grw, gl.dead ? "IFVG" : gl.armed ? "arm" : "wait", bgcolor = gwc, text_size = size.tiny)
 
 // ═══════════════════════════════════════════════════════════════════
 // אבחון המנועים — מה כל מסגרת באמת מחזיקה
