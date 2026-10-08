@@ -62,6 +62,9 @@ extendBodies = input.bool(true, "הרחב גאפ לגופי הנרות (רווח
 // נפתח ב-24201 — שתי הנקודות האלה לא נסחרו ברגע המעבר, וזה גאפ שמיש.
 // **רצף — שני הנרות חייבים ללכת לאותו כיוון.** לא נר יורד ואחריו נר עולה.
 // רווח כלפי מעלה נספר רק כששני הנרות עולים, וכלפי מטה רק כששניהם יורדים.
+// **חוץ ממעבר סייקל** — פתיחת יום, שבוע או סשן לפי הזמנים שלנו. שם הרווח
+// נולד מהמעבר עצמו (סגירה של אתמול מול פתיחה של היום) ולא מתנועה של
+// הנרות, ולכן אין טעם לדרוש רצף והוא נספר כמו שהוא.
 // VI ו-FVG נספרים יחד לאותו גאפ קולקטיבי: NQ עם VI ו-ES עם FVG באותו נר
 // זה גאפ תקף. **הגודל לא משנה** — רווח של 0.25 הוא רווח בדיוק כמו 15 נק',
 // ועליו יכולות להירשם כל הדרגות.
@@ -838,14 +841,16 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
         bool fBearY = okY and yh0 < yl2
 
         // VI של שני נרות — נר 2 ונר 3 של אותה שלישייה (אינדקסים 4,5 ו-0,3).
-        // **רצף**: שני הנרות חייבים ללכת לאותו כיוון של הרווח. חייב להיות
-        // זהה לגרף.
-        bool vBullN = volImbOn and okN and no0 > nc1 and nc1 > no1 and nc0 > no0
-        bool vBullE = volImbOn and okE and eo0 > ec1 and ec1 > eo1 and ec0 > eo0
-        bool vBullY = volImbOn and okY and yo0 > yc1 and yc1 > yo1 and yc0 > yo0
-        bool vBearN = volImbOn and okN and no0 < nc1 and nc1 < no1 and nc0 < no0
-        bool vBearE = volImbOn and okE and eo0 < ec1 and ec1 < eo1 and ec0 < eo0
-        bool vBearY = volImbOn and okY and yo0 < yc1 and yc1 < yo1 and yc0 < yo0
+        // **רצף**: שני הנרות חייבים ללכת לאותו כיוון של הרווח —
+        // **אלא אם הנר הזה פותח תת-מחזור חדש** (newRef), כלומר זה המעבר
+        // עצמו: סגירת הסייקל הקודם מול פתיחת החדש. חייב להיות זהה לגרף.
+        bool cycEdge = newRef
+        bool vBullN = volImbOn and okN and no0 > nc1 and (cycEdge or (nc1 > no1 and nc0 > no0))
+        bool vBullE = volImbOn and okE and eo0 > ec1 and (cycEdge or (ec1 > eo1 and ec0 > eo0))
+        bool vBullY = volImbOn and okY and yo0 > yc1 and (cycEdge or (yc1 > yo1 and yc0 > yo0))
+        bool vBearN = volImbOn and okN and no0 < nc1 and (cycEdge or (nc1 < no1 and nc0 < no0))
+        bool vBearE = volImbOn and okE and eo0 < ec1 and (cycEdge or (ec1 < eo1 and ec0 < eo0))
+        bool vBearY = volImbOn and okY and yo0 < yc1 and (cycEdge or (yc1 < yo1 and yc0 < yo0))
 
         // שני הסוגים נספרים יחד — גאפ קולקטיבי יכול להיות FVG ב-NQ ו-VI ב-ES
         bool bullN = fBullN or vBullN
@@ -1133,6 +1138,15 @@ if array.size(gaps) > 0
 //    **רצף — שני הנרות חייבים ללכת לאותו כיוון של הרווח.** רווח כלפי
 //    מעלה נספר רק כשנר [1] עלה **וגם** נר [0] עלה; לא נר יורד ואחריו נר
 //    עולה. זה מה שמפריד רצף אמיתי מריצוד.
+//
+// 3) **רווח המעבר** — אותו VI, אבל על נר שפותח תת-מחזור חדש (`cycEdge`):
+//    הסגירה האחרונה של הסייקל הקודם מול הפתיחה הראשונה של החדש. **שם
+//    תנאי הרצף לא חל**, כי הרווח נולד מהשבר בזמן ולא מתנועה של הנרות.
+//    זה מה שתופס את גאפ פתיחת יום המסחר (17:00→18:00 EST) ואת גאפ
+//    פתיחת השבוע, ובמסגרות הנמוכות גם את המעבר בין סשנים ומיקרו-סשנים.
+//    כל מסגרת רואה את המעבר שלה: 1m את הרבע · 5m את המיקרו והסשן ·
+//    15m את אסיה→לונדון ואת פתיחת היום · 1H את היום והשבוע · 4H את
+//    השבוע והחודש, וכך הלאה עד שאין יותר שבר אמיתי בזמן.
 //    **הגודל לא משנה** — רווח של 0.25 הוא רווח בדיוק כמו 15 נקודות, ועליו
 //    יכולות להירשם כל הדרגות בדיוק כמו על FVG.
 //
@@ -1155,6 +1169,8 @@ if array.size(gaps) > 0
 var string dgN = "·"
 var string dgE = "·"
 var string dgY = "·"
+// האם הנר האחרון שנסגר היה נר של מעבר סייקל (ואז תנאי הרצף לא חל)
+var bool   dgEdge = false
 
 if barstate.isconfirmed and tfClass != 0 and bar_index > 2
     bool okY = useYM and not na(ymH[2]) and not na(ymL[2])
@@ -1166,14 +1182,23 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
     bool fBearE = esH < esL[2]
     bool fBearY = okY and ymH < ymL[2]
 
-    // VI בין נר [1] לנר [0] — **רצף**: שני הנרות לאותו כיוון של הרווח.
-    // חייב להיות זהה למנוע.
-    bool vBullN = volImbOn and nqO > nqC[1] and nqC[1] > nqO[1] and nqC > nqO
-    bool vBullE = volImbOn and esO > esC[1] and esC[1] > esO[1] and esC > esO
-    bool vBullY = volImbOn and okY and ymO > ymC[1] and ymC[1] > ymO[1] and ymC > ymO
-    bool vBearN = volImbOn and nqO < nqC[1] and nqC[1] < nqO[1] and nqC < nqO
-    bool vBearE = volImbOn and esO < esC[1] and esC[1] < esO[1] and esC < esO
-    bool vBearY = volImbOn and okY and ymO < ymC[1] and ymC[1] < ymO[1] and ymC < ymO
+    // ── מעבר סייקל: פתיחת יום / שבוע / סשן לפי הזמנים שלנו ──
+    // הנר הזה פותח תת-מחזור חדש, ולכן הרווח בינו לבין הנר הקודם הוא
+    // **רווח המעבר** — סגירת הסייקל הקודם מול פתיחת החדש. הוא לא נולד
+    // מתנועה של הנרות אלא מהשבר בזמן, ולכן תנאי הרצף לא חל עליו.
+    // כל מסגרת רואה את המעבר שלה: 1m את הרבע, 5m את המיקרו והסשן,
+    // 15m את המעבר אסיה→לונדון ואת פתיחת יום המסחר, 1H את היום והשבוע,
+    // וכך הלאה עד שאין יותר שבר אמיתי בזמן.
+    bool cycEdge = newRefCycle
+
+    // VI בין נר [1] לנר [0] — **רצף**: שני הנרות לאותו כיוון של הרווח,
+    // אלא אם זה נר של מעבר סייקל. חייב להיות זהה למנוע.
+    bool vBullN = volImbOn and nqO > nqC[1] and (cycEdge or (nqC[1] > nqO[1] and nqC > nqO))
+    bool vBullE = volImbOn and esO > esC[1] and (cycEdge or (esC[1] > esO[1] and esC > esO))
+    bool vBullY = volImbOn and okY and ymO > ymC[1] and (cycEdge or (ymC[1] > ymO[1] and ymC > ymO))
+    bool vBearN = volImbOn and nqO < nqC[1] and (cycEdge or (nqC[1] < nqO[1] and nqC < nqO))
+    bool vBearE = volImbOn and esO < esC[1] and (cycEdge or (esC[1] < esO[1] and esC < esO))
+    bool vBearY = volImbOn and okY and ymO < ymC[1] and (cycEdge or (ymC[1] < ymO[1] and ymC < ymO))
 
     bool bullN = fBullN or vBullN
     bool bullE = fBullE or vBullE
@@ -1192,6 +1217,7 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
     //   ·         כלום.
     // זה מפריד "אין רווח" מ"יש רווח שנפסל" — ההבדל שאי אפשר לראות על הגרף.
     // צריך **שניים** מתוך השלושה באותו כיוון; נכס בודד לא מספיק.
+    dgEdge := cycEdge
     dgN := fBullN and vBullN ? "FV+" : fBearN and vBearN ? "FV-" : fBullN ? "F+" : fBearN ? "F-" : vBullN ? "V+" : vBearN ? "V-" : nqO > nqC[1] ? "v+" : nqO < nqC[1] ? "v-" : "·"
     dgE := fBullE and vBullE ? "FV+" : fBearE and vBearE ? "FV-" : fBullE ? "F+" : fBearE ? "F-" : vBullE ? "V+" : vBearE ? "V-" : esO > esC[1] ? "v+" : esO < esC[1] ? "v-" : "·"
     dgY := fBullY and vBullY ? "FV+" : fBearY and vBearY ? "FV-" : fBullY ? "F+" : fBearY ? "F-" : vBullY ? "V+" : vBearY ? "V-" : ymO > ymC[1] ? "v+" : ymO < ymC[1] ? "v-" : "·"
@@ -1288,14 +1314,14 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
                 if low > high[2]
                     cb := (extendBodies and open[1] > high[2]) ? close[2] : high[2]
                     ct := (extendBodies and low      > close[1]) ? open  : low
-                if volImbOn and open > close[1] and close[1] > open[1] and close > open
+                if volImbOn and open > close[1] and (cycEdge or (close[1] > open[1] and close > open))
                     cb := na(cb) ? close[1] : math.min(cb, close[1])
                     ct := na(ct) ? open     : math.max(ct, open)
             if legOnChart and newDir == -1
                 if high < low[2]
                     ct := (extendBodies and open[1] < low[2])  ? close[2] : low[2]
                     cb := (extendBodies and high     < close[1]) ? open  : high
-                if volImbOn and open < close[1] and close[1] < open[1] and close < open
+                if volImbOn and open < close[1] and (cycEdge or (close[1] < open[1] and close < open))
                     ct := na(ct) ? close[1] : math.max(ct, close[1])
                     cb := na(cb) ? open     : math.min(cb, open)
             // האם רגל משתתפת כלשהי היא FVG. אם כן — התיוג לפי הנר האמצעי
@@ -2024,7 +2050,9 @@ if showDebug and barstate.islast
     // - דובי · · כלום.
     // **צריך שניים מהשלושה באותו כיוון.** שורה שנראית "V+ · ·" מסבירה
     // בדיוק למה לא נוצר גאפ: רק נכס אחד נתן משהו.
-    table.cell(dbg, 0, 12, "גאפ בנר האחרון", bgcolor = hc, text_color = wc)
+    // ⟐ בכותרת = הנר האחרון פתח תת-מחזור חדש, ולכן תנאי הרצף לא חל עליו
+    // והרווח נספר כמו שהוא.
+    table.cell(dbg, 0, 12, "גאפ בנר האחרון" + (dgEdge ? " ⟐" : ""), bgcolor = hc, text_color = wc)
     table.cell(dbg, 1, 12, dgN, bgcolor = wc)
     table.cell(dbg, 2, 12, dgE, bgcolor = wc)
     table.cell(dbg, 3, 12, not useYM ? "כבוי" : dgY, bgcolor = wc)
