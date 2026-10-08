@@ -940,8 +940,11 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
                 // האמצעי של השלישייה; אם הגאפ כולו VI — לפי הנר הנוכחי,
                 // כי שם הריק נוצר ברגע שהנר נפתח.
                 bool anyFvg = (not na(nt) and (nd == 1 ? fBullN : fBearN)) or (not na(et) and (nd == 1 ? fBullE : fBearE)) or (not na(yt) and (nd == 1 ? fBullY : fBearY))
-                int  gRef   = anyFvg ? (rfMid == 0 ? rf : rfMid) : rf
-                int  gWhen  = anyFvg ? (tMid == 0 ? tOpen : tMid) : tOpen
+                // **גאפ מעבר שייך לסייקל שהוא פותח, לא לזה שנגמר.** זהה לגרף.
+                bool anyVi  = (not na(nt) and (nd == 1 ? vBullN : vBearN)) or (not na(et) and (nd == 1 ? vBullE : vBearE)) or (not na(yt) and (nd == 1 ? vBullY : vBearY))
+                bool tagNow = (cycEdge and anyVi) or not anyFvg
+                int  gRef   = tagNow ? rf : (rfMid == 0 ? rf : rfMid)
+                int  gWhen  = tagNow ? tOpen : (tMid == 0 ? tOpen : tMid)
                 Gap gn = Gap.new(e.gapCounter, nd, nb, nt, eb, et, yb, yt, nrb, nrt, erb, ert, gRef, bar_index, gWhen, bar_index, nd == 1 ? nt : nb, nd == 1 ? et : eb, nd == 1 ? yt : yb, 0, 0, 0, 0, false, false, false, not anyFvg, 0, "", 0, 0, na, na, na)
                 array.push(e.gaps, gn)
                 f_trim(e.gaps)
@@ -1324,12 +1327,23 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
                 if volImbOn and open < close[1] and (cycEdge or (close[1] < open[1] and close < open))
                     ct := na(ct) ? close[1] : math.max(ct, close[1])
                     cb := na(cb) ? open     : math.min(cb, open)
-            // האם רגל משתתפת כלשהי היא FVG. אם כן — התיוג לפי הנר האמצעי
-            // של השלישייה; אם הגאפ כולו VI — לפי הנר הנוכחי, כי שם נוצר
-            // הריק, ואז גם הקופסה מתחילה נר אחד אחורה ולא שניים.
+            // ── לאיזה תת-מחזור הגאפ שייך ──
+            // FVG רגיל מתויג לפי **הנר האמצעי** — הוא זה שיצר את חוסר
+            // האיזון, והשלישי רק מאשר.
+            // **גאפ מעבר שייך לסייקל שהוא פותח, לא לזה שנגמר.** הרווח בין
+            // הסגירה האחרונה של אתמול לפתיחה הראשונה של היום נולד ברגע
+            // הפתיחה, ולכן ב-15 דקות הוא של **אסיה** ולא של ה-PM של אתמול,
+            // ובגרף שעה הוא של **יום שלישי** ולא של יום שני. בלי זה נר מעבר
+            // שבמקרה נתן גם רגל FVG נתפס ב-refCycleId[1] ונרשם לסייקל הישן,
+            // ואז הוא נדרך מוקדם מדי ומקבל את השם הלא נכון בקופסה.
             bool anyFvg = (not na(nt) and (newDir == 1 ? fBullN : fBearN)) or (not na(et) and (newDir == 1 ? fBullE : fBearE)) or (not na(yt) and (newDir == 1 ? fBullY : fBearY))
+            bool anyVi  = (not na(nt) and (newDir == 1 ? vBullN : vBearN)) or (not na(et) and (newDir == 1 ? vBullE : vBearE)) or (not na(yt) and (newDir == 1 ? vBullY : vBearY))
+            // תיוג לפי הנר הנוכחי: גאפ מעבר, או גאפ שכולו VI.
+            bool tagNow = (cycEdge and anyVi) or not anyFvg
+            // origin נשאר לפי anyFvg — הוא רק קצה הקופסה, וכשיש FVG היא
+            // צריכה לכסות את כל השלישייה.
             gapCounter += 1
-            Gap gn = Gap.new(gapCounter, newDir, nb, nt, eb, et, yb, yt, nrb, nrt, erb, ert, anyFvg ? refCycleId[1] : refCycleId, bar_index, anyFvg ? time[1] : time, anyFvg ? bar_index - 2 : bar_index - 1, newDir == 1 ? nt : nb, newDir == 1 ? et : eb, newDir == 1 ? yt : yb, 0, 0, 0, 0, false, false, false, not anyFvg, 0, "", 0, 0, na, cb, ct)
+            Gap gn = Gap.new(gapCounter, newDir, nb, nt, eb, et, yb, yt, nrb, nrt, erb, ert, tagNow ? refCycleId : refCycleId[1], bar_index, tagNow ? time : time[1], anyFvg ? bar_index - 2 : bar_index - 1, newDir == 1 ? nt : nb, newDir == 1 ? et : eb, newDir == 1 ? yt : yb, 0, 0, 0, 0, false, false, false, not anyFvg, 0, "", 0, 0, na, cb, ct)
             array.push(gaps, gn)
             f_trim(gaps)
 
