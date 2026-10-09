@@ -83,6 +83,7 @@ nameRows    = input.string("Down to the session", "Names Instead Of Numbers", op
 appendNums  = input.bool(false, "Add Numbers After The Name", group = g_lab, tooltip = "Prints both, as Wed 3-3-3. Leave it off where the cell is too narrow to hold the two of them.")
 labelDepth  = input.int(3, "Levels Per Label", minval = 1, maxval = 3, group = g_lab, tooltip = "How many levels of the hierarchy each numbered cell prints. 3 gives 3-4-2 (grandparent-parent-self), 2 gives 4-2, 1 gives 2.")
 sepStr      = input.string("-", "Separator", options = ["-", ".", " "], group = g_lab)
+gapMark     = input.string("·", "Mark For A Level With No Number", group = g_lab, tooltip = "What a level that carries no number prints inside a chain: Friday, and a dead week. It holds the link's place, so every row keeps reading the same levels in the same order on a Friday as on a Monday. Empty drops the link instead, and the chain then pulls the level above it in to stay three long.")
 textSizeIn  = input.string("small", "Text Size", options = ["tiny", "small", "normal", "large"], group = g_lab)
 textCol     = input.color(color.new(#000000, 10), "Text Color", group = g_lab)
 
@@ -302,18 +303,28 @@ array.set(idx, 6, i90)
 array.set(idx, 7, i225)
 array.set(idx, 8, i5625)
 
-// the chain of quarters ending at level `lvl`, highest level first. Levels with
-// no number are skipped rather than left blank, so the chain keeps its length,
-// and a level with no number of its own has no chain at all
+// The chain of quarters ending at level `lvl`, highest level first.
+//
+// A level that carries no number but is on the chart all the same, Friday and a
+// dead week, holds its place with gapMark, so the session row reads week - day -
+// session on a Friday just as it does on a Monday. Were the link dropped, the
+// chain would pull the level above it in to stay three long and the same row
+// would silently read quarter - week - session instead.
+//
+// The split level is different: off the daily chart it is not on the chart at
+// all, so it is passed over without taking a place.
 chainOf(int lvl, int depth, string sep) =>
     string out = ""
     int    n   = 0
     if not na(array.get(idx, lvl - 1))
         for i = lvl to 1
-            int v = array.get(idx, i - 1)
-            if not na(v) and n < depth
-                out := str.tostring(v) + (out == "" ? "" : sep) + out
-                n   := n + 1
+            if n < depth
+                int    v     = array.get(idx, i - 1)
+                bool   onChart = i != 3 or en3
+                string piece = na(v) ? (onChart ? gapMark : "") : str.tostring(v)
+                if piece != ""
+                    out := piece + (out == "" ? "" : sep) + out
+                    n   := n + 1
     out
 
 dayName() =>
