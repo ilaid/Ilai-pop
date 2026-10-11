@@ -22,10 +22,14 @@ indicator("SSMT Fill | Quarterly Theory", overlay = true, max_labels_count = 20,
 // כל ביקור בגאפ נמדד מאפס. אם כולם מילאו את הגאפ יחד — אין שבירה, אבל
 // הגאפ נשאר תקף וכניסה חוזרת אליו נמדדת מחדש ויכולה לייצר שבירה.
 //
-// שבירה היא אירוע שקרה — אחרי שנרשמה היא נשארת, והדרגה יכולה רק לעלות.
-// **מה שמוציא אותה מהמשחק זה רק החלפת מיכל.** גאפ חי כל עוד המיכל שלו
-// חי, גם אם המחיר סגר מעבר לו.
+// שבירה נרשמת ברגע שהיא קורית. אם **באותו ביקור** המפגר משיג את המוביל,
+// הדרגה יורדת לרמה שעדיין מבדילה ביניהם (או מתבטלת), ונשלחת התראת תיקון.
+// כשהביקור נגמר הדרגה ננעלת. מצב "בסוף הביקור" רושם רק כשהביקור נגמר.
 // שבירה נגדית רק דוחקת אותה מהתצוגה — מוצגת תמיד העדכנית ביותר.
+//
+// IFVG לפי נכס: נכס שסוגר נר מעבר לרגל שלו — הרגל שלו מתה והוא יוצא
+// מהגאפ. הנכסים האחרים ממשיכים. נשארו פחות משתי רגליים חיות — הגאפ מת
+// ונמחק. YM לא מת בסגירה מתחת לגאפ שורי — זו החולשה הצפויה שלו.
 //
 // מיפוי תת-מחזור/מיכל לכל מסגרת זמן:
 //   1M  — רבע 22.5m   → מיקרו-סשן    5M  — מיקרו-סשן → סשן
@@ -57,22 +61,19 @@ extendBodies = input.bool(true, "הרחב גאפ לגופי הנרות (רווח
 // סוג גאפ שני, על **שני נרות** ולא על שלושה: נר נסגר ב-24200 והנר שאחריו
 // נפתח ב-24201 — שתי הנקודות האלה לא נסחרו ברגע המעבר, וזה גאפ שמיש.
 // **רצף — שני הנרות חייבים ללכת לאותו כיוון.** לא נר יורד ואחריו נר עולה.
-// רווח כלפי מעלה נספר רק כששני הנרות עולים, וכלפי מטה רק כששניהם יורדים.
 // **חוץ ממעבר סייקל** — פתיחת יום, שבוע או סשן לפי הזמנים שלנו. שם הרווח
-// נולד מהמעבר עצמו (סגירה של אתמול מול פתיחה של היום) ולא מתנועה של
-// הנרות, ולכן אין טעם לדרוש רצף והוא נספר כמו שהוא.
+// נולד מהמעבר עצמו ולכן אין דרישת רצף.
 // VI ו-FVG נספרים יחד לאותו גאפ קולקטיבי: NQ עם VI ו-ES עם FVG באותו נר
-// זה גאפ תקף. **הגודל לא משנה** — רווח של 0.25 הוא רווח בדיוק כמו 15 נק',
-// ועליו יכולות להירשם כל הדרגות.
-// **ולנכס שיש לו גם FVG וגם VI באותו נר — הם מתאחדים לגאפ אחד גדול**,
-// min של התחתונים ו-max של העליונים. FVG מורחב, לא שני גאפים נפרדים.
-// מסומן V בהצצה רק כשאף נכס משתתף לא נתן FVG.
+// זה גאפ תקף. ולנכס שיש לו גם FVG וגם VI באותו נר — הם מתאחדים לגאפ אחד.
+// **הגודל נמדד בטיקים של כל נכס** (NQ/ES 0.25, YM 1) — רגל VI זעירה
+// מתמלאת בטיק אחד ומייצרת F3 מזויפות, ו-IFVG שלה הרג גאפים אמיתיים.
+//   VI לבד   — נספר רק מ-viMinTicks טיקים ומעלה.
+//   VI + FVG — מתאחד ל-FVG של אותו נכס כבר מ-viMergeTicks טיקים.
 volImbOn     = input.bool(true, "זהה גם גאפ סגירה/פתיחה בין שני נרות", tooltip = "Volume Imbalance — הרווח בין הסגירה של נר לפתיחה של הנר שאחריו. נספר יחד עם FVG רגיל לאותו גאפ קולקטיבי, ומסומן V בהצצה כשכל הרגליים הן VI.", group = grpGap)
+viMinTicks   = input.int(4, "VI לבד — מינימום טיקים", minval = 1, maxval = 100, tooltip = "רווח סגירה/פתיחה שנספר כגאפ בפני עצמו. 4 טיקים = נקודה אחת ב-NQ/ES.", group = grpGap)
+viMergeTicks = input.int(2, "VI שמתאחד עם FVG — מינימום טיקים", minval = 1, maxval = 100, tooltip = "רווח סגירה/פתיחה שמרחיב FVG של אותו נכס באותו נר.", group = grpGap)
 // כיבוי מחזיר את ההתנהגות הישנה: רק NQ מול ES, YM לא משתתף בכלל.
 useYM        = input.bool(true, "כלול את YM כנכס חלש", group = grpGap)
-// השאר על 0. האסימטריה בין הנכסים היא הסיגנל עצמו — סינון לפי גודל
-// חותך דווקא את השבירות החזקות (גאפ גדול בנכס אחד מול גאפ קטן בשני).
-minGapPct    = input.float(0.0, "גודל גאפ מינימלי (% מהמחיר)", minval = 0.0, maxval = 1.0, step = 0.01, group = grpGap)
 maxGaps      = input.int(60, "מקסימום גאפים במיכל", minval = 5, maxval = 200, group = grpGap)
 
 grpVis = "תצוגה"
@@ -104,6 +105,11 @@ showDebug   = input.bool(false, "הצג טבלת בדיקה", group = grpVis)
 
 grpLogic = "לוגיקה"
 blockDeadWeek = input.bool(true, "חסום שבירות בשבוע מת (4H בלבד)", group = grpLogic)
+// "מיידי עם תיקון": נרשמת ומתריעה מיד; אם באותו ביקור המפגר משיג את
+// המוביל — הדרגה יורדת או מתבטלת ונשלחת התראת תיקון.
+// "בסוף הביקור": נרשמת רק כשכל הנכסים יצאו מהגאפ, לפי העומקים הסופיים.
+fracMode      = input.string("מיידי עם תיקון", "מתי נרשמת שבירה", options = ["מיידי עם תיקון", "בסוף הביקור"], group = grpLogic)
+fracAtEnd     = fracMode == "בסוף הביקור"
 
 grpAlert = "התראות"
 // ההתראה רצה בשרתי TradingView, לא בדפדפן — אפשר להקים אותה על גרף 15 דקות
@@ -328,9 +334,10 @@ keepLast = tfClass <= 2 or tfClass == 4 or tfClass >= 6
 // משיכת נתוני שלושת הנכסים (open נדרש להרחבת הגאפ לגופים)
 // ═══════════════════════════════════════════════════════════════════
 
-[rNqO, rNqH, rNqL, rNqC] = request.security(sNQ, timeframe.period, [open, high, low, close], lookahead = barmerge.lookahead_off)
-[rEsO, rEsH, rEsL, rEsC] = request.security(sES, timeframe.period, [open, high, low, close], lookahead = barmerge.lookahead_off)
-[rYmO, rYmH, rYmL, rYmC] = request.security(sYM, timeframe.period, [open, high, low, close], lookahead = barmerge.lookahead_off)
+// הטיק של כל נכס מגיע יחד עם הנרות — סף ה-VI נמדד בו.
+[nqO, nqH, nqL, nqC, tkN] = request.security(sNQ, timeframe.period, [open, high, low, close, syminfo.mintick], lookahead = barmerge.lookahead_off)
+[esO, esH, esL, esC, tkE] = request.security(sES, timeframe.period, [open, high, low, close, syminfo.mintick], lookahead = barmerge.lookahead_off)
+[ymO, ymH, ymL, ymC, tkY] = request.security(sYM, timeframe.period, [open, high, low, close, syminfo.mintick], lookahead = barmerge.lookahead_off)
 
 // **כל המדידות משלוש הסדרות של request.security, בלי יוצא מן הכלל.**
 // קודם הנכס שהגרף מציג נקרא מהגרף עצמו, והשאר מ-request.security. זה נתן
@@ -341,18 +348,6 @@ keepLast = tfClass <= 2 or tfClass == 4 or tfClass >= 6
 // שבירה שבועית הופיעה F3 על MNQ ו-F2 על MES.
 // עכשיו המדידה אחידה בכל גרף, בדיוק כמו המנועים של שאר המסגרות (שתמיד
 // קראו את שלושתם מהסדרה — ולכן הם תמיד הסכימו ביניהם).
-nqO = rNqO
-nqH = rNqH
-nqL = rNqL
-nqC = rNqC
-esO = rEsO
-esH = rEsH
-esL = rEsL
-esC = rEsC
-ymO = rYmO
-ymH = rYmH
-ymL = rYmL
-ymC = rYmC
 
 // ── הגבולות שמצוירים ──
 // המלכודת המקורית בעינה עומדת: קופסה שמצוירת לפי הסדרה הגולמית על גרף
@@ -374,7 +369,7 @@ type Gap
     float  esBot
     float  esTop
     float  ymBot
-    float  ymTop
+    float  ymTop    // רגל שמתה ב-IFVG מקבלת na — הנכס יוצא מהגאפ
     // תת-המחזור של **הנר האמצעי** — הנר שיצר את חוסר האיזון. הנר השלישי רק
     // מאשר אותו, ולכן גאפ שנוצר ב-23:45 שייך לאסיה גם אם האישור הגיע ב-00:00.
     int    refId
@@ -391,11 +386,14 @@ type Gap
     // שלושה. משמש לכיתוב (V בהצצה) — כל שאר הלוגיקה זהה לשני הסוגים.
     bool   volImb
     // ── השבירה של הגאפ הזה. כל גאפ מחזיק את שלו, הן לא מתחרות על מקום אחד ──
-    int    fDeg     // 0 = עוד לא נרשמה שבירה. 1..3, יכול רק לעלות.
+    int    fDeg     // 0 = אין שבירה. עולה מיד; יורד רק בתיקון באותו ביקור.
     string fLead    // המשתתפים לפי סדר עומק, למשל "NQ+ES+YM"
     int    fSigB    // הנר שבו נרשמה
     int    fSeq     // מונה רץ — הגבוה ביותר הוא זה שמצויר
     float  fYPos    // גובה התווית
+    int    fVisit   // הביקור שבו נרשמה — רק בו מותר לתקן אותה
+    int    endDeg   // מצב "בסוף הביקור": הדרגה שהביקור שנגמר עכשיו נתן
+    string endLead  // והמשתתפים שלה
     // ── גבולות לציור בלבד, בסקאלה של הגרף עצמו ──
     // na = לנכס שהגרף מציג אין את הגאפ הזה, ואז פשוט אין קופסה.
     float  drwBot
@@ -500,6 +498,91 @@ method fracTxt(Gap g) =>
         t := t + "+" + f_name(gi)
     t
 
+// ── מדידת ביקור אחד בגאפ — נר אחד, לכל נכס בנפרד ──
+// הביקור נגמר כשכל הרגליים החיות בחוץ; אז העומקים מתאפסים לקראת ביקור חדש.
+// במצב "בסוף הביקור" הדרגה של הביקור שנגמר נשמרת לפני האיפוס.
+// משותף לגרף ולמנועים — אותו קוד בדיוק.
+method visit(Gap g, float nh, float nl, float eh, float el, float yh, float yl) =>
+    bool outN = na(g.nqTop) or (g.dir == 1 ? nl > g.nqTop : nh < g.nqBot)
+    bool outE = na(g.esTop) or (g.dir == 1 ? el > g.esTop : eh < g.esBot)
+    bool outY = na(g.ymTop) or (g.dir == 1 ? yl > g.ymTop : yh < g.ymBot)
+    if outN and outE and outY
+        if g.inVisit and fracAtEnd
+            g.endDeg  := g.fracDeg()
+            g.endLead := g.fracTxt()
+        g.inVisit := false
+        g.nqExt   := g.dir == 1 ? g.nqTop : g.nqBot
+        g.esExt   := g.dir == 1 ? g.esTop : g.esBot
+        g.ymExt   := g.dir == 1 ? g.ymTop : g.ymBot
+    else
+        if not g.inVisit
+            g.inVisit := true
+            g.visits  := g.visits + 1
+        if g.dir == 1
+            g.nqExt := na(g.nqTop) ? na : math.min(g.nqExt, nl)
+            g.esExt := na(g.esTop) ? na : math.min(g.esExt, el)
+            g.ymExt := na(g.ymTop) ? na : math.min(g.ymExt, yl)
+        else
+            g.nqExt := na(g.nqTop) ? na : math.max(g.nqExt, nh)
+            g.esExt := na(g.esTop) ? na : math.max(g.esExt, eh)
+            g.ymExt := na(g.ymTop) ? na : math.max(g.ymExt, yh)
+    g.inVisit
+
+// ── IFVG לפי נכס ──
+// נכס שסגר מעבר לרגל שלו — הרגל מתה (na) והוא לא משתתף יותר בשבירה על
+// הגאפ הזה. השאר ממשיכים. YM לא מת בסגירה מתחת לגאפ שורי: זו החולשה
+// הצפויה שלו. מחזיר כמה רגליים חיות נשארו — פחות משתיים = הגאפ מת.
+method killLegs(Gap g, float nc, float ec, float yc) =>
+    if g.dir == 1
+        if not na(g.nqBot) and nc < g.nqBot
+            g.nqBot := na
+            g.nqTop := na
+            g.nqExt := na
+        if not na(g.esBot) and ec < g.esBot
+            g.esBot := na
+            g.esTop := na
+            g.esExt := na
+    else
+        if not na(g.nqTop) and nc > g.nqTop
+            g.nqBot := na
+            g.nqTop := na
+            g.nqExt := na
+        if not na(g.esTop) and ec > g.esTop
+            g.esBot := na
+            g.esTop := na
+            g.esExt := na
+        if not na(g.ymTop) and yc > g.ymTop
+            g.ymBot := na
+            g.ymTop := na
+            g.ymExt := na
+    (na(g.nqTop) ? 0 : 1) + (na(g.esTop) ? 0 : 1) + (na(g.ymTop) ? 0 : 1)
+
+// ── רישום ותיקון של שבירה — נקרא פעם אחת לנר סגור, לכל גאפ דרוך ──
+//   1 = שבירה חדשה או עליית דרגה (הקורא מקדם את המונה ומתריע)
+//   2 = תיקון: המפגר השיג את המוביל באותו ביקור, הדרגה ירדה (0 = בוטלה)
+//   0 = כלום
+// allowNew = false בשישי/שבוע מת: אין שבירה חדשה, אבל תיקון עדיין חל.
+method judge(Gap g, bool allowNew) =>
+    int ev = 0
+    if g.armed
+        int deg = fracAtEnd ? g.endDeg : g.fracDeg()
+        if allowNew and deg > g.fDeg
+            g.fDeg   := deg
+            g.fLead  := fracAtEnd ? g.endLead : g.fracTxt()
+            g.fVisit := g.visits
+            ev := 1
+        else if not fracAtEnd and g.fDeg > 0 and g.inVisit and g.fVisit == g.visits and deg < g.fDeg
+            g.fDeg := deg
+            if deg > 0
+                g.fLead := g.fracTxt()
+            ev := 2
+        g.endDeg := 0
+    ev
+
+// טקסט התראת התיקון
+f_fixTxt(string tf, int dir, int deg) =>
+    "[" + tf + "] " + syminfo.ticker + " · שבירה " + (dir == 1 ? "שורית" : "דובית") + (deg == 0 ? " בוטלה" : " ירדה ל-" + "F" + str.tostring(deg))
+
 // שם קריא למחלקת מסגרת זמן. החודשי הוא "Mo" ולא "1M", כדי שלא יתבלבל עם
 // "1m" של הדקה בשורת הסימון הזעירה בפינה.
 f_clsName(int c) =>
@@ -581,7 +664,6 @@ type Engine
     int          lifeId     // המיכל של הצעד הקודם
     bool         started
     int          lastT      // זמן הפתיחה של הנר שכבר עובד — מונע צעד כפול
-    int          shownDir
     int          curRef     // המחזורים של הנר הנוכחי, נכתבים ע"י f_setCycles
     int          curLife
     bool         curDead
@@ -594,6 +676,7 @@ type Engine
     int          fGapId     // הגאפ שנושא את השבירה המוצגת
     int          fWhen      // ומתי הוא נולד
     bool         justFired
+    string       fixTxt     // התראות תיקון שנאספו בנר הגרף הזה
 
 // כל מזהי המחזורים מתוך חותמת זמן של נר, לפי מחלקת מסגרת הזמן.
 // זהה לחישוב שרץ למעלה על נרות הגרף, רק שהוא מקבל את הזמן כפרמטר.
@@ -724,7 +807,6 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
             else
                 array.clear(e.gaps)
                 e.seedActive := false
-            e.shownDir := 0
         else if newRef and e.seedActive
             if array.size(e.gaps) > 0
                 for i = array.size(e.gaps) - 1 to 0
@@ -743,39 +825,17 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
         float yl0 = array.get(y, 2)
         float yc0 = array.get(y, 3)
 
-        // ── דריכה · מדידת ביקור ──
+        // ── דריכה · מדידת ביקור · IFVG לפי נכס ──
+        // מהסוף להתחלה, כי גאפ שנשאר עם פחות משתי רגליים חיות נמחק.
         if array.size(e.gaps) > 0
-            for i = 0 to array.size(e.gaps) - 1
+            for i = array.size(e.gaps) - 1 to 0
                 Gap gu = array.get(e.gaps, i)
                 if not gu.armed and gu.refId != rf
                     gu.armed := true
                 if gu.armed
-                    bool outN = na(gu.nqTop) or (gu.dir == 1 ? nl0 > gu.nqTop : nh0 < gu.nqBot)
-                    bool outE = na(gu.esTop) or (gu.dir == 1 ? el0 > gu.esTop : eh0 < gu.esBot)
-                    bool outY = na(gu.ymTop) or (gu.dir == 1 ? yl0 > gu.ymTop : yh0 < gu.ymBot)
-                    if outN and outE and outY
-                        gu.inVisit := false
-                        gu.nqExt   := gu.dir == 1 ? gu.nqTop : gu.nqBot
-                        gu.esExt   := gu.dir == 1 ? gu.esTop : gu.esBot
-                        gu.ymExt   := gu.dir == 1 ? gu.ymTop : gu.ymBot
-                    else
-                        if not gu.inVisit
-                            gu.inVisit := true
-                            gu.visits  := gu.visits + 1
-                        if gu.dir == 1
-                            if not na(gu.nqTop)
-                                gu.nqExt := math.min(gu.nqExt, nl0)
-                            if not na(gu.esTop)
-                                gu.esExt := math.min(gu.esExt, el0)
-                            if not na(gu.ymTop)
-                                gu.ymExt := math.min(gu.ymExt, yl0)
-                        else
-                            if not na(gu.nqTop)
-                                gu.nqExt := math.max(gu.nqExt, nh0)
-                            if not na(gu.esTop)
-                                gu.esExt := math.max(gu.esExt, eh0)
-                            if not na(gu.ymTop)
-                                gu.ymExt := math.max(gu.ymExt, yh0)
+                    gu.visit(nh0, nl0, eh0, el0, yh0, yl0)
+                if gu.killLegs(nc0, ec0, yc0) < 2
+                    array.remove(e.gaps, i)
 
         // ── זיהוי גאפ קולקטיבי: אותו כיוון, אותו נר, לפחות שני נכסים ──
         float no1 = array.get(n, 4)
@@ -814,13 +874,23 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
         // **רצף**: שני הנרות חייבים ללכת לאותו כיוון של הרווח —
         // **אלא אם הנר הזה פותח תת-מחזור חדש** (newRef), כלומר זה המעבר
         // עצמו: סגירת הסייקל הקודם מול פתיחת החדש. חייב להיות זהה לגרף.
+        // הגודל בטיקים: m* = מספיק כדי להתאחד עם FVG, v* = מספיק לבד.
         bool cycEdge = newRef
-        bool vBullN = volImbOn and okN and no0 > nc1 and (cycEdge or (nc1 > no1 and nc0 > no0))
-        bool vBullE = volImbOn and okE and eo0 > ec1 and (cycEdge or (ec1 > eo1 and ec0 > eo0))
-        bool vBullY = volImbOn and okY and yo0 > yc1 and (cycEdge or (yc1 > yo1 and yc0 > yo0))
-        bool vBearN = volImbOn and okN and no0 < nc1 and (cycEdge or (nc1 < no1 and nc0 < no0))
-        bool vBearE = volImbOn and okE and eo0 < ec1 and (cycEdge or (ec1 < eo1 and ec0 < eo0))
-        bool vBearY = volImbOn and okY and yo0 < yc1 and (cycEdge or (yc1 < yo1 and yc0 < yo0))
+        int  tiN = math.round(math.abs(no0 - nc1) / tkN)
+        int  tiE = math.round(math.abs(eo0 - ec1) / tkE)
+        int  tiY = math.round(math.abs(yo0 - yc1) / tkY)
+        bool mBullN = volImbOn and okN and no0 > nc1 and (cycEdge or (nc1 > no1 and nc0 > no0)) and tiN >= viMergeTicks
+        bool mBullE = volImbOn and okE and eo0 > ec1 and (cycEdge or (ec1 > eo1 and ec0 > eo0)) and tiE >= viMergeTicks
+        bool mBullY = volImbOn and okY and yo0 > yc1 and (cycEdge or (yc1 > yo1 and yc0 > yo0)) and tiY >= viMergeTicks
+        bool mBearN = volImbOn and okN and no0 < nc1 and (cycEdge or (nc1 < no1 and nc0 < no0)) and tiN >= viMergeTicks
+        bool mBearE = volImbOn and okE and eo0 < ec1 and (cycEdge or (ec1 < eo1 and ec0 < eo0)) and tiE >= viMergeTicks
+        bool mBearY = volImbOn and okY and yo0 < yc1 and (cycEdge or (yc1 < yo1 and yc0 < yo0)) and tiY >= viMergeTicks
+        bool vBullN = mBullN and tiN >= viMinTicks
+        bool vBullE = mBullE and tiE >= viMinTicks
+        bool vBullY = mBullY and tiY >= viMinTicks
+        bool vBearN = mBearN and tiN >= viMinTicks
+        bool vBearE = mBearE and tiE >= viMinTicks
+        bool vBearY = mBearY and tiY >= viMinTicks
 
         // שני הסוגים נספרים יחד — גאפ קולקטיבי יכול להיות FVG ב-NQ ו-VI ב-ES
         bool bullN = fBullN or vBullN
@@ -847,50 +917,40 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
                 if fBullN
                     nb := (extendBodies and no1 > nh2) ? nc2 : nh2
                     nt := (extendBodies and nl0 > nc1) ? no0 : nl0
-                if vBullN
+                if vBullN or (fBullN and mBullN)
                     nb := na(nb) ? nc1 : math.min(nb, nc1)
                     nt := na(nt) ? no0 : math.max(nt, no0)
                 if fBullE
                     eb := (extendBodies and eo1 > eh2) ? ec2 : eh2
                     et := (extendBodies and el0 > ec1) ? eo0 : el0
-                if vBullE
+                if vBullE or (fBullE and mBullE)
                     eb := na(eb) ? ec1 : math.min(eb, ec1)
                     et := na(et) ? eo0 : math.max(et, eo0)
                 if fBullY
                     yb := (extendBodies and yo1 > yh2) ? yc2 : yh2
                     yt := (extendBodies and yl0 > yc1) ? yo0 : yl0
-                if vBullY
+                if vBullY or (fBullY and mBullY)
                     yb := na(yb) ? yc1 : math.min(yb, yc1)
                     yt := na(yt) ? yo0 : math.max(yt, yo0)
             else
                 if fBearN
                     nt := (extendBodies and no1 < nl2) ? nc2 : nl2
                     nb := (extendBodies and nh0 < nc1) ? no0 : nh0
-                if vBearN
+                if vBearN or (fBearN and mBearN)
                     nt := na(nt) ? nc1 : math.max(nt, nc1)
                     nb := na(nb) ? no0 : math.min(nb, no0)
                 if fBearE
                     et := (extendBodies and eo1 < el2) ? ec2 : el2
                     eb := (extendBodies and eh0 < ec1) ? eo0 : eh0
-                if vBearE
+                if vBearE or (fBearE and mBearE)
                     et := na(et) ? ec1 : math.max(et, ec1)
                     eb := na(eb) ? eo0 : math.min(eb, eo0)
                 if fBearY
                     yt := (extendBodies and yo1 < yl2) ? yc2 : yl2
                     yb := (extendBodies and yh0 < yc1) ? yo0 : yh0
-                if vBearY
+                if vBearY or (fBearY and mBearY)
                     yt := na(yt) ? yc1 : math.max(yt, yc1)
                     yb := na(yb) ? yo0 : math.min(yb, yo0)
-            // גאפ שקטן מהסף נפסל לאותו נכס בלבד, ואם נשאר רק אחד — אין גאפ
-            if not na(nt) and nt - nb <= minGapPct / 100 * nc0
-                nb := na
-                nt := na
-            if not na(et) and et - eb <= minGapPct / 100 * ec0
-                eb := na
-                et := na
-            if not na(yt) and yt - yb <= minGapPct / 100 * yc0
-                yb := na
-                yt := na
             int parts = (na(nt) ? 0 : 1) + (na(et) ? 0 : 1) + (na(yt) ? 0 : 1)
             if parts >= 2
                 e.gapCounter := e.gapCounter + 1
@@ -899,28 +959,28 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
                 // כי שם הריק נוצר ברגע שהנר נפתח.
                 bool anyFvg = (not na(nt) and (nd == 1 ? fBullN : fBearN)) or (not na(et) and (nd == 1 ? fBullE : fBearE)) or (not na(yt) and (nd == 1 ? fBullY : fBearY))
                 // **גאפ מעבר שייך לסייקל שהוא פותח, לא לזה שנגמר.** זהה לגרף.
-                bool anyVi  = (not na(nt) and (nd == 1 ? vBullN : vBearN)) or (not na(et) and (nd == 1 ? vBullE : vBearE)) or (not na(yt) and (nd == 1 ? vBullY : vBearY))
+                bool anyVi  = (not na(nt) and (nd == 1 ? mBullN : mBearN)) or (not na(et) and (nd == 1 ? mBullE : mBearE)) or (not na(yt) and (nd == 1 ? mBullY : mBearY))
                 bool tagNow = (cycEdge and anyVi) or not anyFvg
                 int  gRef   = tagNow ? rf : (rfMid == 0 ? rf : rfMid)
                 int  gWhen  = tagNow ? tOpen : (tMid == 0 ? tOpen : tMid)
-                Gap gn = Gap.new(e.gapCounter, nd, nb, nt, eb, et, yb, yt, gRef, gWhen, bar_index, nd == 1 ? nt : nb, nd == 1 ? et : eb, nd == 1 ? yt : yb, 0, 0, false, false, not anyFvg, 0, "", 0, 0, na, na, na)
+                Gap gn = Gap.new(e.gapCounter, nd, nb, nt, eb, et, yb, yt, gRef, gWhen, bar_index, nd == 1 ? nt : nb, nd == 1 ? et : eb, nd == 1 ? yt : yb, 0, 0, false, false, not anyFvg, 0, "", 0, 0, na, 0, 0, "", na, na)
                 array.push(e.gaps, gn)
                 f_trim(e.gaps)
 
         // ── רישום שבירות ──
         bool blockDW  = e.cls == 5 and blockDeadWeek and deadW
         bool blockFri = (e.cls == 5 or e.cls == 4) and dow == dayofweek.friday
-        if not blockDW and not blockFri and array.size(e.gaps) > 0
+        if array.size(e.gaps) > 0
             for i = 0 to array.size(e.gaps) - 1
                 Gap gr = array.get(e.gaps, i)
-                if gr.armed
-                    int deg = gr.fracDeg()
-                    if deg > gr.fDeg
-                        e.seqCounter := e.seqCounter + 1
-                        gr.fSeq  := e.seqCounter
-                        gr.fSigB := bar_index
-                        gr.fDeg  := deg
-                        gr.fLead := gr.fracTxt()
+                int ev = gr.judge(not blockDW and not blockFri)
+                if ev == 1
+                    e.seqCounter := e.seqCounter + 1
+                    gr.fSeq  := e.seqCounter
+                    gr.fSigB := bar_index
+                else if ev == 2
+                    string fx = f_fixTxt(f_clsName(e.cls), gr.dir, gr.fDeg)
+                    e.fixTxt := e.fixTxt == "" ? fx : e.fixTxt + "\n" + fx
 
         // ── בחירת השבירה המוצגת (החיה העדכנית ביותר) ──
         int selI = -1
@@ -939,7 +999,6 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
             e.fWhen  := 0
         else
             Gap gd = array.get(e.gaps, selI)
-            e.shownDir := gd.dir
             e.fGapId   := gd.id
             e.fWhen    := gd.birthT
             e.fDir     := gd.dir
@@ -1015,52 +1074,32 @@ else if newRefCycle and seedActive
     seedActive := false
 
 // ═══════════════════════════════════════════════════════════════════
-// דריכה · מדידת ביקור
+// דריכה · מדידת ביקור · IFVG לפי נכס
 //
 // דריכה: גאפ נהיה זמין לשבירה רק אחרי שתת-המחזור שבו נולד הסתיים.
 // חזרה לגאפ באותו תת-מחזור שבו נוצר אינה שבירה ואינה נספרת.
 // (1H: תת-מחזור = יום מסחר · 4H: שבוע · 15M: סשן · 5M: מיקרו-סשן · 1M: רבע
 //  יומי: רבע-רבעון (~23 יום) · שבועי: רבעון · חודשי: שנה)
 //
-// ביקור: כשאף נכס משתתף לא נוגע בגאפ — הביקור נגמר והעומקים מתאפסים. YM
+// ביקור: כשאף רגל חיה לא נוגעת בגאפ — הביקור נגמר והעומקים מתאפסים. YM
 // נספר גם הוא. כך מילוי משותף בביקור אחד לא חוסם שבירה בביקור הבא.
+//
+// IFVG לפי נכס (killLegs): רגל של נכס שסגר מעבר לה מתה, והשאר ממשיכים.
+// פחות משתי רגליים חיות — הגאפ נמחק. גאפים מתים לא נשמרים ולא מוצגים.
+//
+// רק בנר סגור, כמו המנועים — שום דבר כאן לא משנה את מה שמוצג באמצע נר.
 // ═══════════════════════════════════════════════════════════════════
 
-if array.size(gaps) > 0
-    for i = 0 to array.size(gaps) - 1
+if barstate.isconfirmed and array.size(gaps) > 0
+    for i = array.size(gaps) - 1 to 0
         Gap gu = array.get(gaps, i)
         if not gu.armed and gu.refId != refCycleId
             gu.armed := true
             gu.armB  := bar_index
-
         if gu.armed
-            bool outN = na(gu.nqTop) or (gu.dir == 1 ? nqL > gu.nqTop : nqH < gu.nqBot)
-            bool outE = na(gu.esTop) or (gu.dir == 1 ? esL > gu.esTop : esH < gu.esBot)
-            bool outY = na(gu.ymTop) or (gu.dir == 1 ? ymL > gu.ymTop : ymH < gu.ymBot)
-            if outN and outE and outY
-                // הביקור נגמר — מאפסים לקראת ביקור חדש
-                gu.inVisit := false
-                gu.nqExt   := gu.dir == 1 ? gu.nqTop : gu.nqBot
-                gu.esExt   := gu.dir == 1 ? gu.esTop : gu.esBot
-                gu.ymExt   := gu.dir == 1 ? gu.ymTop : gu.ymBot
-            else
-                if not gu.inVisit
-                    gu.inVisit := true
-                    gu.visits  := gu.visits + 1
-                if gu.dir == 1
-                    if not na(gu.nqTop)
-                        gu.nqExt := math.min(gu.nqExt, nqL)
-                    if not na(gu.esTop)
-                        gu.esExt := math.min(gu.esExt, esL)
-                    if not na(gu.ymTop)
-                        gu.ymExt := math.min(gu.ymExt, ymL)
-                else
-                    if not na(gu.nqTop)
-                        gu.nqExt := math.max(gu.nqExt, nqH)
-                    if not na(gu.esTop)
-                        gu.esExt := math.max(gu.esExt, esH)
-                    if not na(gu.ymTop)
-                        gu.ymExt := math.max(gu.ymExt, ymH)
+            gu.visit(nqH, nqL, esH, esL, ymH, ymL)
+        if gu.killLegs(nqC, esC, ymC) < 2
+            array.remove(gaps, i)
 
 // ═══════════════════════════════════════════════════════════════════
 // זיהוי גאפ קולקטיבי — באותו כיוון, באותו נר, בלפחות שני נכסים
@@ -1093,8 +1132,9 @@ if array.size(gaps) > 0
 //    כל מסגרת רואה את המעבר שלה: 1m את הרבע · 5m את המיקרו והסשן ·
 //    15m את אסיה→לונדון ואת פתיחת היום · 1H את היום והשבוע · 4H את
 //    השבוע והחודש, וכך הלאה עד שאין יותר שבר אמיתי בזמן.
-//    **הגודל לא משנה** — רווח של 0.25 הוא רווח בדיוק כמו 15 נקודות, ועליו
-//    יכולות להירשם כל הדרגות בדיוק כמו על FVG.
+//
+// **סף בטיקים של כל נכס** (VI ורווח מעבר): לבד — viMinTicks ומעלה;
+// כהרחבה של FVG של אותו נכס — כבר מ-viMergeTicks.
 //
 // **FVG ו-VI של אותו נכס מתאחדים לגאפ אחד.** זה לא "או-או": כשלנכס יש את
 // שניהם באותו נר, הגבולות הם האיחוד — `min` של התחתונים ו-`max` של
@@ -1138,13 +1178,30 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
     bool cycEdge = newRefCycle
 
     // VI בין נר [1] לנר [0] — **רצף**: שני הנרות לאותו כיוון של הרווח,
-    // אלא אם זה נר של מעבר סייקל. חייב להיות זהה למנוע.
-    bool vBullN = volImbOn and nqO > nqC[1] and (cycEdge or (nqC[1] > nqO[1] and nqC > nqO))
-    bool vBullE = volImbOn and esO > esC[1] and (cycEdge or (esC[1] > esO[1] and esC > esO))
-    bool vBullY = volImbOn and okY and ymO > ymC[1] and (cycEdge or (ymC[1] > ymO[1] and ymC > ymO))
-    bool vBearN = volImbOn and nqO < nqC[1] and (cycEdge or (nqC[1] < nqO[1] and nqC < nqO))
-    bool vBearE = volImbOn and esO < esC[1] and (cycEdge or (esC[1] < esO[1] and esC < esO))
-    bool vBearY = volImbOn and okY and ymO < ymC[1] and (cycEdge or (ymC[1] < ymO[1] and ymC < ymO))
+    // אלא אם זה נר של מעבר סייקל. הגודל בטיקים של כל נכס:
+    //   r* = יש רווח ברצף (לפני הסף) · m* = מספיק להתאחד עם FVG ·
+    //   v* = מספיק לבד. חייב להיות זהה למנוע.
+    int  tiN = math.round(math.abs(nqO - nqC[1]) / tkN)
+    int  tiE = math.round(math.abs(esO - esC[1]) / tkE)
+    int  tiY = math.round(math.abs(ymO - ymC[1]) / tkY)
+    bool rBullN = volImbOn and nqO > nqC[1] and (cycEdge or (nqC[1] > nqO[1] and nqC > nqO))
+    bool rBullE = volImbOn and esO > esC[1] and (cycEdge or (esC[1] > esO[1] and esC > esO))
+    bool rBullY = volImbOn and okY and ymO > ymC[1] and (cycEdge or (ymC[1] > ymO[1] and ymC > ymO))
+    bool rBearN = volImbOn and nqO < nqC[1] and (cycEdge or (nqC[1] < nqO[1] and nqC < nqO))
+    bool rBearE = volImbOn and esO < esC[1] and (cycEdge or (esC[1] < esO[1] and esC < esO))
+    bool rBearY = volImbOn and okY and ymO < ymC[1] and (cycEdge or (ymC[1] < ymO[1] and ymC < ymO))
+    bool mBullN = rBullN and tiN >= viMergeTicks
+    bool mBullE = rBullE and tiE >= viMergeTicks
+    bool mBullY = rBullY and tiY >= viMergeTicks
+    bool mBearN = rBearN and tiN >= viMergeTicks
+    bool mBearE = rBearE and tiE >= viMergeTicks
+    bool mBearY = rBearY and tiY >= viMergeTicks
+    bool vBullN = rBullN and tiN >= viMinTicks
+    bool vBullE = rBullE and tiE >= viMinTicks
+    bool vBullY = rBullY and tiY >= viMinTicks
+    bool vBearN = rBearN and tiN >= viMinTicks
+    bool vBearE = rBearE and tiE >= viMinTicks
+    bool vBearY = rBearY and tiY >= viMinTicks
 
     bool bullN = fBullN or vBullN
     bool bullE = fBullE or vBullE
@@ -1158,15 +1215,15 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
     //   F+ / F-   FVG של שלושה נרות
     //   V+ / V-   VI של שני נרות
     //   FV+ / FV- **שניהם באותו נר** — הם התאחדו לגאפ אחד מורחב
-    //   v+ / v-   **אות קטנה**: היה רווח סגירה/פתיחה, אבל שני הנרות לא
-    //             הלכו לאותו כיוון ולכן אין רצף והוא נפסל.
+    //   v+ / v-   **אות קטנה**: היה רווח סגירה/פתיחה אבל הוא נפסל — אין
+    //             רצף, או שהוא קטן מסף הטיקים.
     //   ·         כלום.
     // זה מפריד "אין רווח" מ"יש רווח שנפסל" — ההבדל שאי אפשר לראות על הגרף.
     // צריך **שניים** מתוך השלושה באותו כיוון; נכס בודד לא מספיק.
     dgEdge := cycEdge
-    dgN := fBullN and vBullN ? "FV+" : fBearN and vBearN ? "FV-" : fBullN ? "F+" : fBearN ? "F-" : vBullN ? "V+" : vBearN ? "V-" : nqO > nqC[1] ? "v+" : nqO < nqC[1] ? "v-" : "·"
-    dgE := fBullE and vBullE ? "FV+" : fBearE and vBearE ? "FV-" : fBullE ? "F+" : fBearE ? "F-" : vBullE ? "V+" : vBearE ? "V-" : esO > esC[1] ? "v+" : esO < esC[1] ? "v-" : "·"
-    dgY := fBullY and vBullY ? "FV+" : fBearY and vBearY ? "FV-" : fBullY ? "F+" : fBearY ? "F-" : vBullY ? "V+" : vBearY ? "V-" : ymO > ymC[1] ? "v+" : ymO < ymC[1] ? "v-" : "·"
+    dgN := fBullN and mBullN ? "FV+" : fBearN and mBearN ? "FV-" : fBullN ? "F+" : fBearN ? "F-" : vBullN ? "V+" : vBearN ? "V-" : nqO > nqC[1] ? "v+" : nqO < nqC[1] ? "v-" : "·"
+    dgE := fBullE and mBullE ? "FV+" : fBearE and mBearE ? "FV-" : fBullE ? "F+" : fBearE ? "F-" : vBullE ? "V+" : vBearE ? "V-" : esO > esC[1] ? "v+" : esO < esC[1] ? "v-" : "·"
+    dgY := fBullY and mBullY ? "FV+" : fBearY and mBearY ? "FV-" : fBullY ? "F+" : fBearY ? "F-" : vBullY ? "V+" : vBearY ? "V-" : ymO > ymC[1] ? "v+" : ymO < ymC[1] ? "v-" : "·"
 
     int cBull = (bullN ? 1 : 0) + (bullE ? 1 : 0) + (bullY ? 1 : 0)
     int cBear = (bearN ? 1 : 0) + (bearE ? 1 : 0) + (bearY ? 1 : 0)
@@ -1186,51 +1243,40 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
             if fBullN
                 nb := (extendBodies and nqO[1] > nqH[2]) ? nqC[2] : nqH[2]
                 nt := (extendBodies and nqL    > nqC[1]) ? nqO    : nqL
-            if vBullN
+            if vBullN or (fBullN and mBullN)
                 nb := na(nb) ? nqC[1] : math.min(nb, nqC[1])
                 nt := na(nt) ? nqO    : math.max(nt, nqO)
             if fBullE
                 eb := (extendBodies and esO[1] > esH[2]) ? esC[2] : esH[2]
                 et := (extendBodies and esL    > esC[1]) ? esO    : esL
-            if vBullE
+            if vBullE or (fBullE and mBullE)
                 eb := na(eb) ? esC[1] : math.min(eb, esC[1])
                 et := na(et) ? esO    : math.max(et, esO)
             if fBullY
                 yb := (extendBodies and ymO[1] > ymH[2]) ? ymC[2] : ymH[2]
                 yt := (extendBodies and ymL    > ymC[1]) ? ymO    : ymL
-            if vBullY
+            if vBullY or (fBullY and mBullY)
                 yb := na(yb) ? ymC[1] : math.min(yb, ymC[1])
                 yt := na(yt) ? ymO    : math.max(yt, ymO)
         else
             if fBearN
                 nt := (extendBodies and nqO[1] < nqL[2]) ? nqC[2] : nqL[2]
                 nb := (extendBodies and nqH    < nqC[1]) ? nqO    : nqH
-            if vBearN
+            if vBearN or (fBearN and mBearN)
                 nt := na(nt) ? nqC[1] : math.max(nt, nqC[1])
                 nb := na(nb) ? nqO    : math.min(nb, nqO)
             if fBearE
                 et := (extendBodies and esO[1] < esL[2]) ? esC[2] : esL[2]
                 eb := (extendBodies and esH    < esC[1]) ? esO    : esH
-            if vBearE
+            if vBearE or (fBearE and mBearE)
                 et := na(et) ? esC[1] : math.max(et, esC[1])
                 eb := na(eb) ? esO    : math.min(eb, esO)
             if fBearY
                 yt := (extendBodies and ymO[1] < ymL[2]) ? ymC[2] : ymL[2]
                 yb := (extendBodies and ymH    < ymC[1]) ? ymO    : ymH
-            if vBearY
+            if vBearY or (fBearY and mBearY)
                 yt := na(yt) ? ymC[1] : math.max(yt, ymC[1])
                 yb := na(yb) ? ymO    : math.min(yb, ymO)
-
-        // גאפ שקטן מהסף נפסל לאותו נכס בלבד. אם נשאר רק אחד — אין גאפ.
-        if not na(nt) and nt - nb <= minGapPct / 100 * nqC
-            nb := na
-            nt := na
-        if not na(et) and et - eb <= minGapPct / 100 * esC
-            eb := na
-            et := na
-        if not na(yt) and yt - yb <= minGapPct / 100 * ymC
-            yb := na
-            yt := na
 
         int parts = (na(nt) ? 0 : 1) + (na(et) ? 0 : 1) + (na(yt) ? 0 : 1)
         if parts >= 2
@@ -1241,18 +1287,21 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
             bool legOnChart = (isNQc and not na(nt)) or (isESc and not na(et)) or (isYMc and not na(yt))
             float cb = na
             float ct = na
+            int   chTi = math.round(math.abs(open - close[1]) / syminfo.mintick)
             if legOnChart and newDir == 1
-                if low > high[2]
+                bool chF = low > high[2]
+                if chF
                     cb := (extendBodies and open[1] > high[2]) ? close[2] : high[2]
                     ct := (extendBodies and low      > close[1]) ? open  : low
-                if volImbOn and open > close[1] and (cycEdge or (close[1] > open[1] and close > open))
+                if volImbOn and open > close[1] and (cycEdge or (close[1] > open[1] and close > open)) and (chTi >= viMinTicks or (chF and chTi >= viMergeTicks))
                     cb := na(cb) ? close[1] : math.min(cb, close[1])
                     ct := na(ct) ? open     : math.max(ct, open)
             if legOnChart and newDir == -1
-                if high < low[2]
+                bool chF = high < low[2]
+                if chF
                     ct := (extendBodies and open[1] < low[2])  ? close[2] : low[2]
                     cb := (extendBodies and high     < close[1]) ? open  : high
-                if volImbOn and open < close[1] and (cycEdge or (close[1] < open[1] and close < open))
+                if volImbOn and open < close[1] and (cycEdge or (close[1] < open[1] and close < open)) and (chTi >= viMinTicks or (chF and chTi >= viMergeTicks))
                     ct := na(ct) ? close[1] : math.max(ct, close[1])
                     cb := na(cb) ? open     : math.min(cb, open)
             // ── לאיזה תת-מחזור הגאפ שייך ──
@@ -1265,13 +1314,13 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
             // שבמקרה נתן גם רגל FVG נתפס ב-refCycleId[1] ונרשם לסייקל הישן,
             // ואז הוא נדרך מוקדם מדי ומקבל את השם הלא נכון בקופסה.
             bool anyFvg = (not na(nt) and (newDir == 1 ? fBullN : fBearN)) or (not na(et) and (newDir == 1 ? fBullE : fBearE)) or (not na(yt) and (newDir == 1 ? fBullY : fBearY))
-            bool anyVi  = (not na(nt) and (newDir == 1 ? vBullN : vBearN)) or (not na(et) and (newDir == 1 ? vBullE : vBearE)) or (not na(yt) and (newDir == 1 ? vBullY : vBearY))
+            bool anyVi  = (not na(nt) and (newDir == 1 ? mBullN : mBearN)) or (not na(et) and (newDir == 1 ? mBullE : mBearE)) or (not na(yt) and (newDir == 1 ? mBullY : mBearY))
             // תיוג לפי הנר הנוכחי: גאפ מעבר, או גאפ שכולו VI.
             bool tagNow = (cycEdge and anyVi) or not anyFvg
             // origin נשאר לפי anyFvg — הוא רק קצה הקופסה, וכשיש FVG היא
             // צריכה לכסות את כל השלישייה.
             gapCounter += 1
-            Gap gn = Gap.new(gapCounter, newDir, nb, nt, eb, et, yb, yt, tagNow ? refCycleId : refCycleId[1], tagNow ? time : time[1], anyFvg ? bar_index - 2 : bar_index - 1, newDir == 1 ? nt : nb, newDir == 1 ? et : eb, newDir == 1 ? yt : yb, 0, 0, false, false, not anyFvg, 0, "", 0, 0, na, cb, ct)
+            Gap gn = Gap.new(gapCounter, newDir, nb, nt, eb, et, yb, yt, tagNow ? refCycleId : refCycleId[1], tagNow ? time : time[1], anyFvg ? bar_index - 2 : bar_index - 1, newDir == 1 ? nt : nb, newDir == 1 ? et : eb, newDir == 1 ? yt : yb, 0, 0, false, false, not anyFvg, 0, "", 0, 0, na, 0, 0, "", cb, ct)
             array.push(gaps, gn)
             f_trim(gaps)
 
@@ -1283,19 +1332,18 @@ cycleOK  = not (tfClass == 5 and blockDeadWeek and isDeadWeek)
 friBlock = (tfClass == 5 or tfClass == 4) and tdDow == dayofweek.friday
 
 // ═══════════════════════════════════════════════════════════════════
-// רישום שבירות — לכל גאפ השבירה שלו
+// רישום שבירות — לכל גאפ השבירה שלו (judge)
 //
-// שבירה היא אירוע שקרה על גאפ מסוים. היא נרשמת על הגאפ עצמו ונשארת שם,
-// והדרגה יכולה רק לעלות. פתיל של הנכס המפגר אינו מבטל אותה.
+// "מיידי עם תיקון": שבירה נרשמת ומתריעה ברגע שהיא קורית, ויכולה רק לעלות
+// — חוץ ממקרה אחד: אם **באותו ביקור** המפגר משיג את המוביל, הדרגה יורדת
+// (או מתבטלת) ונשלחת התראת תיקון. כשהביקור נגמר הדרגה ננעלת.
+// "בסוף הביקור": נרשמת רק כשכל הנכסים יצאו מהגאפ, לפי העומקים הסופיים.
 // שבירות של גאפים שונים אינן מתחרות על מקום אחד — כל אחת נרשמת בנפרד,
 // ומה שמצויר על הגרף זו פשוט העדכנית ביותר.
+// שישי / שבוע מת חוסמים שבירה חדשה, לא תיקון.
 // ═══════════════════════════════════════════════════════════════════
 
 atr = ta.atr(14)
-
-// שם קריא למסגרת הזמן — כדי שבהתראה בנייד יהיה ברור מיד מאיפה היא הגיעה
-f_tfName() =>
-    f_clsName(tfClass)
 
 var int seqCounter = 0
 
@@ -1303,23 +1351,23 @@ var int seqCounter = 0
 // יגיעו כהתראה אחת ולא כמה נפרדות.
 string alertMsg = ""
 
-if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK and array.size(gaps) > 0
+if barstate.isconfirmed and tfClass != 0 and array.size(gaps) > 0
     for i = 0 to array.size(gaps) - 1
         Gap gr = array.get(gaps, i)
-        if gr.armed
-            int deg = gr.fracDeg()
-            if deg > gr.fDeg
-                // כל עליית דרגה היא אירוע חדש ומרעננת את המונה, כך שמה
-                // שמוצג הוא תמיד השבירה שקרתה אחרונה.
-                seqCounter += 1
-                gr.fSeq   := seqCounter
-                gr.fSigB  := bar_index
-                gr.fYPos  := gr.dir == 1 ? low - atr * offsetMlt : high + atr * offsetMlt
-                gr.fDeg   := deg
-                gr.fLead  := gr.fracTxt()
-                if alertOn and deg >= alertMinDeg
-                    string one = "[" + f_tfName() + "] " + syminfo.ticker + " · שבירה " + (gr.dir == 1 ? "שורית" : "דובית") + " " + f_degTxt(deg) + " · " + gr.fLead
-                    alertMsg := alertMsg == "" ? one : alertMsg + "\n" + one
+        int ev = gr.judge(not friBlock and cycleOK)
+        if ev == 1
+            // כל עליית דרגה היא אירוע חדש ומרעננת את המונה, כך שמה
+            // שמוצג הוא תמיד השבירה שקרתה אחרונה.
+            seqCounter += 1
+            gr.fSeq  := seqCounter
+            gr.fSigB := bar_index
+            gr.fYPos := gr.dir == 1 ? low - atr * offsetMlt : high + atr * offsetMlt
+            if alertOn and gr.fDeg >= alertMinDeg
+                string one = "[" + f_clsName(tfClass) + "] " + syminfo.ticker + " · שבירה " + (gr.dir == 1 ? "שורית" : "דובית") + " " + f_degTxt(gr.fDeg) + " · " + gr.fLead
+                alertMsg := alertMsg == "" ? one : alertMsg + "\n" + one
+        else if ev == 2 and alertOn
+            string fx = f_fixTxt(f_clsName(tfClass), gr.dir, gr.fDeg)
+            alertMsg := alertMsg == "" ? fx : alertMsg + "\n" + fx
 
 // ההתראה עצמה נשלחת בסוף הקובץ, אחרי שגם המנועים של שאר המסגרות
 // הספיקו להוסיף את השבירות שלהם לאותה הודעה.
@@ -1327,14 +1375,14 @@ if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK and array.
 // ═══════════════════════════════════════════════════════════════════
 // בחירת מה מוצג — השבירה החיה העדכנית ביותר
 //
-// שבירה חיה עד סוף המיכל, בכל מסגרות הזמן. **החלפת מיכל היא הדבר היחיד
-// שמוציא אותה מהרשימה.**
+// שבירה חיה עד סוף המיכל, בכל מסגרות הזמן. מה שמוציא אותה: החלפת מיכל,
+// ביטול בתיקון, או שהגאפ שלה מת (פחות משתי רגליים חיות).
 //   15M — שבירה של לונדון מלווה את שאר יום המסחר (NY-AM ו-NY-PM)
 //   1H  — של יום שני, עד סוף השבוע · 4H — של שבוע, עד סוף החודש
 //   1D  — של רבע-רבעון, עד סוף השנה · 1W — של רבעון, עד סוף השנה
 //   Mo  — של שנה, עד סוף מחזור 4 השנים
 // מבין השבירות מצוירת זו שקרתה אחרונה. שבירה נגדית לא מוחקת את הקודמות —
-// היא רק חדשה יותר ולכן קופצת לתצוגה.
+// היא רק חדשה יותר ולכן קופצת לתצוגה. כשהיא מתבטלת, הקודמת חוזרת.
 // ═══════════════════════════════════════════════════════════════════
 
 int selIdx = -1
@@ -1345,14 +1393,6 @@ if array.size(gaps) > 0
         if gv.fDeg > 0 and gv.fSeq > selSeq
             selSeq := gv.fSeq
             selIdx := i
-
-// שבירה נגדית דוחקת את הקודמות מהתצוגה, אבל לא מוחקת אותן. הבחירה למעלה
-// לוקחת תמיד את העדכנית ביותר, והיא נשארת עד שהמיכל מתחלף.
-var int shownDir = 0
-if newLifeCycle
-    shownDir := 0
-if selIdx != -1
-    shownDir := array.get(gaps, selIdx).dir
 
 // ═══════════════════════════════════════════════════════════════════
 // מסגרות זמן אחרות — מנוע נפרד לכל אחת
@@ -1450,16 +1490,16 @@ tfl3 = not useL3 ? "12M" : cL3 == 1 ? "1" : cL3 == 2 ? "5" : cL3 == 3 ? "15" : c
 [q2yo, q2yh, q2yl, q2yc] = request.security_lower_tf(sYM, tfl2, [open, high, low, close], ignore_invalid_timeframe = true)
 [q3yo, q3yh, q3yl, q3yc] = request.security_lower_tf(sYM, tfl3, [open, high, low, close], ignore_invalid_timeframe = true)
 
-var Engine eg1 = Engine.new(c1, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, 0, 0, false)
-var Engine eg2 = Engine.new(c2, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, 0, 0, false)
-var Engine eg3 = Engine.new(c3, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, 0, 0, false)
-var Engine eg4 = Engine.new(c4, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, 0, 0, false)
-var Engine eg5 = Engine.new(c5, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, 0, 0, false)
-var Engine eg6 = Engine.new(c6, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, 0, 0, false)
+var Engine eg1 = Engine.new(c1, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, false, 0, 0, 0, "", 0, 0, 0, 0, false, "")
+var Engine eg2 = Engine.new(c2, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, false, 0, 0, 0, "", 0, 0, 0, 0, false, "")
+var Engine eg3 = Engine.new(c3, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, false, 0, 0, 0, "", 0, 0, 0, 0, false, "")
+var Engine eg4 = Engine.new(c4, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, false, 0, 0, 0, "", 0, 0, 0, 0, false, "")
+var Engine eg5 = Engine.new(c5, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, false, 0, 0, 0, "", 0, 0, 0, 0, false, "")
+var Engine eg6 = Engine.new(c6, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, false, 0, 0, 0, "", 0, 0, 0, 0, false, "")
 
-var Engine el1 = Engine.new(cL1, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, 0, 0, false)
-var Engine el2 = Engine.new(cL2, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, 0, 0, false)
-var Engine el3 = Engine.new(cL3, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, 0, false, 0, 0, 0, "", 0, 0, 0, 0, false)
+var Engine el1 = Engine.new(cL1, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, false, 0, 0, 0, "", 0, 0, 0, 0, false, "")
+var Engine el2 = Engine.new(cL2, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, false, 0, 0, 0, "", 0, 0, 0, 0, false, "")
+var Engine el3 = Engine.new(cL3, array.new<Gap>(), array.new_float(8, na), array.new_float(8, na), array.new_float(8, na), 0, 0, false, 0, 0, 0, false, 0, 0, 0, false, 0, 0, 0, "", 0, 0, 0, 0, false, "")
 
 // כל המנועים ברשימה אחת, באותו סדר של useH1..useL3, כדי שאפשר יהיה לעבור
 // עליהם בלולאה במקום לחזור על אותו קוד תשע פעמים.
@@ -1506,6 +1546,7 @@ if mtfOn and barstate.isconfirmed
         for k = 0 to array.size(allEng) - 1
             Engine er = array.get(allEng, k)
             er.justFired := false
+            er.fixTxt    := ""
     if useH1
         f_step(eg1, t1, array.from(n1o0, n1h0, n1l0, n1c0, n1o1, n1c1, n1h2, n1l2, n1c2), array.from(s1o0, s1h0, s1l0, s1c0, s1o1, s1c1, s1h2, s1l2, s1c2), array.from(y1o0, y1h0, y1l0, y1c0, y1o1, y1c1, y1h2, y1l2, y1c2))
     if useH2
@@ -1651,6 +1692,8 @@ var int    flashLife = 0
 if mtfOn and barstate.isconfirmed and array.size(allEng) > 0
     for k = 0 to array.size(allEng) - 1
         Engine ek = array.get(allEng, k)
+        if f_useSlot(k) and mtfAlert and alertOn and ek.fixTxt != ""
+            alertMsg := alertMsg == "" ? ek.fixTxt : alertMsg + "\n" + ek.fixTxt
         if f_useSlot(k) and ek.justFired
             flashTxt  := f_clsName(ek.cls) + " " + (ek.fDir == 1 ? "▲" : "▼") + str.tostring(ek.fDeg)
             flashDir  := ek.fDir
@@ -1929,7 +1972,7 @@ if showDebug and barstate.islast
 
     table.cell(dbg, 0, 3, "שבירות פעילות", bgcolor = hc, text_color = wc)
     table.cell(dbg, 1, 3, str.tostring(tFrac), bgcolor = wc)
-    table.cell(dbg, 2, 3, shownDir == 0 ? "-" : (shownDir == 1 ? "שורית" : "דובית"), bgcolor = wc)
+    table.cell(dbg, 2, 3, fracAtEnd ? "סוף ביקור" : "מיידי", bgcolor = wc)
     table.cell(dbg, 3, 3, tDir == 0 ? "-" : (tDir == 1 ? "שורי" : "דובי"), bgcolor = wc)
 
     table.cell(dbg, 0, 4, "── הגאפ המוצג ──", bgcolor = hc, text_color = wc)
