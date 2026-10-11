@@ -375,10 +375,6 @@ type Gap
     float  esTop
     float  ymBot
     float  ymTop
-    float  nqRawBot // ה-FVG הקלאסי בפתילים בלבד, בלי הרחבה — לאבחון
-    float  nqRawTop
-    float  esRawBot
-    float  esRawTop
     // תת-המחזור של **הנר האמצעי** — הנר שיצר את חוסר האיזון. הנר השלישי רק
     // מאשר אותו, ולכן גאפ שנוצר ב-23:45 שייך לאסיה גם אם האישור הגיע ב-00:00.
     int    refId
@@ -387,8 +383,6 @@ type Gap
     float  nqExt    // הקיצוניות בביקור הנוכחי (min ל-bull, max ל-bear)
     float  esExt
     float  ymExt
-    int    nqExtB   // הנר של הקיצוניות — לאבחון
-    int    esExtB
     int    armB     // הנר שבו הגאפ נדרך — לאבחון
     int    visits   // כמה פעמים המחיר חזר לגאפ
     bool   inVisit  // האם אנחנו כרגע בתוך ביקור
@@ -847,29 +841,21 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
             float et = na
             float yb = na
             float yt = na
-            float nrb = na
-            float nrt = na
-            float erb = na
-            float ert = na
             // FVG ו-VI לאותו נכס **מתאחדים** לגאפ אחד: min של התחתונים
             // ו-max של העליונים. זהה לגרף.
             if nd == 1
                 if fBullN
-                    nb  := (extendBodies and no1 > nh2) ? nc2 : nh2
-                    nt  := (extendBodies and nl0 > nc1) ? no0 : nl0
-                    nrb := nh2
-                    nrt := nl0
+                    nb := (extendBodies and no1 > nh2) ? nc2 : nh2
+                    nt := (extendBodies and nl0 > nc1) ? no0 : nl0
                 if vBullN
-                    nb  := na(nb) ? nc1 : math.min(nb, nc1)
-                    nt  := na(nt) ? no0 : math.max(nt, no0)
+                    nb := na(nb) ? nc1 : math.min(nb, nc1)
+                    nt := na(nt) ? no0 : math.max(nt, no0)
                 if fBullE
-                    eb  := (extendBodies and eo1 > eh2) ? ec2 : eh2
-                    et  := (extendBodies and el0 > ec1) ? eo0 : el0
-                    erb := eh2
-                    ert := el0
+                    eb := (extendBodies and eo1 > eh2) ? ec2 : eh2
+                    et := (extendBodies and el0 > ec1) ? eo0 : el0
                 if vBullE
-                    eb  := na(eb) ? ec1 : math.min(eb, ec1)
-                    et  := na(et) ? eo0 : math.max(et, eo0)
+                    eb := na(eb) ? ec1 : math.min(eb, ec1)
+                    et := na(et) ? eo0 : math.max(et, eo0)
                 if fBullY
                     yb := (extendBodies and yo1 > yh2) ? yc2 : yh2
                     yt := (extendBodies and yl0 > yc1) ? yo0 : yl0
@@ -878,21 +864,17 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
                     yt := na(yt) ? yo0 : math.max(yt, yo0)
             else
                 if fBearN
-                    nt  := (extendBodies and no1 < nl2) ? nc2 : nl2
-                    nb  := (extendBodies and nh0 < nc1) ? no0 : nh0
-                    nrb := nh0
-                    nrt := nl2
+                    nt := (extendBodies and no1 < nl2) ? nc2 : nl2
+                    nb := (extendBodies and nh0 < nc1) ? no0 : nh0
                 if vBearN
-                    nt  := na(nt) ? nc1 : math.max(nt, nc1)
-                    nb  := na(nb) ? no0 : math.min(nb, no0)
+                    nt := na(nt) ? nc1 : math.max(nt, nc1)
+                    nb := na(nb) ? no0 : math.min(nb, no0)
                 if fBearE
-                    et  := (extendBodies and eo1 < el2) ? ec2 : el2
-                    eb  := (extendBodies and eh0 < ec1) ? eo0 : eh0
-                    erb := eh0
-                    ert := el2
+                    et := (extendBodies and eo1 < el2) ? ec2 : el2
+                    eb := (extendBodies and eh0 < ec1) ? eo0 : eh0
                 if vBearE
-                    et  := na(et) ? ec1 : math.max(et, ec1)
-                    eb  := na(eb) ? eo0 : math.min(eb, eo0)
+                    et := na(et) ? ec1 : math.max(et, ec1)
+                    eb := na(eb) ? eo0 : math.min(eb, eo0)
                 if fBearY
                     yt := (extendBodies and yo1 < yl2) ? yc2 : yl2
                     yb := (extendBodies and yh0 < yc1) ? yo0 : yh0
@@ -921,7 +903,7 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
                 bool tagNow = (cycEdge and anyVi) or not anyFvg
                 int  gRef   = tagNow ? rf : (rfMid == 0 ? rf : rfMid)
                 int  gWhen  = tagNow ? tOpen : (tMid == 0 ? tOpen : tMid)
-                Gap gn = Gap.new(e.gapCounter, nd, nb, nt, eb, et, yb, yt, nrb, nrt, erb, ert, gRef, gWhen, bar_index, nd == 1 ? nt : nb, nd == 1 ? et : eb, nd == 1 ? yt : yb, 0, 0, 0, 0, false, false, not anyFvg, 0, "", 0, 0, na, na, na)
+                Gap gn = Gap.new(e.gapCounter, nd, nb, nt, eb, et, yb, yt, gRef, gWhen, bar_index, nd == 1 ? nt : nb, nd == 1 ? et : eb, nd == 1 ? yt : yb, 0, 0, false, false, not anyFvg, 0, "", 0, 0, na, na, na)
                 array.push(e.gaps, gn)
                 f_trim(e.gaps)
 
@@ -1066,23 +1048,19 @@ if array.size(gaps) > 0
                     gu.inVisit := true
                     gu.visits  := gu.visits + 1
                 if gu.dir == 1
-                    if not na(gu.nqTop) and nqL < gu.nqExt
-                        gu.nqExt  := nqL
-                        gu.nqExtB := bar_index
-                    if not na(gu.esTop) and esL < gu.esExt
-                        gu.esExt  := esL
-                        gu.esExtB := bar_index
-                    if not na(gu.ymTop) and ymL < gu.ymExt
-                        gu.ymExt  := ymL
+                    if not na(gu.nqTop)
+                        gu.nqExt := math.min(gu.nqExt, nqL)
+                    if not na(gu.esTop)
+                        gu.esExt := math.min(gu.esExt, esL)
+                    if not na(gu.ymTop)
+                        gu.ymExt := math.min(gu.ymExt, ymL)
                 else
-                    if not na(gu.nqTop) and nqH > gu.nqExt
-                        gu.nqExt  := nqH
-                        gu.nqExtB := bar_index
-                    if not na(gu.esTop) and esH > gu.esExt
-                        gu.esExt  := esH
-                        gu.esExtB := bar_index
-                    if not na(gu.ymTop) and ymH > gu.ymExt
-                        gu.ymExt  := ymH
+                    if not na(gu.nqTop)
+                        gu.nqExt := math.max(gu.nqExt, nqH)
+                    if not na(gu.esTop)
+                        gu.esExt := math.max(gu.esExt, esH)
+                    if not na(gu.ymTop)
+                        gu.ymExt := math.max(gu.ymExt, ymH)
 
 // ═══════════════════════════════════════════════════════════════════
 // זיהוי גאפ קולקטיבי — באותו כיוון, באותו נר, בלפחות שני נכסים
@@ -1201,33 +1179,22 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
         float et = na
         float yb = na
         float yt = na
-        // ה-FVG הקלאסי בפתילים בלבד — נשמר כדי שאפשר יהיה לראות בטבלה
-        // בדיוק מה ההרחבה לגופים עשתה לגבולות
-        float nrb = na
-        float nrt = na
-        float erb = na
-        float ert = na
-
         // ── FVG ו-VI לאותו נכס מתאחדים לגאפ אחד ──
         // לא "או-או": כשלנכס יש את שניהם באותו נר, הגאפ הוא האיחוד שלהם —
         // min של התחתונים ו-max של העליונים. בפועל זה FVG מורחב.
         if newDir == 1
             if fBullN
-                nb  := (extendBodies and nqO[1] > nqH[2]) ? nqC[2] : nqH[2]
-                nt  := (extendBodies and nqL    > nqC[1]) ? nqO    : nqL
-                nrb := nqH[2]
-                nrt := nqL
+                nb := (extendBodies and nqO[1] > nqH[2]) ? nqC[2] : nqH[2]
+                nt := (extendBodies and nqL    > nqC[1]) ? nqO    : nqL
             if vBullN
-                nb  := na(nb) ? nqC[1] : math.min(nb, nqC[1])
-                nt  := na(nt) ? nqO    : math.max(nt, nqO)
+                nb := na(nb) ? nqC[1] : math.min(nb, nqC[1])
+                nt := na(nt) ? nqO    : math.max(nt, nqO)
             if fBullE
-                eb  := (extendBodies and esO[1] > esH[2]) ? esC[2] : esH[2]
-                et  := (extendBodies and esL    > esC[1]) ? esO    : esL
-                erb := esH[2]
-                ert := esL
+                eb := (extendBodies and esO[1] > esH[2]) ? esC[2] : esH[2]
+                et := (extendBodies and esL    > esC[1]) ? esO    : esL
             if vBullE
-                eb  := na(eb) ? esC[1] : math.min(eb, esC[1])
-                et  := na(et) ? esO    : math.max(et, esO)
+                eb := na(eb) ? esC[1] : math.min(eb, esC[1])
+                et := na(et) ? esO    : math.max(et, esO)
             if fBullY
                 yb := (extendBodies and ymO[1] > ymH[2]) ? ymC[2] : ymH[2]
                 yt := (extendBodies and ymL    > ymC[1]) ? ymO    : ymL
@@ -1236,21 +1203,17 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
                 yt := na(yt) ? ymO    : math.max(yt, ymO)
         else
             if fBearN
-                nt  := (extendBodies and nqO[1] < nqL[2]) ? nqC[2] : nqL[2]
-                nb  := (extendBodies and nqH    < nqC[1]) ? nqO    : nqH
-                nrb := nqH
-                nrt := nqL[2]
+                nt := (extendBodies and nqO[1] < nqL[2]) ? nqC[2] : nqL[2]
+                nb := (extendBodies and nqH    < nqC[1]) ? nqO    : nqH
             if vBearN
-                nt  := na(nt) ? nqC[1] : math.max(nt, nqC[1])
-                nb  := na(nb) ? nqO    : math.min(nb, nqO)
+                nt := na(nt) ? nqC[1] : math.max(nt, nqC[1])
+                nb := na(nb) ? nqO    : math.min(nb, nqO)
             if fBearE
-                et  := (extendBodies and esO[1] < esL[2]) ? esC[2] : esL[2]
-                eb  := (extendBodies and esH    < esC[1]) ? esO    : esH
-                erb := esH
-                ert := esL[2]
+                et := (extendBodies and esO[1] < esL[2]) ? esC[2] : esL[2]
+                eb := (extendBodies and esH    < esC[1]) ? esO    : esH
             if vBearE
-                et  := na(et) ? esC[1] : math.max(et, esC[1])
-                eb  := na(eb) ? esO    : math.min(eb, esO)
+                et := na(et) ? esC[1] : math.max(et, esC[1])
+                eb := na(eb) ? esO    : math.min(eb, esO)
             if fBearY
                 yt := (extendBodies and ymO[1] < ymL[2]) ? ymC[2] : ymL[2]
                 yb := (extendBodies and ymH    < ymC[1]) ? ymO    : ymH
@@ -1308,7 +1271,7 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
             // origin נשאר לפי anyFvg — הוא רק קצה הקופסה, וכשיש FVG היא
             // צריכה לכסות את כל השלישייה.
             gapCounter += 1
-            Gap gn = Gap.new(gapCounter, newDir, nb, nt, eb, et, yb, yt, nrb, nrt, erb, ert, tagNow ? refCycleId : refCycleId[1], tagNow ? time : time[1], anyFvg ? bar_index - 2 : bar_index - 1, newDir == 1 ? nt : nb, newDir == 1 ? et : eb, newDir == 1 ? yt : yb, 0, 0, 0, 0, false, false, not anyFvg, 0, "", 0, 0, na, cb, ct)
+            Gap gn = Gap.new(gapCounter, newDir, nb, nt, eb, et, yb, yt, tagNow ? refCycleId : refCycleId[1], tagNow ? time : time[1], anyFvg ? bar_index - 2 : bar_index - 1, newDir == 1 ? nt : nb, newDir == 1 ? et : eb, newDir == 1 ? yt : yb, 0, 0, false, false, not anyFvg, 0, "", 0, 0, na, cb, ct)
             array.push(gaps, gn)
             f_trim(gaps)
 
