@@ -23,13 +23,9 @@ indicator("SSMT Fill | Quarterly Theory", overlay = true, max_labels_count = 20,
 // הגאפ נשאר תקף וכניסה חוזרת אליו נמדדת מחדש ויכולה לייצר שבירה.
 //
 // שבירה היא אירוע שקרה — אחרי שנרשמה היא נשארת, והדרגה יכולה רק לעלות.
-// מה שמוציא אותה מהמשחק: IFVG על הגאפ שלה, או החלפת מיכל.
-// שבירה נגדית רק דוחקת אותה מהתצוגה — מוצגת תמיד החיה העדכנית ביותר.
-// אם הגאפ של הנגדית הופך ל-IFVG, הקודמת בכיוון ההפוך חוזרת להיות המוצגת,
-// כל עוד המיכל לא התחלף.
-//
-// IFVG: סגירה של NQ או ES מעבר לגאפ הורגת אותו בשני הכיוונים. סגירה של YM
-// הורגת רק גאפ דובי — סגירה שלו מתחת לגאפ שורי היא החולשה הצפויה שלו.
+// **מה שמוציא אותה מהמשחק זה רק החלפת מיכל.** גאפ חי כל עוד המיכל שלו
+// חי, גם אם המחיר סגר מעבר לו.
+// שבירה נגדית רק דוחקת אותה מהתצוגה — מוצגת תמיד העדכנית ביותר.
 //
 // מיפוי תת-מחזור/מיכל לכל מסגרת זמן:
 //   1M  — רבע 22.5m   → מיקרו-סשן    5M  — מיקרו-סשן → סשן
@@ -104,10 +100,6 @@ showAllGaps = input.bool(false, "הצג את הגאפים הדרוכים (תמי
 // והגרף נשאר נקי אחרי זה. ההגדרה שמעל נשארת למי שרוצה אותם קבוע.
 autoAllGaps = input.bool(true, "הצצה: הגאפים הדרוכים בהחלפת מסגרת (4H ומטה)", group = grpVis)
 autoAllSec  = input.int(20, "כמה שניות להשאיר את ההצצה", minval = 1, maxval = 600, group = grpVis)
-// לאבחון בלבד: מצייר גם את הגאפים שבוטלו ב-IFVG, באפור ועם ✕. זה מה שעונה
-// על "הגאפ הזה בכלל נוצר?" — אם הוא לא מופיע גם ככה, הוא פשוט לא נוצר
-// (לא היו שני נכסים באותו כיוון באותו נר). כבוי כברירת מחדל.
-showDeadGaps = input.bool(false, "הצג גם גאפים שבוטלו ב-IFVG (✕)", tooltip = "לאבחון: גאפ אפור עם ✕ נוצר אבל נסגר נר מעבר לו. אם הגאפ שאתה מחפש לא מופיע גם עם זה דלוק — הוא לא נוצר מלכתחילה.", group = grpVis)
 showDebug   = input.bool(false, "הצג טבלת בדיקה", group = grpVis)
 
 grpLogic = "לוגיקה"
@@ -390,7 +382,6 @@ type Gap
     // תת-המחזור של **הנר האמצעי** — הנר שיצר את חוסר האיזון. הנר השלישי רק
     // מאשר אותו, ולכן גאפ שנוצר ב-23:45 שייך לאסיה גם אם האישור הגיע ב-00:00.
     int    refId
-    int    birth    // הנר השלישי — הנר שסגר את ה-FVG (משמש למניעת IFVG על נר הלידה)
     int    birthT   // זמן הפתיחה של הנר האמצעי — הזמן שבו הגאפ באמת נוצר
     int    origin   // הנר הראשון של ה-FVG — משם מתחילה הקופסה
     float  nqExt    // הקיצוניות בביקור הנוכחי (min ל-bull, max ל-bear)
@@ -401,7 +392,6 @@ type Gap
     int    armB     // הנר שבו הגאפ נדרך — לאבחון
     int    visits   // כמה פעמים המחיר חזר לגאפ
     bool   inVisit  // האם אנחנו כרגע בתוך ביקור
-    bool   dead     // הפך ל-IFVG — הרעיון מתבטל
     bool   armed    // תת-המחזור שבו נולד הסתיים — רק עכשיו הוא יכול לייצר שבירה
     // true = גאפ סגירה/פתיחה בין שני נרות (Volume Imbalance), ולא FVG של
     // שלושה. משמש לכיתוב (V בהצצה) — כל שאר הלוגיקה זהה לשני הסוגים.
@@ -425,20 +415,15 @@ f_name(int a) =>
 
 // ── הרשימה מלאה: מי יוצא ──
 // array.shift הוציא תמיד את הגאפ ה**ישן ביותר**, ולכן גאפ אמיתי מיום שני
-// שנושא שבירה חיה הוצא כדי לפנות מקום לגאפ בן שלושה טיקים שמת מיד אחריו.
-// סדר הפינוי עכשיו הוא לפי ערך: קודם המת הישן ביותר (הוא כבר לא משחק),
-// אחריו הישן ביותר בלי שבירה, ורק אם לכולם יש שבירה — הישן ביותר.
-// האיבר ב-0 הוא הישן ביותר, כי הדחיפה תמיד לסוף.
+// שנושא שבירה חיה הוצא כדי לפנות מקום לגאפ בן שלושה טיקים חסר ערך.
+// הפינוי הוא לפי ערך: קודם הישן ביותר **בלי שבירה**, ורק אם לכולם יש
+// שבירה — הישן ביותר. האיבר ב-0 הוא הישן ביותר, כי הדחיפה תמיד לסוף.
 f_trim(array<Gap> a) =>
     if array.size(a) > maxGaps
         int k = -1
         for i = 0 to array.size(a) - 1
-            if k == -1 and array.get(a, i).dead
+            if k == -1 and array.get(a, i).fDeg == 0
                 k := i
-        if k == -1
-            for i = 0 to array.size(a) - 1
-                if k == -1 and array.get(a, i).fDeg == 0
-                    k := i
         array.remove(a, k == -1 ? 0 : k)
 
 // עומק החדירה של נכס לתוך הגאפ שלו, כאחוז מהגאפ שלו (פתיל).
@@ -764,48 +749,39 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
         float yl0 = array.get(y, 2)
         float yc0 = array.get(y, 3)
 
-        // ── דריכה · מדידת ביקור · מוות ב-IFVG ──
+        // ── דריכה · מדידת ביקור ──
         if array.size(e.gaps) > 0
             for i = 0 to array.size(e.gaps) - 1
                 Gap gu = array.get(e.gaps, i)
-                if not gu.dead
-                    if not gu.armed and gu.refId != rf
-                        gu.armed := true
-                    if gu.armed
-                        bool outN = na(gu.nqTop) or (gu.dir == 1 ? nl0 > gu.nqTop : nh0 < gu.nqBot)
-                        bool outE = na(gu.esTop) or (gu.dir == 1 ? el0 > gu.esTop : eh0 < gu.esBot)
-                        bool outY = na(gu.ymTop) or (gu.dir == 1 ? yl0 > gu.ymTop : yh0 < gu.ymBot)
-                        if outN and outE and outY
-                            gu.inVisit := false
-                            gu.nqExt   := gu.dir == 1 ? gu.nqTop : gu.nqBot
-                            gu.esExt   := gu.dir == 1 ? gu.esTop : gu.esBot
-                            gu.ymExt   := gu.dir == 1 ? gu.ymTop : gu.ymBot
-                        else
-                            if not gu.inVisit
-                                gu.inVisit := true
-                                gu.visits  := gu.visits + 1
-                            if gu.dir == 1
-                                if not na(gu.nqTop)
-                                    gu.nqExt := math.min(gu.nqExt, nl0)
-                                if not na(gu.esTop)
-                                    gu.esExt := math.min(gu.esExt, el0)
-                                if not na(gu.ymTop)
-                                    gu.ymExt := math.min(gu.ymExt, yl0)
-                            else
-                                if not na(gu.nqTop)
-                                    gu.nqExt := math.max(gu.nqExt, nh0)
-                                if not na(gu.esTop)
-                                    gu.esExt := math.max(gu.esExt, eh0)
-                                if not na(gu.ymTop)
-                                    gu.ymExt := math.max(gu.ymExt, yh0)
-                    // IFVG. YM הורג רק גאפ דובי — סגירה שלו מתחת לגאפ שורי
-                    // היא החולשה הצפויה שלו ולא מבטלת שום רעיון.
-                    if gu.dir == 1
-                        if (not na(gu.nqBot) and nc0 < gu.nqBot) or (not na(gu.esBot) and ec0 < gu.esBot)
-                            gu.dead := true
+                if not gu.armed and gu.refId != rf
+                    gu.armed := true
+                if gu.armed
+                    bool outN = na(gu.nqTop) or (gu.dir == 1 ? nl0 > gu.nqTop : nh0 < gu.nqBot)
+                    bool outE = na(gu.esTop) or (gu.dir == 1 ? el0 > gu.esTop : eh0 < gu.esBot)
+                    bool outY = na(gu.ymTop) or (gu.dir == 1 ? yl0 > gu.ymTop : yh0 < gu.ymBot)
+                    if outN and outE and outY
+                        gu.inVisit := false
+                        gu.nqExt   := gu.dir == 1 ? gu.nqTop : gu.nqBot
+                        gu.esExt   := gu.dir == 1 ? gu.esTop : gu.esBot
+                        gu.ymExt   := gu.dir == 1 ? gu.ymTop : gu.ymBot
                     else
-                        if (not na(gu.nqTop) and nc0 > gu.nqTop) or (not na(gu.esTop) and ec0 > gu.esTop) or (not na(gu.ymTop) and yc0 > gu.ymTop)
-                            gu.dead := true
+                        if not gu.inVisit
+                            gu.inVisit := true
+                            gu.visits  := gu.visits + 1
+                        if gu.dir == 1
+                            if not na(gu.nqTop)
+                                gu.nqExt := math.min(gu.nqExt, nl0)
+                            if not na(gu.esTop)
+                                gu.esExt := math.min(gu.esExt, el0)
+                            if not na(gu.ymTop)
+                                gu.ymExt := math.min(gu.ymExt, yl0)
+                        else
+                            if not na(gu.nqTop)
+                                gu.nqExt := math.max(gu.nqExt, nh0)
+                            if not na(gu.esTop)
+                                gu.esExt := math.max(gu.esExt, eh0)
+                            if not na(gu.ymTop)
+                                gu.ymExt := math.max(gu.ymExt, yh0)
 
         // ── זיהוי גאפ קולקטיבי: אותו כיוון, אותו נר, לפחות שני נכסים ──
         float no1 = array.get(n, 4)
@@ -945,7 +921,7 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
                 bool tagNow = (cycEdge and anyVi) or not anyFvg
                 int  gRef   = tagNow ? rf : (rfMid == 0 ? rf : rfMid)
                 int  gWhen  = tagNow ? tOpen : (tMid == 0 ? tOpen : tMid)
-                Gap gn = Gap.new(e.gapCounter, nd, nb, nt, eb, et, yb, yt, nrb, nrt, erb, ert, gRef, bar_index, gWhen, bar_index, nd == 1 ? nt : nb, nd == 1 ? et : eb, nd == 1 ? yt : yb, 0, 0, 0, 0, false, false, false, not anyFvg, 0, "", 0, 0, na, na, na)
+                Gap gn = Gap.new(e.gapCounter, nd, nb, nt, eb, et, yb, yt, nrb, nrt, erb, ert, gRef, gWhen, bar_index, nd == 1 ? nt : nb, nd == 1 ? et : eb, nd == 1 ? yt : yb, 0, 0, 0, 0, false, false, not anyFvg, 0, "", 0, 0, na, na, na)
                 array.push(e.gaps, gn)
                 f_trim(e.gaps)
 
@@ -955,7 +931,7 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
         if not blockDW and not blockFri and array.size(e.gaps) > 0
             for i = 0 to array.size(e.gaps) - 1
                 Gap gr = array.get(e.gaps, i)
-                if not gr.dead and gr.armed
+                if gr.armed
                     int deg = gr.fracDeg()
                     if deg > gr.fDeg
                         e.seqCounter := e.seqCounter + 1
@@ -970,7 +946,7 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
         if array.size(e.gaps) > 0
             for i = 0 to array.size(e.gaps) - 1
                 Gap gv = array.get(e.gaps, i)
-                if not gv.dead and gv.fDeg > 0 and gv.fSeq > selS
+                if gv.fDeg > 0 and gv.fSeq > selS
                     selS := gv.fSeq
                     selI := i
         if selI == -1
@@ -1057,7 +1033,7 @@ else if newRefCycle and seedActive
     seedActive := false
 
 // ═══════════════════════════════════════════════════════════════════
-// דריכה · מדידת ביקור · מוות ב-IFVG
+// דריכה · מדידת ביקור
 //
 // דריכה: גאפ נהיה זמין לשבירה רק אחרי שתת-המחזור שבו נולד הסתיים.
 // חזרה לגאפ באותו תת-מחזור שבו נוצר אינה שבירה ואינה נספרת.
@@ -1071,53 +1047,42 @@ else if newRefCycle and seedActive
 if array.size(gaps) > 0
     for i = 0 to array.size(gaps) - 1
         Gap gu = array.get(gaps, i)
-        if not gu.dead
-            if not gu.armed and gu.refId != refCycleId
-                gu.armed := true
-                gu.armB  := bar_index
+        if not gu.armed and gu.refId != refCycleId
+            gu.armed := true
+            gu.armB  := bar_index
 
-            if gu.armed
-                bool outN = na(gu.nqTop) or (gu.dir == 1 ? nqL > gu.nqTop : nqH < gu.nqBot)
-                bool outE = na(gu.esTop) or (gu.dir == 1 ? esL > gu.esTop : esH < gu.esBot)
-                bool outY = na(gu.ymTop) or (gu.dir == 1 ? ymL > gu.ymTop : ymH < gu.ymBot)
-                if outN and outE and outY
-                    // הביקור נגמר — מאפסים לקראת ביקור חדש
-                    gu.inVisit := false
-                    gu.nqExt   := gu.dir == 1 ? gu.nqTop : gu.nqBot
-                    gu.esExt   := gu.dir == 1 ? gu.esTop : gu.esBot
-                    gu.ymExt   := gu.dir == 1 ? gu.ymTop : gu.ymBot
-                else
-                    if not gu.inVisit
-                        gu.inVisit := true
-                        gu.visits  := gu.visits + 1
-                    if gu.dir == 1
-                        if not na(gu.nqTop) and nqL < gu.nqExt
-                            gu.nqExt  := nqL
-                            gu.nqExtB := bar_index
-                        if not na(gu.esTop) and esL < gu.esExt
-                            gu.esExt  := esL
-                            gu.esExtB := bar_index
-                        if not na(gu.ymTop) and ymL < gu.ymExt
-                            gu.ymExt  := ymL
-                    else
-                        if not na(gu.nqTop) and nqH > gu.nqExt
-                            gu.nqExt  := nqH
-                            gu.nqExtB := bar_index
-                        if not na(gu.esTop) and esH > gu.esExt
-                            gu.esExt  := esH
-                            gu.esExtB := bar_index
-                        if not na(gu.ymTop) and ymH > gu.ymExt
-                            gu.ymExt  := ymH
-
-            // IFVG: סגירה מעבר לגאפ הופכת אותו — הרעיון מתבטל (גם לפני הדריכה).
-            // YM הורג רק גאפ דובי; סגירה שלו מתחת לגאפ שורי היא חולשה צפויה.
-            if barstate.isconfirmed and bar_index > gu.birth
+        if gu.armed
+            bool outN = na(gu.nqTop) or (gu.dir == 1 ? nqL > gu.nqTop : nqH < gu.nqBot)
+            bool outE = na(gu.esTop) or (gu.dir == 1 ? esL > gu.esTop : esH < gu.esBot)
+            bool outY = na(gu.ymTop) or (gu.dir == 1 ? ymL > gu.ymTop : ymH < gu.ymBot)
+            if outN and outE and outY
+                // הביקור נגמר — מאפסים לקראת ביקור חדש
+                gu.inVisit := false
+                gu.nqExt   := gu.dir == 1 ? gu.nqTop : gu.nqBot
+                gu.esExt   := gu.dir == 1 ? gu.esTop : gu.esBot
+                gu.ymExt   := gu.dir == 1 ? gu.ymTop : gu.ymBot
+            else
+                if not gu.inVisit
+                    gu.inVisit := true
+                    gu.visits  := gu.visits + 1
                 if gu.dir == 1
-                    if (not na(gu.nqBot) and nqC < gu.nqBot) or (not na(gu.esBot) and esC < gu.esBot)
-                        gu.dead := true
+                    if not na(gu.nqTop) and nqL < gu.nqExt
+                        gu.nqExt  := nqL
+                        gu.nqExtB := bar_index
+                    if not na(gu.esTop) and esL < gu.esExt
+                        gu.esExt  := esL
+                        gu.esExtB := bar_index
+                    if not na(gu.ymTop) and ymL < gu.ymExt
+                        gu.ymExt  := ymL
                 else
-                    if (not na(gu.nqTop) and nqC > gu.nqTop) or (not na(gu.esTop) and esC > gu.esTop) or (not na(gu.ymTop) and ymC > gu.ymTop)
-                        gu.dead := true
+                    if not na(gu.nqTop) and nqH > gu.nqExt
+                        gu.nqExt  := nqH
+                        gu.nqExtB := bar_index
+                    if not na(gu.esTop) and esH > gu.esExt
+                        gu.esExt  := esH
+                        gu.esExtB := bar_index
+                    if not na(gu.ymTop) and ymH > gu.ymExt
+                        gu.ymExt  := ymH
 
 // ═══════════════════════════════════════════════════════════════════
 // זיהוי גאפ קולקטיבי — באותו כיוון, באותו נר, בלפחות שני נכסים
@@ -1343,7 +1308,7 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
             // origin נשאר לפי anyFvg — הוא רק קצה הקופסה, וכשיש FVG היא
             // צריכה לכסות את כל השלישייה.
             gapCounter += 1
-            Gap gn = Gap.new(gapCounter, newDir, nb, nt, eb, et, yb, yt, nrb, nrt, erb, ert, tagNow ? refCycleId : refCycleId[1], bar_index, tagNow ? time : time[1], anyFvg ? bar_index - 2 : bar_index - 1, newDir == 1 ? nt : nb, newDir == 1 ? et : eb, newDir == 1 ? yt : yb, 0, 0, 0, 0, false, false, false, not anyFvg, 0, "", 0, 0, na, cb, ct)
+            Gap gn = Gap.new(gapCounter, newDir, nb, nt, eb, et, yb, yt, nrb, nrt, erb, ert, tagNow ? refCycleId : refCycleId[1], tagNow ? time : time[1], anyFvg ? bar_index - 2 : bar_index - 1, newDir == 1 ? nt : nb, newDir == 1 ? et : eb, newDir == 1 ? yt : yb, 0, 0, 0, 0, false, false, not anyFvg, 0, "", 0, 0, na, cb, ct)
             array.push(gaps, gn)
             f_trim(gaps)
 
@@ -1378,7 +1343,7 @@ string alertMsg = ""
 if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK and array.size(gaps) > 0
     for i = 0 to array.size(gaps) - 1
         Gap gr = array.get(gaps, i)
-        if not gr.dead and gr.armed
+        if gr.armed
             int deg = gr.fracDeg()
             if deg > gr.fDeg
                 // כל עליית דרגה היא אירוע חדש ומרעננת את המונה, כך שמה
@@ -1399,15 +1364,14 @@ if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK and array.
 // ═══════════════════════════════════════════════════════════════════
 // בחירת מה מוצג — השבירה החיה העדכנית ביותר
 //
-// שבירה חיה עד סוף המיכל, בכל מסגרות הזמן. מה שמוציא אותה מהרשימה זה
-// IFVG על הגאפ שלה, או החלפת מיכל.
+// שבירה חיה עד סוף המיכל, בכל מסגרות הזמן. **החלפת מיכל היא הדבר היחיד
+// שמוציא אותה מהרשימה.**
 //   15M — שבירה של לונדון מלווה את שאר יום המסחר (NY-AM ו-NY-PM)
 //   1H  — של יום שני, עד סוף השבוע · 4H — של שבוע, עד סוף החודש
 //   1D  — של רבע-רבעון, עד סוף השנה · 1W — של רבעון, עד סוף השנה
 //   Mo  — של שנה, עד סוף מחזור 4 השנים
-// מבין השבירות החיות מצוירת זו שקרתה אחרונה. שבירה נגדית לא מוחקת את
-// הקודמות — היא רק חדשה יותר ולכן קופצת לתצוגה. אם היא מתה ב-IFVG,
-// הקודמת בכיוון ההפוך חוזרת מעצמה.
+// מבין השבירות מצוירת זו שקרתה אחרונה. שבירה נגדית לא מוחקת את הקודמות —
+// היא רק חדשה יותר ולכן קופצת לתצוגה.
 // ═══════════════════════════════════════════════════════════════════
 
 int selIdx = -1
@@ -1415,14 +1379,12 @@ int selSeq = -1
 if array.size(gaps) > 0
     for i = 0 to array.size(gaps) - 1
         Gap gv = array.get(gaps, i)
-        if not gv.dead and gv.fDeg > 0 and gv.fSeq > selSeq
+        if gv.fDeg > 0 and gv.fSeq > selSeq
             selSeq := gv.fSeq
             selIdx := i
 
 // שבירה נגדית דוחקת את הקודמות מהתצוגה, אבל לא מוחקת אותן. הבחירה למעלה
-// לוקחת תמיד את החיה העדכנית ביותר, ולכן כשהגאפ של הנגדית הופך ל-IFVG הוא
-// יוצא מהרשימה והשבירה הקודמת בכיוון ההפוך חוזרת מעצמה. ‏5 שבירות לירידות,
-// אחת לעליות שנשברת — וחוזרים לירידות, עד שהמיכל מתחלף.
+// לוקחת תמיד את העדכנית ביותר, והיא נשארת עד שהמיכל מתחלף.
 var int shownDir = 0
 if newLifeCycle
     shownDir := 0
@@ -1905,14 +1867,13 @@ if barstate.islast
             Gap gz = array.get(gaps, i)
             // armed הוא כל התנאי: גאפ שתת-המחזור שלו עוד לא נגמר אינו
             // מועמד לשבירה, ולכן אין לו מה לעשות על המסך.
-            // showDeadGaps מוסיף לאבחון גם את מי שבוטל ב-IFVG, באפור.
-            if (not gz.dead and gz.armed) or (showDeadGaps and gz.dead)
+            if gz.armed
                 float zTop = gz.drwTop
                 float zBot = gz.drwBot
                 if not na(zTop)
-                    color  zCol = gz.dead ? color.gray : gz.dir == 1 ? colBull : colBear
+                    color  zCol = gz.dir == 1 ? colBull : colBear
                     // V = גאפ סגירה/פתיחה בין שני נרות, ולא FVG של שלושה
-                    string zTxt = "#" + str.tostring(gz.id) + " " + f_subName(tfClass, gz.birthT) + (gz.volImb ? " V" : "") + (gz.dead ? " ✕" : "")
+                    string zTxt = "#" + str.tostring(gz.id) + " " + f_subName(tfClass, gz.birthT) + (gz.volImb ? " V" : "")
                     array.push(dbgBoxes, box.new(gz.origin, zTop, bar_index, zBot, border_color = color.new(zCol, 35), border_width = 1, bgcolor = color.new(zCol, 94), text = zTxt, text_color = color.new(zCol, 20), text_size = size.tiny, text_halign = text.align_left, text_valign = text.align_top))
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1934,24 +1895,18 @@ if showDebug and barstate.islast
     hc = color.gray
     wc = color.white
 
-    int tLive  = 0
+    int tLive  = array.size(gaps)
     int tArmed = 0
     int tFrac  = 0
     if array.size(gaps) > 0
         for i = 0 to array.size(gaps) - 1
-            if not array.get(gaps, i).dead
-                tLive += 1
-                if array.get(gaps, i).armed
-                    tArmed += 1
-                if array.get(gaps, i).fDeg > 0
-                    tFrac += 1
+            if array.get(gaps, i).armed
+                tArmed += 1
+            if array.get(gaps, i).fDeg > 0
+                tFrac += 1
 
-    // הגאפ שמוצג בטבלה: זה של השבירה המוצגת, ואם אין — הגאפ החי האחרון
-    int dIdx = selIdx
-    if dIdx == -1 and array.size(gaps) > 0
-        for i = array.size(gaps) - 1 to 0
-            if dIdx == -1 and not array.get(gaps, i).dead
-                dIdx := i
+    // הגאפ שמוצג בטבלה: זה של השבירה המוצגת, ואם אין — האחרון שנוצר
+    int dIdx = selIdx == -1 ? array.size(gaps) - 1 : selIdx
 
     float  tN      = na
     float  tE      = na
@@ -2081,8 +2036,7 @@ if showDebug and barstate.islast
 //
 // שמונת הגאפים האחרונים של המיכל הנוכחי, מהחדש לישן:
 //   #id ותת-המחזור שבו נולד (V = VI בלבד) · כיוון · deg שנרשם (deg עכשיו)
-//   · המצב: arm = דרוך ומחכה · wait = תת-המחזור שלו עוד לא נגמר ·
-//   IFVG = נסגר נר מעבר לו והוא בוטל.
+//   · המצב: arm = דרוך ומחכה · wait = תת-המחזור שלו עוד לא נגמר.
 //
 // "deg נרשם 2 (3)" = נרשמה F2 ועכשיו העומקים כבר נותנים F3 — היא תתעדכן
 // בסגירת הנר. "- (-)" על גאפ arm = הוא חי, דרוך, ופשוט אין סטייה.
@@ -2108,7 +2062,7 @@ if showDebug and barstate.islast
                 table.cell(gdbg, 0, grw, "#" + str.tostring(gl.id) + " " + f_subName(tfClass, gl.birthT) + (gl.volImb ? " V" : ""), bgcolor = gwc, text_size = size.tiny)
                 table.cell(gdbg, 1, grw, gl.dir == 1 ? "▲" : "▼", bgcolor = gwc, text_color = gl.dir == 1 ? colBull : colBear, text_size = size.tiny)
                 table.cell(gdbg, 2, grw, f_degNum(gl.fDeg) + " (" + f_degNum(gl.fracDeg()) + ")", bgcolor = gwc, text_size = size.tiny)
-                table.cell(gdbg, 3, grw, gl.dead ? "IFVG" : gl.armed ? "arm" : "wait", bgcolor = gwc, text_size = size.tiny)
+                table.cell(gdbg, 3, grw, gl.armed ? "arm" : "wait", bgcolor = gwc, text_size = size.tiny)
 
 // ═══════════════════════════════════════════════════════════════════
 // אבחון המנועים — מה כל מסגרת באמת מחזיקה
@@ -2141,11 +2095,10 @@ if showDebug and barstate.islast and array.size(allEng) > 0
             if array.size(ee.gaps) > 0
                 for i = 0 to array.size(ee.gaps) - 1
                     Gap gq = array.get(ee.gaps, i)
-                    if not gq.dead
-                        egLive += 1
-                        if gq.armed
-                            egArm += 1
-                        egMax := math.max(egMax, gq.fracDeg())
+                    egLive += 1
+                    if gq.armed
+                        egArm += 1
+                    egMax := math.max(egMax, gq.fracDeg())
             er += 1
             table.cell(edbg, 0, er, f_clsName(ee.cls), bgcolor = ehc, text_color = ewc, text_size = size.tiny)
             table.cell(edbg, 1, er, str.tostring(egLive), bgcolor = ewc, text_size = size.tiny)
