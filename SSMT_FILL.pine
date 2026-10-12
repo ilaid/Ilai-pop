@@ -1809,8 +1809,9 @@ var bool  drawnBox = false
 int shownSeq = selIdx == -1 ? -999 : array.get(gaps, selIdx).fSeq
 int shownDeg = selIdx == -1 ? -999 : array.get(gaps, selIdx).fDeg
 // האם לגאפ המוצג יש עדיין קופסה על הגרף הזה — משתנה כשהנכס של הגרף עושה
-// IFVG, ואז הקופסה מוחלפת בתווית.
-bool shownBox = selIdx != -1 and not na(array.get(gaps, selIdx).drwTop)
+// IFVG, ואז הקופסה מוחלפת בתווית. ביטוי מותנה ולא `and`: ב-Pine `and` לא
+// עוצר באמצע, ו-array.get(gaps, -1) מפיל את הסקריפט (RE10045) כשאין שבירה.
+bool shownBox = selIdx == -1 ? false : not na(array.get(gaps, selIdx).drwTop)
 
 if shownSeq != drawnSeq or shownDeg != drawnDeg or shownBox != drawnBox
     if not na(aLbl)
