@@ -28,8 +28,10 @@ indicator("SSMT Fill | Quarterly Theory", overlay = true, max_labels_count = 20,
 // שבירה נגדית רק דוחקת אותה מהתצוגה — מוצגת תמיד העדכנית ביותר.
 //
 // IFVG לפי נכס: נכס שסוגר נר מעבר לרגל שלו — הרגל שלו מתה והוא יוצא
-// מהגאפ. הנכסים האחרים ממשיכים. נשארו פחות משתי רגליים חיות — הגאפ מת
-// ונמחק. YM לא מת בסגירה מתחת לגאפ שורי — זו החולשה הצפויה שלו.
+// מהגאפ. הנכסים האחרים ממשיכים. **שני נכסים שעשו IFVG — הגאפ מת** ונמחק;
+// נכס אחד בלבד — הגאפ חי. YM לא מת בסגירה מתחת לגאפ שורי — זו החולשה
+// הצפויה שלו. השבירה נבדקת **לפני** מחיקת הרגל, כך שהנר שבו המוביל נסגר
+// מעבר לגאפ עדיין נותן את השבירה שלו.
 //
 // מיפוי תת-מחזור/מיכל לכל מסגרת זמן:
 //   1M  — רבע 22.5m   → מיקרו-סשן    5M  — מיקרו-סשן → סשן
@@ -394,6 +396,7 @@ type Gap
     int    fVisit   // הביקור שבו נרשמה — רק בו מותר לתקן אותה
     int    endDeg   // מצב "בסוף הביקור": הדרגה שהביקור שנגמר עכשיו נתן
     string endLead  // והמשתתפים שלה
+    int    nDead    // כמה נכסים עשו IFVG על הרגל שלהם. שניים = הגאפ מת.
     // ── גבולות לציור בלבד, בסקאלה של הגרף עצמו ──
     // na = לנכס שהגרף מציג אין את הגאפ הזה, ואז פשוט אין קופסה.
     float  drwBot
@@ -531,31 +534,54 @@ method visit(Gap g, float nh, float nl, float eh, float el, float yh, float yl) 
 // ── IFVG לפי נכס ──
 // נכס שסגר מעבר לרגל שלו — הרגל מתה (na) והוא לא משתתף יותר בשבירה על
 // הגאפ הזה. השאר ממשיכים. YM לא מת בסגירה מתחת לגאפ שורי: זו החולשה
-// הצפויה שלו. מחזיר כמה רגליים חיות נשארו — פחות משתיים = הגאפ מת.
+// הצפויה שלו. מחזיר כמה נכסים מתו עד עכשיו — **שניים = הגאפ מת**.
+// גאפ של שניים שרק אחד מת בו נשאר חי: הוא לא יכול לייצר שבירה חדשה (אין
+// מול מי), אבל שומר את השבירה שכבר נרשמה ומוצג על הגרף של מי שהחזיק.
+// מוות של רגל נועל את השבירה (fVisit = -1): מוביל שנסגר מעבר לגאפ השלים
+// את התנועה — זה לא המפגר שהשיג אותו, ולכן אין מה לתקן.
 method killLegs(Gap g, float nc, float ec, float yc) =>
+    int d0 = g.nDead
     if g.dir == 1
         if not na(g.nqBot) and nc < g.nqBot
             g.nqBot := na
             g.nqTop := na
             g.nqExt := na
+            g.nDead := g.nDead + 1
         if not na(g.esBot) and ec < g.esBot
             g.esBot := na
             g.esTop := na
             g.esExt := na
+            g.nDead := g.nDead + 1
     else
         if not na(g.nqTop) and nc > g.nqTop
             g.nqBot := na
             g.nqTop := na
             g.nqExt := na
+            g.nDead := g.nDead + 1
         if not na(g.esTop) and ec > g.esTop
             g.esBot := na
             g.esTop := na
             g.esExt := na
+            g.nDead := g.nDead + 1
         if not na(g.ymTop) and yc > g.ymTop
             g.ymBot := na
             g.ymTop := na
             g.ymExt := na
-    (na(g.nqTop) ? 0 : 1) + (na(g.esTop) ? 0 : 1) + (na(g.ymTop) ? 0 : 1)
+            g.nDead := g.nDead + 1
+    if g.nDead > d0
+        g.fVisit := -1
+    g.nDead
+
+// הנכסים שעוד חיים בגאפ, למשל "NQ ES YM" או "ES YM" — לטבלת האבחון
+method liveTxt(Gap g) =>
+    string t = ""
+    if not na(g.nqTop)
+        t := "NQ"
+    if not na(g.esTop)
+        t := t == "" ? "ES" : t + " ES"
+    if not na(g.ymTop)
+        t := t == "" ? "YM" : t + " YM"
+    t == "" ? "-" : t
 
 // ── רישום ותיקון של שבירה — נקרא פעם אחת לנר סגור, לכל גאפ דרוך ──
 //   1 = שבירה חדשה או עליית דרגה (הקורא מקדם את המונה ומתריע)
@@ -825,8 +851,12 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
         float yl0 = array.get(y, 2)
         float yc0 = array.get(y, 3)
 
-        // ── דריכה · מדידת ביקור · IFVG לפי נכס ──
-        // מהסוף להתחלה, כי גאפ שנשאר עם פחות משתי רגליים חיות נמחק.
+        // ── דריכה · מדידת ביקור · רישום שבירה · IFVG לפי נכס ──
+        // הסדר קובע: השבירה נבדקת **לפני** שהרגל מתה, אחרת הנר שבו המוביל
+        // נסגר מעבר לגאפ — הסטייה החזקה ביותר — לא היה נרשם בכלל.
+        // מהסוף להתחלה, כי גאפ ששני נכסים עשו עליו IFVG נמחק.
+        bool blockDW  = e.cls == 5 and blockDeadWeek and deadW
+        bool blockFri = (e.cls == 5 or e.cls == 4) and dow == dayofweek.friday
         if array.size(e.gaps) > 0
             for i = array.size(e.gaps) - 1 to 0
                 Gap gu = array.get(e.gaps, i)
@@ -834,7 +864,15 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
                     gu.armed := true
                 if gu.armed
                     gu.visit(nh0, nl0, eh0, el0, yh0, yl0)
-                if gu.killLegs(nc0, ec0, yc0) < 2
+                int ev = gu.judge(not blockDW and not blockFri)
+                if ev == 1
+                    e.seqCounter := e.seqCounter + 1
+                    gu.fSeq  := e.seqCounter
+                    gu.fSigB := bar_index
+                else if ev == 2
+                    string fx = f_fixTxt(f_clsName(e.cls), gu.dir, gu.fDeg)
+                    e.fixTxt := e.fixTxt == "" ? fx : e.fixTxt + "\n" + fx
+                if gu.killLegs(nc0, ec0, yc0) >= 2
                     array.remove(e.gaps, i)
 
         // ── זיהוי גאפ קולקטיבי: אותו כיוון, אותו נר, לפחות שני נכסים ──
@@ -963,24 +1001,9 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
                 bool tagNow = (cycEdge and anyVi) or not anyFvg
                 int  gRef   = tagNow ? rf : (rfMid == 0 ? rf : rfMid)
                 int  gWhen  = tagNow ? tOpen : (tMid == 0 ? tOpen : tMid)
-                Gap gn = Gap.new(e.gapCounter, nd, nb, nt, eb, et, yb, yt, gRef, gWhen, bar_index, nd == 1 ? nt : nb, nd == 1 ? et : eb, nd == 1 ? yt : yb, 0, 0, false, false, not anyFvg, 0, "", 0, 0, na, 0, 0, "", na, na)
+                Gap gn = Gap.new(e.gapCounter, nd, nb, nt, eb, et, yb, yt, gRef, gWhen, bar_index, nd == 1 ? nt : nb, nd == 1 ? et : eb, nd == 1 ? yt : yb, 0, 0, false, false, not anyFvg, 0, "", 0, 0, na, 0, 0, "", 0, na, na)
                 array.push(e.gaps, gn)
                 f_trim(e.gaps)
-
-        // ── רישום שבירות ──
-        bool blockDW  = e.cls == 5 and blockDeadWeek and deadW
-        bool blockFri = (e.cls == 5 or e.cls == 4) and dow == dayofweek.friday
-        if array.size(e.gaps) > 0
-            for i = 0 to array.size(e.gaps) - 1
-                Gap gr = array.get(e.gaps, i)
-                int ev = gr.judge(not blockDW and not blockFri)
-                if ev == 1
-                    e.seqCounter := e.seqCounter + 1
-                    gr.fSeq  := e.seqCounter
-                    gr.fSigB := bar_index
-                else if ev == 2
-                    string fx = f_fixTxt(f_clsName(e.cls), gr.dir, gr.fDeg)
-                    e.fixTxt := e.fixTxt == "" ? fx : e.fixTxt + "\n" + fx
 
         // ── בחירת השבירה המוצגת (החיה העדכנית ביותר) ──
         int selI = -1
@@ -1084,13 +1107,37 @@ else if newRefCycle and seedActive
 // ביקור: כשאף רגל חיה לא נוגעת בגאפ — הביקור נגמר והעומקים מתאפסים. YM
 // נספר גם הוא. כך מילוי משותף בביקור אחד לא חוסם שבירה בביקור הבא.
 //
-// IFVG לפי נכס (killLegs): רגל של נכס שסגר מעבר לה מתה, והשאר ממשיכים.
-// פחות משתי רגליים חיות — הגאפ נמחק. גאפים מתים לא נשמרים ולא מוצגים.
+// רישום שבירה (judge) — "מיידי עם תיקון": נרשמת ומתריעה ברגע שהיא קורית,
+// ויכולה רק לעלות — חוץ ממקרה אחד: אם **באותו ביקור** המפגר משיג את
+// המוביל, הדרגה יורדת (או מתבטלת) ונשלחת התראת תיקון. כשהביקור נגמר, או
+// כשאחת הרגליים עשתה IFVG, הדרגה ננעלת. "בסוף הביקור": נרשמת רק כשכל
+// הנכסים יצאו מהגאפ, לפי העומקים הסופיים. שבירות של גאפים שונים אינן
+// מתחרות — מה שמצויר זו פשוט העדכנית ביותר. שישי / שבוע מת חוסמים שבירה
+// חדשה, לא תיקון.
+//
+// IFVG לפי נכס (killLegs) — **אחרי** הרישום, כדי שהנר שבו המוביל נסגר
+// מעבר לגאפ עדיין ייתן את השבירה שלו. רגל של נכס שסגר מעבר לה מתה,
+// והשאר ממשיכים. **שני נכסים מתו — הגאפ נמחק.** רגל של הנכס שהגרף מציג
+// שמתה — הקופסה שלו לא מצוירת יותר (drw = na); אם יש על הגאפ שבירה היא
+// מוצגת כתווית בלבד.
 //
 // רק בנר סגור, כמו המנועים — שום דבר כאן לא משנה את מה שמוצג באמצע נר.
 // ═══════════════════════════════════════════════════════════════════
 
-if barstate.isconfirmed and array.size(gaps) > 0
+cycleOK  = not (tfClass == 5 and blockDeadWeek and isDeadWeek)
+friBlock = (tfClass == 5 or tfClass == 4) and tdDow == dayofweek.friday
+
+atr = ta.atr(14)
+
+var int seqCounter = 0
+
+// נאסף במהלך הסריקה ונשלח פעם אחת בסוף הנר, כדי שכמה שבירות באותו נר
+// יגיעו כהתראה אחת ולא כמה נפרדות.
+// ההתראה עצמה נשלחת בסוף הקובץ, אחרי שגם המנועים של שאר המסגרות הוסיפו
+// את השבירות שלהם לאותה הודעה.
+string alertMsg = ""
+
+if barstate.isconfirmed and tfClass != 0 and array.size(gaps) > 0
     for i = array.size(gaps) - 1 to 0
         Gap gu = array.get(gaps, i)
         if not gu.armed and gu.refId != refCycleId
@@ -1098,8 +1145,26 @@ if barstate.isconfirmed and array.size(gaps) > 0
             gu.armB  := bar_index
         if gu.armed
             gu.visit(nqH, nqL, esH, esL, ymH, ymL)
-        if gu.killLegs(nqC, esC, ymC) < 2
+        int ev = gu.judge(not friBlock and cycleOK)
+        if ev == 1
+            // כל עליית דרגה היא אירוע חדש ומרעננת את המונה, כך שמה
+            // שמוצג הוא תמיד השבירה שקרתה אחרונה.
+            seqCounter += 1
+            gu.fSeq  := seqCounter
+            gu.fSigB := bar_index
+            gu.fYPos := gu.dir == 1 ? low - atr * offsetMlt : high + atr * offsetMlt
+            if alertOn and gu.fDeg >= alertMinDeg
+                string one = "[" + f_clsName(tfClass) + "] " + syminfo.ticker + " · שבירה " + (gu.dir == 1 ? "שורית" : "דובית") + " " + f_degTxt(gu.fDeg) + " · " + gu.fLead
+                alertMsg := alertMsg == "" ? one : alertMsg + "\n" + one
+        else if ev == 2 and alertOn
+            string fx = f_fixTxt(f_clsName(tfClass), gu.dir, gu.fDeg)
+            alertMsg := alertMsg == "" ? fx : alertMsg + "\n" + fx
+        if gu.killLegs(nqC, esC, ymC) >= 2
             array.remove(gaps, i)
+        else if (isNQc and na(gu.nqTop)) or (isESc and na(gu.esTop)) or (isYMc and na(gu.ymTop))
+            // הנכס שהגרף מציג עשה IFVG — אין קופסה על הגרף שלו
+            gu.drwBot := na
+            gu.drwTop := na
 
 // ═══════════════════════════════════════════════════════════════════
 // זיהוי גאפ קולקטיבי — באותו כיוון, באותו נר, בלפחות שני נכסים
@@ -1320,63 +1385,15 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
             // origin נשאר לפי anyFvg — הוא רק קצה הקופסה, וכשיש FVG היא
             // צריכה לכסות את כל השלישייה.
             gapCounter += 1
-            Gap gn = Gap.new(gapCounter, newDir, nb, nt, eb, et, yb, yt, tagNow ? refCycleId : refCycleId[1], tagNow ? time : time[1], anyFvg ? bar_index - 2 : bar_index - 1, newDir == 1 ? nt : nb, newDir == 1 ? et : eb, newDir == 1 ? yt : yb, 0, 0, false, false, not anyFvg, 0, "", 0, 0, na, 0, 0, "", cb, ct)
+            Gap gn = Gap.new(gapCounter, newDir, nb, nt, eb, et, yb, yt, tagNow ? refCycleId : refCycleId[1], tagNow ? time : time[1], anyFvg ? bar_index - 2 : bar_index - 1, newDir == 1 ? nt : nb, newDir == 1 ? et : eb, newDir == 1 ? yt : yb, 0, 0, false, false, not anyFvg, 0, "", 0, 0, na, 0, 0, "", 0, cb, ct)
             array.push(gaps, gn)
             f_trim(gaps)
-
-// ═══════════════════════════════════════════════════════════════════
-// חסימות
-// ═══════════════════════════════════════════════════════════════════
-
-cycleOK  = not (tfClass == 5 and blockDeadWeek and isDeadWeek)
-friBlock = (tfClass == 5 or tfClass == 4) and tdDow == dayofweek.friday
-
-// ═══════════════════════════════════════════════════════════════════
-// רישום שבירות — לכל גאפ השבירה שלו (judge)
-//
-// "מיידי עם תיקון": שבירה נרשמת ומתריעה ברגע שהיא קורית, ויכולה רק לעלות
-// — חוץ ממקרה אחד: אם **באותו ביקור** המפגר משיג את המוביל, הדרגה יורדת
-// (או מתבטלת) ונשלחת התראת תיקון. כשהביקור נגמר הדרגה ננעלת.
-// "בסוף הביקור": נרשמת רק כשכל הנכסים יצאו מהגאפ, לפי העומקים הסופיים.
-// שבירות של גאפים שונים אינן מתחרות על מקום אחד — כל אחת נרשמת בנפרד,
-// ומה שמצויר על הגרף זו פשוט העדכנית ביותר.
-// שישי / שבוע מת חוסמים שבירה חדשה, לא תיקון.
-// ═══════════════════════════════════════════════════════════════════
-
-atr = ta.atr(14)
-
-var int seqCounter = 0
-
-// נאסף במהלך הסריקה ונשלח פעם אחת בסוף הנר, כדי שכמה שבירות באותו נר
-// יגיעו כהתראה אחת ולא כמה נפרדות.
-string alertMsg = ""
-
-if barstate.isconfirmed and tfClass != 0 and array.size(gaps) > 0
-    for i = 0 to array.size(gaps) - 1
-        Gap gr = array.get(gaps, i)
-        int ev = gr.judge(not friBlock and cycleOK)
-        if ev == 1
-            // כל עליית דרגה היא אירוע חדש ומרעננת את המונה, כך שמה
-            // שמוצג הוא תמיד השבירה שקרתה אחרונה.
-            seqCounter += 1
-            gr.fSeq  := seqCounter
-            gr.fSigB := bar_index
-            gr.fYPos := gr.dir == 1 ? low - atr * offsetMlt : high + atr * offsetMlt
-            if alertOn and gr.fDeg >= alertMinDeg
-                string one = "[" + f_clsName(tfClass) + "] " + syminfo.ticker + " · שבירה " + (gr.dir == 1 ? "שורית" : "דובית") + " " + f_degTxt(gr.fDeg) + " · " + gr.fLead
-                alertMsg := alertMsg == "" ? one : alertMsg + "\n" + one
-        else if ev == 2 and alertOn
-            string fx = f_fixTxt(f_clsName(tfClass), gr.dir, gr.fDeg)
-            alertMsg := alertMsg == "" ? fx : alertMsg + "\n" + fx
-
-// ההתראה עצמה נשלחת בסוף הקובץ, אחרי שגם המנועים של שאר המסגרות
-// הספיקו להוסיף את השבירות שלהם לאותה הודעה.
 
 // ═══════════════════════════════════════════════════════════════════
 // בחירת מה מוצג — השבירה החיה העדכנית ביותר
 //
 // שבירה חיה עד סוף המיכל, בכל מסגרות הזמן. מה שמוציא אותה: החלפת מיכל,
-// ביטול בתיקון, או שהגאפ שלה מת (פחות משתי רגליים חיות).
+// ביטול בתיקון, או שהגאפ שלה מת (שני נכסים עשו עליו IFVG).
 //   15M — שבירה של לונדון מלווה את שאר יום המסחר (NY-AM ו-NY-PM)
 //   1H  — של יום שני, עד סוף השבוע · 4H — של שבוע, עד סוף החודש
 //   1D  — של רבע-רבעון, עד סוף השנה · 1W — של רבעון, עד סוף השנה
@@ -1787,11 +1804,15 @@ var box   aBox = na
 var line  aCE  = na
 var int   drawnSeq = -999
 var int   drawnDeg = -999
+var bool  drawnBox = false
 
 int shownSeq = selIdx == -1 ? -999 : array.get(gaps, selIdx).fSeq
 int shownDeg = selIdx == -1 ? -999 : array.get(gaps, selIdx).fDeg
+// האם לגאפ המוצג יש עדיין קופסה על הגרף הזה — משתנה כשהנכס של הגרף עושה
+// IFVG, ואז הקופסה מוחלפת בתווית.
+bool shownBox = selIdx != -1 and not na(array.get(gaps, selIdx).drwTop)
 
-if shownSeq != drawnSeq or shownDeg != drawnDeg
+if shownSeq != drawnSeq or shownDeg != drawnDeg or shownBox != drawnBox
     if not na(aLbl)
         label.delete(aLbl)
         aLbl := na
@@ -1830,6 +1851,7 @@ if shownSeq != drawnSeq or shownDeg != drawnDeg
             aCE := line.new(gd.origin, gMid, xEnd, gMid, color = color.new(col, 40), style = line.style_dashed, width = 1)
     drawnSeq := shownSeq
     drawnDeg := shownDeg
+    drawnBox := shownBox
 
 // הקופסה, הקו והתג עוקבים אחרי הנר הנוכחי — רק במצב "עד הנר הנוכחי"
 if selIdx != -1 and boxLen == "עד הנר הנוכחי"
@@ -2042,23 +2064,25 @@ if showDebug and barstate.islast
 //
 // שמונת הגאפים האחרונים של המיכל הנוכחי, מהחדש לישן:
 //   #id ותת-המחזור שבו נולד (V = VI בלבד) · כיוון · deg שנרשם (deg עכשיו)
-//   · המצב: arm = דרוך ומחכה · wait = תת-המחזור שלו עוד לא נגמר.
+//   · המצב: arm = דרוך ומחכה · wait = תת-המחזור שלו עוד לא נגמר ·
+//   חיים = הנכסים שעוד לא עשו IFVG על הרגל שלהם (למשל "ES YM").
 //
 // "deg נרשם 2 (3)" = נרשמה F2 ועכשיו העומקים כבר נותנים F3 — היא תתעדכן
 // בסגירת הנר. "- (-)" על גאפ arm = הוא חי, דרוך, ופשוט אין סטייה.
 // ═══════════════════════════════════════════════════════════════════
 
-var table gdbg = table.new(position.middle_right, 4, 9, border_width = 1)
+var table gdbg = table.new(position.middle_right, 5, 9, border_width = 1)
 if showDebug and barstate.islast
     color ghc = color.gray
     color gwc = color.white
     for rr = 0 to 8
-        for cx = 0 to 3
+        for cx = 0 to 4
             table.cell(gdbg, cx, rr, "", bgcolor = color.new(color.black, 100))
     table.cell(gdbg, 0, 0, "גאפי " + f_clsName(tfClass), bgcolor = ghc, text_color = gwc, text_size = size.tiny)
     table.cell(gdbg, 1, 0, "כיוון", bgcolor = ghc, text_color = gwc, text_size = size.tiny)
     table.cell(gdbg, 2, 0, "deg", bgcolor = ghc, text_color = gwc, text_size = size.tiny)
     table.cell(gdbg, 3, 0, "מצב", bgcolor = ghc, text_color = gwc, text_size = size.tiny)
+    table.cell(gdbg, 4, 0, "חיים", bgcolor = ghc, text_color = gwc, text_size = size.tiny)
     int grw = 0
     if array.size(gaps) > 0
         for i = array.size(gaps) - 1 to 0
@@ -2069,6 +2093,7 @@ if showDebug and barstate.islast
                 table.cell(gdbg, 1, grw, gl.dir == 1 ? "▲" : "▼", bgcolor = gwc, text_color = gl.dir == 1 ? colBull : colBear, text_size = size.tiny)
                 table.cell(gdbg, 2, grw, f_degNum(gl.fDeg) + " (" + f_degNum(gl.fracDeg()) + ")", bgcolor = gwc, text_size = size.tiny)
                 table.cell(gdbg, 3, grw, gl.armed ? "arm" : "wait", bgcolor = gwc, text_size = size.tiny)
+                table.cell(gdbg, 4, grw, gl.liveTxt(), bgcolor = gwc, text_size = size.tiny)
 
 // ═══════════════════════════════════════════════════════════════════
 // אבחון המנועים — מה כל מסגרת באמת מחזיקה
