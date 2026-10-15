@@ -102,6 +102,9 @@ showAllGaps = input.bool(false, "הצג את הגאפים הדרוכים (תמי
 // והגרף נשאר נקי אחרי זה. ההגדרה שמעל נשארת למי שרוצה אותם קבוע.
 autoAllGaps = input.bool(true, "הצצה: הגאפים הדרוכים בהחלפת מסגרת (4H ומטה)", group = grpVis)
 autoAllSec  = input.int(20, "כמה שניות להשאיר את ההצצה", minval = 1, maxval = 600, group = grpVis)
+// המסגרת של קופסאות ההצצה (קולקטיביים + גאפים של הגרף). גבוה = עדינה יותר,
+// 100 = בלי מסגרת בכלל. הקופסה המרכזית של השבירה לא מושפעת מזה.
+peekBorder  = input.int(80, "שקיפות מסגרת ההצצה", minval = 0, maxval = 100, group = grpVis)
 showDebug   = input.bool(false, "הצג טבלת בדיקה", group = grpVis)
 
 // ── גאפים של הגרף עצמו — לא קורלטיביים ──
@@ -1948,7 +1951,7 @@ if barstate.islast
                     color  zCol = gz.dir == 1 ? colBull : colBear
                     // V = גאפ סגירה/פתיחה בין שני נרות, ולא FVG של שלושה
                     string zTxt = "#" + str.tostring(gz.id) + " " + f_subName(tfClass, gz.birthT) + (gz.volImb ? " V" : "")
-                    array.push(dbgBoxes, box.new(gz.origin, zTop, bar_index, zBot, border_color = color.new(zCol, 35), border_width = 1, bgcolor = color.new(zCol, 94), text = zTxt, text_color = color.new(zCol, 20), text_size = size.tiny, text_halign = text.align_left, text_valign = text.align_top))
+                    array.push(dbgBoxes, box.new(gz.origin, zTop, bar_index, zBot, border_color = color.new(zCol, peekBorder), border_width = 1, bgcolor = color.new(zCol, 94), text = zTxt, text_color = color.new(zCol, 20), text_size = size.tiny, text_halign = text.align_left, text_valign = text.align_top))
 
 // ── הגאפים של הגרף עצמו (לא קורלטיביים), בצבע נפרד ──
 var array<box> ownBoxes = array.new<box>()
@@ -1973,7 +1976,7 @@ if barstate.islast
                 if not dup
                     color oCol = og.dir == 1 ? ownBull : ownBear
                     string oTxt = f_subName(tfClass, og.birthT) + (og.volImb ? " V" : "")
-                    array.push(ownBoxes, box.new(og.origin, og.top, bar_index, og.bot, border_color = color.new(oCol, 45), border_width = 1, bgcolor = color.new(oCol, 94), text = oTxt, text_color = color.new(oCol, 25), text_size = size.tiny, text_halign = text.align_left, text_valign = text.align_top))
+                    array.push(ownBoxes, box.new(og.origin, og.top, bar_index, og.bot, border_color = color.new(oCol, peekBorder), border_width = 1, bgcolor = color.new(oCol, 94), text = oTxt, text_color = color.new(oCol, 25), text_size = size.tiny, text_halign = text.align_left, text_valign = text.align_top))
 
 // ═══════════════════════════════════════════════════════════════════
 // טבלת בדיקה (אבחון — כבויה כברירת מחדל)
