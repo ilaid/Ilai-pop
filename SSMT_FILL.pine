@@ -28,8 +28,8 @@ indicator("SSMT Fill | Quarterly Theory", overlay = true, max_labels_count = 20,
 // אם הגאפ של הנגדית הופך ל-IFVG, הקודמת בכיוון ההפוך חוזרת להיות המוצגת,
 // כל עוד המיכל לא התחלף.
 //
-// IFVG: סגירה של NQ או ES מעבר לגאפ הורגת אותו בשני הכיוונים. סגירה של YM
-// הורגת רק גאפ דובי — סגירה שלו מתחת לגאפ שורי היא החולשה הצפויה שלו.
+// IFVG: סגירה של NQ או ES מעבר לגאפ הורגת אותו בשני הכיוונים. YM לא הורג
+// גאפ — סגירה שלו מעבר לגאפ רק מוציאה אותו ממנו, והשבירה של NQ/ES נשארת.
 //
 // סוג גאפ שני: VI — רווח סגירה/פתיחה בין שני נרות, ברצף, מסף טיקים. נספר
 // יחד עם FVG לאותו גאפ קולקטיבי ומתאחד איתו באותו נכס. רווח של פתיחת
@@ -813,14 +813,18 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
                                     gu.esExt := math.max(gu.esExt, eh0)
                                 if not na(gu.ymTop)
                                     gu.ymExt := math.max(gu.ymExt, yh0)
-                    // IFVG. YM הורג רק גאפ דובי — סגירה שלו מתחת לגאפ שורי
-                    // היא החולשה הצפויה שלו ולא מבטלת שום רעיון.
+                    // IFVG — רק NQ ו-ES הורגים גאפ. YM שסוגר מעבר לגאפ רק יוצא
+                    // ממנו (הרגל שלו נמחקת); השאר ממשיכים והשבירה נשארת. זהה לגרף.
                     if gu.dir == 1
                         if (not na(gu.nqBot) and nc0 < gu.nqBot) or (not na(gu.esBot) and ec0 < gu.esBot)
                             gu.dead := true
                     else
-                        if (not na(gu.nqTop) and nc0 > gu.nqTop) or (not na(gu.esTop) and ec0 > gu.esTop) or (not na(gu.ymTop) and yc0 > gu.ymTop)
+                        if (not na(gu.nqTop) and nc0 > gu.nqTop) or (not na(gu.esTop) and ec0 > gu.esTop)
                             gu.dead := true
+                    if not gu.dead and not na(gu.ymTop) and (gu.dir == 1 ? yc0 < gu.ymBot : yc0 > gu.ymTop)
+                        gu.ymBot := na
+                        gu.ymTop := na
+                        gu.ymExt := na
 
         // ── זיהוי גאפ קולקטיבי: אותו כיוון, אותו נר, לפחות שני נכסים ──
         float no1 = array.get(n, 4)
@@ -1121,15 +1125,25 @@ if array.size(gaps) > 0
                         if not na(gu.ymTop) and ymH > gu.ymExt
                             gu.ymExt  := ymH
 
-            // IFVG: סגירה מעבר לגאפ הופכת אותו — הרעיון מתבטל (גם לפני הדריכה).
-            // YM הורג רק גאפ דובי; סגירה שלו מתחת לגאפ שורי היא חולשה צפויה.
+            // IFVG: סגירה של NQ או ES מעבר לגאפ הופכת אותו — הרעיון מתבטל (גם
+            // לפני הדריכה). **YM לא הורג גאפ** — הוא הנכס החלש, הוא לא מחזק ולא
+            // מבטל. סגירה שלו מעבר לגאפ רק מוציאה אותו מהגאפ: הרגל שלו נמחקת,
+            // NQ ו-ES ממשיכים, והשבירה שכבר נרשמה עליו נשארת.
             if barstate.isconfirmed and bar_index > gu.birth
                 if gu.dir == 1
                     if (not na(gu.nqBot) and nqC < gu.nqBot) or (not na(gu.esBot) and esC < gu.esBot)
                         gu.dead := true
                 else
-                    if (not na(gu.nqTop) and nqC > gu.nqTop) or (not na(gu.esTop) and esC > gu.esTop) or (not na(gu.ymTop) and ymC > gu.ymTop)
+                    if (not na(gu.nqTop) and nqC > gu.nqTop) or (not na(gu.esTop) and esC > gu.esTop)
                         gu.dead := true
+                if not gu.dead and not na(gu.ymTop) and (gu.dir == 1 ? ymC < gu.ymBot : ymC > gu.ymTop)
+                    gu.ymBot := na
+                    gu.ymTop := na
+                    gu.ymExt := na
+                    // בגרף YM — הנכס של הגרף יצא מהגאפ, ולכן אין לו קופסה
+                    if isYMc
+                        gu.drwBot := na
+                        gu.drwTop := na
 
 // ═══════════════════════════════════════════════════════════════════
 // זיהוי גאפ קולקטיבי — באותו כיוון, באותו נר, בלפחות שני נכסים
@@ -1835,11 +1849,16 @@ var box   aBox = na
 var line  aCE  = na
 var int   drawnSeq = -999
 var int   drawnDeg = -999
+var bool  drawnBox = false
 
 int shownSeq = selIdx == -1 ? -999 : array.get(gaps, selIdx).fSeq
 int shownDeg = selIdx == -1 ? -999 : array.get(gaps, selIdx).fDeg
+// האם לגאפ המוצג יש עדיין קופסה על הגרף הזה — בגרף YM היא נעלמת כש-YM יוצא
+// מהגאפ, ואז הקופסה מוחלפת בתווית. ביטוי מותנה ולא `and`: ב-Pine `and` לא
+// עוצר באמצע, ו-array.get(gaps, -1) היה מפיל את הסקריפט כשאין שבירה.
+bool shownBox = selIdx == -1 ? false : not na(array.get(gaps, selIdx).drwTop)
 
-if shownSeq != drawnSeq or shownDeg != drawnDeg
+if shownSeq != drawnSeq or shownDeg != drawnDeg or shownBox != drawnBox
     if not na(aLbl)
         label.delete(aLbl)
         aLbl := na
@@ -1878,6 +1897,7 @@ if shownSeq != drawnSeq or shownDeg != drawnDeg
             aCE := line.new(gd.origin, gMid, xEnd, gMid, color = color.new(col, 40), style = line.style_dashed, width = 1)
     drawnSeq := shownSeq
     drawnDeg := shownDeg
+    drawnBox := shownBox
 
 // הקופסה, הקו והתג עוקבים אחרי הנר הנוכחי — רק במצב "עד הנר הנוכחי"
 if selIdx != -1 and boxLen == "עד הנר הנוכחי"
