@@ -710,7 +710,7 @@ qsFiltTrue = qsMode == "רק שבירות ברצף אמיתי"
 qsFiltHot  = qsMode == "רק שבירות ברצף חם"
 hotKey     = "," + str.replace_all(hotList, " ", "") + ","
 
-// האם השבירה "מסומנת" (צבע מלא וקו עבה), האם מקבלת ★, והאם היא עוברת סינון
+// האם השבירה "מסומנת" (צבע מלא), האם מקבלת ★, והאם היא עוברת סינון
 f_qsMarked(bool tru, bool hot) => qsByTrue ? tru : (qsStarOn and hot)
 f_qsStar(bool tru, bool hot)   => qsByTrue ? (tru and hot) : (qsStarOn and hot)
 f_qsPass(bool tru, bool hot)   => qsFiltTrue ? tru : qsFiltHot ? hot : true
