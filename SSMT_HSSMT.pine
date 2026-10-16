@@ -32,7 +32,20 @@ linePad    = input.float(0.1, "מרווח הקו האלכסוני מהנרות (
 // מקבלת את השקיפות הזאת מעליו — גם על הגרף וגם בכיתוב בפינה.
 weakFade   = input.int(45, "שקיפות השבירה החלשה", minval = 0, maxval = 90, group = grpVis)
 lineWidth  = input.int(2, "עובי קו", minval = 1, maxval = 4, group = grpVis)
+// "קומפקטי" = תווית קטנה בשתי שורות, נעוצה בנר שעשה את השבירה (בסוף הקו):
+//   323-333 ★
+//   90m SSMT · NQ
+// "קלאסי" = התווית הישנה, שעוקבת אחרי הנר האחרון.
+lblStyle   = input.string("קומפקטי", "עיצוב התווית", options = ["קומפקטי", "קלאסי"], group = grpVis)
 showDebug  = input.bool(false, "הצג טבלת בדיקה", group = grpVis)
+
+// רצף QS = שלושה מספרים של רבעים, מהגבוה לנמוך, ברמה אחת מתחת למחזור של
+// השבירה. למשל בשבירת 90 דק' (גרף 5 דק'): סשן-מיקרו-רבע, כך ש-3-2-3 = סשן
+// AM, מיקרו 2, רבע 3. ליד כל שבירה נכתבים שני רצפים: איפה ישב הקיצון שנלקח,
+// ואיפה הוא נלקח. אם אחד מהם הוא רצף חם — השבירה High Probability.
+grpQS = "רצפי QS"
+qsMode  = input.string("סמן ★ ברצף חם", "רצף QS ליד השבירה", options = ["סמן ★ ברצף חם", "רק להציג את הרצף", "רק שבירות ברצף חם", "כבוי"], group = grpQS, tooltip = "פעיל במדרגות התוך-יומיות בלבד: 15 שניות, דקה, 5 דקות, 15 דקות ושעה. ★ = לפחות אחד משני הרצפים (הייחוס או נקודת השבירה) הוא רצף חם, והשבירה מצוירת בצבע מלא ובקו עבה יותר. 'רק שבירות ברצף חם' מסתיר כל שבירה תוך-יומית שלא נמצאת ברצף חם, גם על הגרף וגם בפינה.")
+hotList = input.string("111,114,141,144,411,414,441,444,222,333", "רצפים חמים", group = grpQS, tooltip = "מופרדים בפסיקים. נר שעומד בדיוק על התפר בין שני רבעים שייך לשניהם — ואם אחד מהשניים חם, השבירה חמה.")
 
 grpLogic = "לוגיקה"
 requireTrueOpen = input.bool(false, "סנן לפי True Open (פרימיום/דיסקאונט)", group = grpLogic)
@@ -673,6 +686,87 @@ isESc = str.contains(cs, "ES")
 isYMc = str.contains(cs, "YM")
 
 // ═══════════════════════════════════════════════════════════════════
+// רצפי QS
+// ═══════════════════════════════════════════════════════════════════
+// הרצף נבנה ברמה אחת מתחת למחזור הייחוס של המדרגה, ומכיל אותה ואת שתי
+// הרמות שמעליה:
+//   15S / 1M — מיקרו-רבע-תת רבע   (מתחת לתת-רבע אין רמה, אז 15S משתמש באותו)
+//   5M       — סשן-מיקרו-רבע
+//   15M      — יום-סשן-מיקרו       (שני 1 .. חמישי 4, שישי = ·)
+//   1H       — שבוע-יום-סשן        (שבוע מת = ·)
+// מ-4H ומעלה אין רצף. החישוב זהה לחישוב המחזורים הראשי (שניות, עוגן שלישי).
+
+qsUseCls(int cls) => qsMode != "כבוי" and cls >= 1 and cls <= 5
+qsMark   = qsMode == "סמן ★ ברצף חם" or qsMode == "רק שבירות ברצף חם"
+qsFilter = qsMode == "רק שבירות ברצף חם"
+hotKey   = "," + str.replace_all(hotList, " ", "") + ","
+
+f_qsChain(int cls, int t) =>
+    mOD  = hour(t, TZ) * 60 + minute(t, TZ)
+    post = mOD >= 1080
+    mFD  = post ? mOD - 1080 : mOD + 360
+    sFD  = mFD * 60 + second(t, TZ)
+    tdt  = post ? t + 86400000 : t
+    sI   = math.floor(sFD / 21600)
+    sIS  = sFD % 21600
+    mI   = math.floor(sIS / 5400)
+    sIM  = sIS % 5400
+    qI   = math.floor(sIM / 1350)
+    sqI  = math.floor((sIM % 1350) / 337.5)
+    string out = ""
+    if cls <= 2
+        out := str.tostring(mI + 1) + str.tostring(qI + 1) + str.tostring(sqI + 1)
+    else if cls == 3
+        out := str.tostring(sI + 1) + str.tostring(mI + 1) + str.tostring(qI + 1)
+    else if cls <= 5
+        dw = dayofweek(tdt, TZ)
+        dN = dw == dayofweek.monday ? 1 : dw == dayofweek.tuesday ? 2 : dw == dayofweek.wednesday ? 3 : dw == dayofweek.thursday ? 4 : 0
+        dS = dN == 0 ? "·" : str.tostring(dN)
+        if cls == 4
+            out := dS + str.tostring(sI + 1) + str.tostring(mI + 1)
+        else
+            dsm  = dw == dayofweek.sunday ? 6 : dw - 2
+            mon  = tdt - dsm * 86400000
+            tue  = mon + 86400000
+            thu  = mon + 3 * 86400000
+            dead = month(tue, TZ) != month(thu, TZ)
+            wk   = dead ? 0 : math.floor((dayofmonth(tue, TZ) - 1) / 7) + 1
+            out := (wk == 0 ? "·" : str.tostring(wk)) + dS + str.tostring(sI + 1)
+    out
+
+f_qsHot(string s) => str.length(s) == 3 and str.contains(hotKey, "," + s + ",")
+
+// נר שחוצה תפר (למשל נר דקה שחוצה גבול של 5.625 דק', או נר 5 דק' שחוצה גבול
+// של 22.5) שייך לשני הרבעים. בודקים את תחילת הנר ואת הרגע האחרון שלו: אם
+// אחד מהם חם — חם, ומוצג הרצף החם.
+f_qsPair(int cls, int t, int durMs) =>
+    c1 = f_qsChain(cls, t)
+    c2 = f_qsChain(cls, t + durMs - 1)
+    h1 = f_qsHot(c1)
+    h2 = c2 != c1 and f_qsHot(c2)
+    [h2 and not h1 ? c2 : c1, h1 or h2]
+
+// אורך נר של מדרגה, במילישניות
+f_clsMs(int cls) => (cls == 1 ? 15 : cls == 2 ? 60 : cls == 3 ? 300 : cls == 4 ? 900 : cls == 5 ? 3600 : 14400) * 1000
+
+// שם המחזור שבין תת-המחזורים שלו קרתה השבירה
+f_cycName(int cls) => cls == 1 ? "5.6m" : cls == 2 ? "22.5m" : cls == 3 ? "90m" : cls == 4 ? "Session" : cls == 5 ? "Day" : cls == 6 ? "Week" : cls == 7 ? "QQ" : cls == 8 ? "Qtr" : "Year"
+
+// הנכסים שלקחו את הרמה, בלי סימוני H/S — לשורה התחתונה הקצרה של התווית
+f_assets(string s) =>
+    string out = ""
+    for p in str.split(s, " ")
+        if (p == "NQ" or p == "ES" or p == "YM") and not str.contains(out, p)
+            out := out == "" ? p : out + "/" + p
+    out
+
+// הקו והתווית נשענים על נרות בעבר (נר הייחוס ונר השבירה) — במרחק שיכול
+// להגיע למאות נרות. מגדילים מראש את ההיסטוריה של הסדרות האלה.
+max_bars_back(time, 2000)
+max_bars_back(high, 2000)
+max_bars_back(low, 2000)
+
+// ═══════════════════════════════════════════════════════════════════
 // מצב מבוסס אירוע
 // ═══════════════════════════════════════════════════════════════════
 
@@ -832,42 +926,126 @@ f_clearShift(bool isBull, int b1, float p1, int b2, float p2, array<float> extA,
 
 // צבע השבירה: HSSMT בצבע מלא, SSMT מעט שקוף, ולשבירה החלשה (הישנה מבין
 // השתיים שחיות במקביל) מתווספת שקיפות נוספת מעל זה.
-f_col(color base, int typ, bool weak) =>
-    t = (typ == 2 ? 0 : 30) + (weak ? weakFade : 0)
+// שבירה ברצף חם מקבלת צבע מלא גם כשהיא SSMT.
+f_col(color base, int typ, bool weak, bool hot) =>
+    t = (typ == 2 or hot ? 0 : 30) + (weak ? weakFade : 0)
     color.new(base, math.min(t, 95))
+
+// הסדרות של נכס הגרף שעליהן נמדדת השבירה: HSSMT **מסגירה לסגירה**, SSMT
+// מפתיל לפתיל — כל אחד על הסדרה שבה הוא באמת נמדד.
+f_ser(bool isBull, bool isH) =>
+    extA  = isH ? (isBull ? (isNQc ? nqLoCA  : isESc ? esLoCA  : ymLoCA)  : (isNQc ? nqHiCA  : isESc ? esHiCA  : ymHiCA))  : (isBull ? (isNQc ? nqLoA  : isESc ? esLoA  : ymLoA)  : (isNQc ? nqHiA  : isESc ? esHiA  : ymHiA))
+    extBA = isH ? (isBull ? (isNQc ? nqLoCBA : isESc ? esLoCBA : ymLoCBA) : (isNQc ? nqHiCBA : isESc ? esHiCBA : ymHiCBA)) : (isBull ? (isNQc ? nqLoBA : isESc ? esLoBA : ymLoBA) : (isNQc ? nqHiBA : isESc ? esHiBA : ymHiBA))
+    curE  = isH ? (isBull ? (isNQc ? nqCLC  : isESc ? esCLC  : ymCLC)  : (isNQc ? nqCHC  : isESc ? esCHC  : ymCHC))  : (isBull ? (isNQc ? nqCL  : isESc ? esCL  : ymCL)  : (isNQc ? nqCH  : isESc ? esCH  : ymCH))
+    curEB = isH ? (isBull ? (isNQc ? nqCLCb : isESc ? esCLCb : ymCLCb) : (isNQc ? nqCHCb : isESc ? esCHCb : ymCHCb)) : (isBull ? (isNQc ? nqCLb : isESc ? esCLb : ymCLb) : (isNQc ? nqCHb : isESc ? esCHb : ymCHb))
+    [extA, extBA, curE, curEB]
+
+// שתי הנקודות של השבירה על נכס הגרף: הקיצון של תת-מחזור הייחוס (b1/p1),
+// והנר שלקח אותו (b2/p2). מהן נגזרים הקו האלכסוני, מיקום התווית והרצפים.
+f_brk(int dir, int typ, int refI) =>
+    int   b1 = -1
+    float p1 = na
+    int   b2 = -1
+    float p2 = na
+    bool  ok = false
+    if dir != 0 and refI >= 0
+        isBull = dir == 1
+        [extA, extBA, curE, curEB] = f_ser(isBull, typ == 2)
+        if refI <= array.size(extA) - 1
+            p1 := array.get(extA,  refI)
+            b1 := array.get(extBA, refI)
+            [tp, tb] = f_takeBar(isBull, extA, extBA, refI, curE, curEB)
+            p2 := tp
+            b2 := tb
+            ok := b2 > b1 and not na(p1) and not na(p2)
+    [b1, p1, b2, p2, ok]
+
+// הטקסט של התווית
+f_lblTxt(int typ, string s, string chR, string chT, bool hot) =>
+    star = hot and qsMark ? " ★" : ""
+    string out = ""
+    if lblStyle == "קלאסי"
+        out := "W " + s + star
+    else
+        top = chR != "" ? chR + "-" + chT + star : ""
+        bot = f_cycName(tfClass) + " " + (typ == 2 ? "HSSMT" : "SSMT") + " · " + f_assets(s)
+        out := top == "" ? bot : top + "\n" + bot
+    out
 
 // ציור ערכה שלמה לכיוון אחד: תווית, קו אופקי וקו אלכסוני. מוחזרים כדי שהקורא
 // ישמור אותם ב-var וימחק אותם בציור הבא.
-f_drawSet(int dir, int typ, string str, float lvl, int refB, int refI, int sigB, float yPos, bool weak) =>
+f_drawSet(int dir, int typ, float lvl, int refB, int refI, int sigB, float yPos, bool weak, string txt, bool hot, int b1, float p1, int b2, float p2, bool ok, float hB2, float lB2) =>
     label lb = na
     line  ln = na
     line  dg = na
     if dir != 0 and not na(yPos)
-        cFin = f_col(dir == 1 ? colBull : colBear, typ, weak)
-        lb := label.new(sigB, yPos, "W " + str, style = label.style_none, textcolor = cFin, size = labelSize, textalign = text.align_center)
+        isBull = dir == 1
+        cFin = f_col(isBull ? colBull : colBear, typ, weak, hot and qsMark)
+        lw   = lineWidth + (hot and qsMark ? 1 : 0)
+        float y2 = na
         if showLine and not na(lvl) and refB > 0
             if lineMode != "אלכסוני"
-                ln := line.new(refB, lvl, bar_index, lvl, color = cFin, style = line.style_solid, width = lineWidth)
-            // HSSMT נמתח **מסגירה לסגירה**, SSMT מפתיל לפתיל — כל אחד על הסדרה
-            // שבה הוא באמת נמדד. קו של HSSMT על הפתילים לא מייצג את השבירה.
-            if lineMode != "אופקי" and refI >= 0
-                isBull = dir == 1
-                isH    = typ == 2
-                extA  = isH ? (isBull ? (isNQc ? nqLoCA  : isESc ? esLoCA  : ymLoCA)  : (isNQc ? nqHiCA  : isESc ? esHiCA  : ymHiCA))  : (isBull ? (isNQc ? nqLoA  : isESc ? esLoA  : ymLoA)  : (isNQc ? nqHiA  : isESc ? esHiA  : ymHiA))
-                extBA = isH ? (isBull ? (isNQc ? nqLoCBA : isESc ? esLoCBA : ymLoCBA) : (isNQc ? nqHiCBA : isESc ? esHiCBA : ymHiCBA)) : (isBull ? (isNQc ? nqLoBA : isESc ? esLoBA : ymLoBA) : (isNQc ? nqHiBA : isESc ? esHiBA : ymHiBA))
-                curE  = isH ? (isBull ? (isNQc ? nqCLC  : isESc ? esCLC  : ymCLC)  : (isNQc ? nqCHC  : isESc ? esCHC  : ymCHC))  : (isBull ? (isNQc ? nqCL  : isESc ? esCL  : ymCL)  : (isNQc ? nqCH  : isESc ? esCH  : ymCH))
-                curEB = isH ? (isBull ? (isNQc ? nqCLCb : isESc ? esCLCb : ymCLCb) : (isNQc ? nqCHCb : isESc ? esCHCb : ymCHCb)) : (isBull ? (isNQc ? nqCLb : isESc ? esCLb : ymCLb) : (isNQc ? nqCHb : isESc ? esCHb : ymCHb))
-                if refI <= array.size(extA) - 1
-                    pad = atr * linePad
-                    p1  = array.get(extA,  refI)
-                    b1  = array.get(extBA, refI)
-                    [p2, b2] = f_takeBar(isBull, extA, extBA, refI, curE, curEB)
-                    if b2 > b1 and not na(p1) and not na(p2)
-                        sh = f_clearShift(isBull, b1, p1, b2, p2, extA, extBA, refI, pad)
-                        y1 = isBull ? p1 - pad - sh : p1 + pad + sh
-                        y2 = isBull ? p2 - pad - sh : p2 + pad + sh
-                        dg := line.new(b1, y1, b2, y2, color = cFin, style = line.style_solid, width = lineWidth)
+                ln := line.new(refB, lvl, bar_index, lvl, color = cFin, style = line.style_solid, width = lw)
+            if lineMode != "אופקי" and ok
+                [extA, extBA, curE, curEB] = f_ser(isBull, typ == 2)
+                pad = atr * linePad
+                sh = f_clearShift(isBull, b1, p1, b2, p2, extA, extBA, refI, pad)
+                y1 = isBull ? p1 - pad - sh : p1 + pad + sh
+                y2 := isBull ? p2 - pad - sh : p2 + pad + sh
+                dg := line.new(b1, y1, b2, y2, color = cFin, style = line.style_solid, width = lw)
+        // קומפקטי: התווית נעוצה מעל (או מתחת ל-) הנר שלקח את הרמה, כלומר בקצה
+        // הקו, ולא זזה עם הנר האחרון. מעל הפתיל — כדי שלא תעלה על הנר עצמו.
+        if lblStyle == "קומפקטי" and ok
+            pd = atr * 0.15
+            yl = isBull ? math.min(lB2, nz(y2, lB2)) - pd : math.max(hB2, nz(y2, hB2)) + pd
+            lb := label.new(b2, yl, txt, style = isBull ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = cFin, size = labelSize, textalign = text.align_center)
+        else
+            lb := label.new(sigB, yPos, txt, style = label.style_none, textcolor = cFin, size = labelSize, textalign = text.align_center)
     [lb, ln, dg]
+
+// ── נקודות השבירה, הרצפים וה-High Probability לשתי השבירות ──
+[pB1, pP1, pB2, pP2, pOk] = f_brk(showDir, dispType, dispRefI)
+[sB1, sP1, sB2, sP2, sOk] = f_brk(secDir,  secType,  secRefI)
+qsOn  = qsUseCls(tfClass)
+durMs = tfSec * 1000
+string pChR = ""
+string pChT = ""
+bool   pHot = false
+string sChR = ""
+string sChT = ""
+bool   sHot = false
+if qsOn and pOk
+    [c1, h1] = f_qsPair(tfClass, time[bar_index - pB1], durMs)
+    [c2, h2] = f_qsPair(tfClass, time[bar_index - pB2], durMs)
+    pChR := c1
+    pChT := c2
+    pHot := h1 or h2
+if qsOn and sOk
+    [c3, h3] = f_qsPair(tfClass, time[bar_index - sB1], durMs)
+    [c4, h4] = f_qsPair(tfClass, time[bar_index - sB2], durMs)
+    sChR := c3
+    sChT := c4
+    sHot := h3 or h4
+// הקיצון של נר השבירה — כדי שהתווית תשב מעליו/מתחתיו ולא על הנר
+// (ב-if ולא בטרנרי, כדי שלא תיקרא היסטוריה במרחק לא חוקי כשאין שבירה)
+float pHiB2 = na
+float pLoB2 = na
+float sHiB2 = na
+float sLoB2 = na
+int   pBrkT = na
+if pOk
+    pBrkT := time[bar_index - pB2]
+    pHiB2 := high[bar_index - pB2]
+    pLoB2 := low[bar_index - pB2]
+if sOk
+    sHiB2 := high[bar_index - sB2]
+    sLoB2 := low[bar_index - sB2]
+
+// "רק שבירות ברצף חם": שבירה תוך-יומית שלא ברצף חם לא מצוירת בכלל
+drawDir = qsOn and qsFilter and not pHot ? 0 : showDir
+drawSec = qsOn and qsFilter and not sHot ? 0 : secDir
+txtA = f_lblTxt(dispType, dispStr, pChR, pChT, pHot)
+txtB = f_lblTxt(secType,  secStr,  sChR, sChT, sHot)
 
 var label aLbl  = na
 var line  aLine = na
@@ -887,9 +1065,12 @@ var int    drawnHb   = -1
 var int    drawnLb   = -1
 var int    drawnHCb  = -1
 var int    drawnLCb  = -1
+var string drawnTA   = ""
+var string drawnTB   = ""
 
-// הקצה הימני של הקו האלכסוני נגזר מהמצברים, ולכן גם הם חלק מהתנאי
-needRedraw = curSeq != drawnSeq or showDir != drawnDir or dispType != drawnType or dispStr != drawnStr or dispLvl != drawnLvl or secDir != drawnSDir or secType != drawnSTyp or secStr != drawnSStr or cHb != drawnHb or cLb != drawnLb or cHCb != drawnHCb or cLCb != drawnLCb
+// הקצה הימני של הקו האלכסוני נגזר מהמצברים, ולכן גם הם חלק מהתנאי. הטקסט
+// (כולל הרצפים) נגזר מנקודות השבירה, ולכן שינוי שלו מחייב ציור מחדש.
+needRedraw = curSeq != drawnSeq or drawDir != drawnDir or dispType != drawnType or dispStr != drawnStr or dispLvl != drawnLvl or drawSec != drawnSDir or secType != drawnSTyp or secStr != drawnSStr or cHb != drawnHb or cLb != drawnLb or cHCb != drawnHCb or cLCb != drawnLCb or txtA != drawnTA or txtB != drawnTB
 
 if needRedraw
     if not na(aLbl)
@@ -910,20 +1091,24 @@ if needRedraw
     if not na(bDiag)
         line.delete(bDiag)
         bDiag := na
-    [l1, n1, g1] = f_drawSet(showDir, dispType, dispStr, dispLvl, dispRefB, dispRefI, dispSigB, dispYPos, false)
+    [l1, n1, g1] = f_drawSet(drawDir, dispType, dispLvl, dispRefB, dispRefI, dispSigB, dispYPos, false, txtA, pHot, pB1, pP1, pB2, pP2, pOk, pHiB2, pLoB2)
     aLbl  := l1
     aLine := n1
     aDiag := g1
-    [l2, n2, g2] = f_drawSet(secDir, secType, secStr, secLvl, secRefB, secRefI, secSigB, secYPos, true)
+    // השבירה השנייה דהויה רק כשהעיקרית באמת מצוירת (בסינון "רק חמות" היא
+    // יכולה להיות מוסתרת, ואז השנייה היא היחידה על הגרף)
+    [l2, n2, g2] = f_drawSet(drawSec, secType, secLvl, secRefB, secRefI, secSigB, secYPos, drawDir != 0, txtB, sHot, sB1, sP1, sB2, sP2, sOk, sHiB2, sLoB2)
     bLbl  := l2
     bLine := n2
     bDiag := g2
     drawnSeq  := curSeq
-    drawnDir  := showDir
+    drawnDir  := drawDir
     drawnType := dispType
     drawnStr  := dispStr
     drawnLvl  := dispLvl
-    drawnSDir := secDir
+    drawnTA   := txtA
+    drawnTB   := txtB
+    drawnSDir := drawSec
     drawnSTyp := secType
     drawnSStr := secStr
     drawnHb   := cHb
@@ -932,16 +1117,18 @@ if needRedraw
     drawnLCb  := cLCb
 
 // התוויות והקווים האופקיים עוקבים אחרי הנר הנוכחי. האלכסוניים לא — שני קצותיהם
-// נעולים על נרות אמיתיים, וזה כל הרעיון שלהם.
-if not na(aLbl) and showDir != 0
+// נעולים על נרות אמיתיים, וזה כל הרעיון שלהם. גם התווית הקומפקטית לא עוקבת —
+// היא נעוצה בנר השבירה (אלא אם אין לה נקודת שבירה ונפלה לתצוגה הקלאסית).
+lblFollow = lblStyle == "קלאסי"
+if not na(aLbl) and drawDir != 0 and (lblFollow or not pOk)
     label.set_x(aLbl, dispSigB)
     label.set_y(aLbl, dispYPos)
-if not na(aLine) and showDir != 0
+if not na(aLine) and drawDir != 0
     line.set_x2(aLine, bar_index)
-if not na(bLbl) and secDir != 0
+if not na(bLbl) and drawSec != 0 and (lblFollow or not sOk)
     label.set_x(bLbl, secSigB)
     label.set_y(bLbl, secYPos)
-if not na(bLine) and secDir != 0
+if not na(bLine) and drawSec != 0
     line.set_x2(bLine, bar_index)
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1070,9 +1257,19 @@ type Eng
     array<float> yLoA
     array<float> yHcA
     array<float> yLcA
+    // זמני הקיצונים של נכס הגרף — בשביל רצפי ה-QS (איפה ישב הקיצון ואיפה נלקח)
+    array<int>   tHiA
+    array<int>   tLoA
+    array<int>   tHcA
+    array<int>   tLcA
+    int    tH
+    int    tL
+    int    tHC
+    int    tLC
+    bool   hot
 
 f_newEng(int cls) =>
-    Eng.new(cls, 0, 0, 0, false, false, "", 0, "", 0, 0, 0, "", "", 0, 0, 0, -1, -1, na, na, na, na, na, na, na, na, na, na, na, na, array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float())
+    Eng.new(cls, 0, 0, 0, false, false, "", 0, "", 0, 0, 0, "", "", 0, 0, 0, -1, -1, na, na, na, na, na, na, na, na, na, na, na, na, array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_int(), array.new_int(), array.new_int(), array.new_int(), 0, 0, 0, 0, false)
 
 // צעד אחד: נר סגור אחד של המסגרת שהמנוע מייצג
 f_engStep(Eng e, int t, float nh, float nl, float nc, float eh, float el, float ec, float yh, float yl, float yc) =>
@@ -1097,7 +1294,15 @@ f_engStep(Eng e, int t, float nh, float nl, float nc, float eh, float el, float 
                 array.clear(e.yLoA)
                 array.clear(e.yHcA)
                 array.clear(e.yLcA)
+                array.clear(e.tHiA)
+                array.clear(e.tLoA)
+                array.clear(e.tHcA)
+                array.clear(e.tLcA)
             if ((not newLife) or kL) and not na(e.nH)
+                array.push(e.tHiA, e.tH)
+                array.push(e.tLoA, e.tL)
+                array.push(e.tHcA, e.tHC)
+                array.push(e.tLcA, e.tLC)
                 array.push(e.nHiA, e.nH)
                 array.push(e.nLoA, e.nL)
                 array.push(e.nHcA, e.nHC)
@@ -1123,6 +1328,14 @@ f_engStep(Eng e, int t, float nh, float nl, float nc, float eh, float el, float 
                 array.remove(e.yLoA, 0)
                 array.remove(e.yHcA, 0)
                 array.remove(e.yLcA, 0)
+                array.remove(e.tHiA, 0)
+                array.remove(e.tLoA, 0)
+                array.remove(e.tHcA, 0)
+                array.remove(e.tLcA, 0)
+            e.tH  := t
+            e.tL  := t
+            e.tHC := t
+            e.tLC := t
             e.nH := nh
             e.nL := nl
             e.nHC := nc
@@ -1136,6 +1349,22 @@ f_engStep(Eng e, int t, float nh, float nl, float nc, float eh, float el, float 
             e.yHC := yc
             e.yLC := yc
         else
+            // זמן הקיצון של נכס הגרף מתעדכן לפני הערכים — ההשוואה היא מול הקיצון הישן
+            float oH  = isNQc ? e.nH  : isESc ? e.eH  : e.yH
+            float oL  = isNQc ? e.nL  : isESc ? e.eL  : e.yL
+            float oHC = isNQc ? e.nHC : isESc ? e.eHC : e.yHC
+            float oLC = isNQc ? e.nLC : isESc ? e.eLC : e.yLC
+            float xH  = isNQc ? nh : isESc ? eh : yh
+            float xL  = isNQc ? nl : isESc ? el : yl
+            float xC  = isNQc ? nc : isESc ? ec : yc
+            if na(oH) or xH > oH
+                e.tH := t
+            if na(oL) or xL < oL
+                e.tL := t
+            if na(oHC) or xC > oHC
+                e.tHC := t
+            if na(oLC) or xC < oLC
+                e.tLC := t
             e.nH  := na(e.nH)  or nh > e.nH  ? nh : e.nH
             e.nL  := na(e.nL)  or nl < e.nL  ? nl : e.nL
             e.nHC := na(e.nHC) or nc > e.nHC ? nc : e.nHC
@@ -1207,7 +1436,30 @@ f_engStep(Eng e, int t, float nh, float nl, float nc, float eh, float el, float 
 
         d = e.bTy != 0 and e.uTy != 0 ? (e.bSeq > e.uSeq ? -1 : 1) : e.bTy != 0 ? -1 : e.uTy != 0 ? 1 : 0
         e.dir := d
-        e.txt := d == -1 ? "▼" + e.bStr : d == 1 ? "▲" + e.uStr : ""
+        // רצף QS של השבירה המוצגת — אותו חישוב כמו על הגרף, על נכס הגרף:
+        // זמן הקיצון של תת-מחזור הייחוס, וזמן הנר שלקח אותו
+        bool hotNow = false
+        if d != 0 and qsUseCls(e.cls)
+            isB = d == 1
+            ty  = isB ? e.uTy : e.bTy
+            rI  = isB ? e.uRefI : e.bRefI
+            isH = ty == 2
+            vA  = isNQc ? (isB ? (isH ? e.nLcA : e.nLoA) : (isH ? e.nHcA : e.nHiA)) : isESc ? (isB ? (isH ? e.eLcA : e.eLoA) : (isH ? e.eHcA : e.eHiA)) : (isB ? (isH ? e.yLcA : e.yLoA) : (isH ? e.yHcA : e.yHiA))
+            cV  = isNQc ? (isB ? (isH ? e.nLC : e.nL) : (isH ? e.nHC : e.nH)) : isESc ? (isB ? (isH ? e.eLC : e.eL) : (isH ? e.eHC : e.eH)) : (isB ? (isH ? e.yLC : e.yL) : (isH ? e.yHC : e.yH))
+            tA  = isB ? (isH ? e.tLcA : e.tLoA) : (isH ? e.tHcA : e.tHiA)
+            cT  = isB ? (isH ? e.tLC : e.tL) : (isH ? e.tHC : e.tH)
+            if rI >= 0 and rI <= array.size(vA) - 1 and array.size(tA) == array.size(vA)
+                [tpx, tT] = f_takeBar(isB, vA, tA, rI, cV, cT)
+                dur = f_clsMs(e.cls)
+                [r1, rh] = f_qsPair(e.cls, array.get(tA, rI), dur)
+                [r2, th] = f_qsPair(e.cls, tT, dur)
+                hotNow := rh or th
+        e.hot := hotNow
+        star = hotNow and qsMark ? " ★" : ""
+        e.txt := d == -1 ? "▼" + e.bStr + star : d == 1 ? "▲" + e.uStr + star : ""
+        // "רק שבירות ברצף חם" — מדרגה תוך-יומית בלי רצף חם לא נכתבת בפינה
+        if qsFilter and qsUseCls(e.cls) and not hotNow
+            e.txt := ""
         // השבירה החלשה — הכיוון ההפוך, רק כששניהם חיים במקביל
         d2 = (e.bTy != 0 and e.uTy != 0) ? -d : 0
         e.dir2 := d2
@@ -1344,11 +1596,12 @@ if mtfOn and barstate.islast and tfClass != 0
     // בפינה נכתבת **רק השבירה העדכנית** של כל מסגרת. השבירה החלשה עדיין מצוירת
     // על הגרף בצבע דהוי, אבל לא בכיתוב — כדי שהשורה תישאר קצרה וקריאה.
     // (הנתונים שלה זמינים ב-egX.txt2 / egX.dir2 אם אי פעם נרצה להחזיר אותה.)
-    sC = showDir == -1 ? "▼" + bearStr : showDir == 1 ? "▲" + bullStr : ""
+    pStar = pHot and qsMark ? " ★" : ""
+    sC = drawDir == -1 ? "▼" + bearStr + pStar : drawDir == 1 ? "▲" + bullStr + pStar : ""
 
     clsArr = array.from(cU3, cU2, cU1, tfClass, cD1, cD2)
     stArr  = array.from(egU3.txt, egU2.txt, egU1.txt, sC, egD1.txt, egD2.txt)
-    dirArr = array.from(egU3.dir, egU2.dir, egU1.dir, showDir, egD1.dir, egD2.dir)
+    dirArr = array.from(egU3.dir, egU2.dir, egU1.dir, drawDir, egD1.dir, egD2.dir)
     // מדרגה שלא נסרקת (מעל 4H, או מתחת לדקה) פשוט יוצאת מהרשימה
     useArr = array.from(useU3, useU2, useU1, true, useD1, useD2)
 
@@ -1396,7 +1649,7 @@ if mtfOn and barstate.islast and tfClass != 0
 
 f_num(x) => na(x) ? "-" : str.tostring(x, format.mintick)
 
-var table dbg = table.new(position.top_right, 4, 16, border_width = 1)
+var table dbg = table.new(position.top_right, 4, 17, border_width = 1)
 if showDebug and barstate.islast
     // רמות ייחוס הכי נמוכות/גבוהות במיכל (סגירה) — "הכי נמוך/גבוה בחודש"
     float nqMinLoC = nLevels > 0 ? array.min(nqLoCA) : na
@@ -1485,3 +1738,8 @@ if showDebug and barstate.islast
     table.cell(dbg, 1, 15, nLevels > 0 ? str.format_time(time[bar_index - array.get(nqHiBA, 0)], "dd/MM HH:mm", TZ) : "-", bgcolor = wc)
     table.cell(dbg, 2, 15, nLevels > 0 ? str.format_time(time[bar_index - array.get(nqLoBA, 0)], "dd/MM HH:mm", TZ) : "-", bgcolor = wc)
     table.cell(dbg, 3, 15, "", bgcolor = wc)
+    // רצפי QS של השבירה המוצגת: ייחוס-שבירה, והאם חם
+    table.cell(dbg, 0, 16, "QS ref-brk", bgcolor = hc, text_color = wc)
+    table.cell(dbg, 1, 16, pChR == "" ? "-" : pChR + "-" + pChT, bgcolor = wc)
+    table.cell(dbg, 2, 16, pHot ? "HOT" : "-", bgcolor = wc)
+    table.cell(dbg, 3, 16, pOk ? str.format_time(pBrkT, "HH:mm:ss", TZ) : "-", bgcolor = wc)
