@@ -69,10 +69,11 @@ extendBodies = input.bool(true, "הרחב גאפ לגופי הנרות (רווח
 // נר — מתאחדים ל-FVG מורחב.
 // **הגודל בטיקים של כל נכס** (NQ/ES 0.25, YM 1). חל רק על VI.
 //   VI לבד   — נספר מ-viMinTicks טיקים ומעלה.
-//   VI + FVG — מרחיב את ה-FVG של אותו נכס כבר מ-viMergeTicks.
+//   VI + FVG — מרחיב את ה-FVG של אותו נכס כבר מ-viMergeTicks, משני הצדדים:
+//              נר 1→2 מרחיב את הקצה הקרוב לנר 1, נר 2→3 את הקצה הקרוב לנר 3.
 volImbOn     = input.bool(true, "זהה גם גאפ סגירה/פתיחה בין שני נרות", tooltip = "Volume Imbalance — הרווח בין הסגירה של נר לפתיחה של הנר שאחריו. נספר יחד עם FVG רגיל לאותו גאפ קולקטיבי, ומסומן V בהצצה כשכל הרגליים הן VI.", group = grpGap)
 viMinTicks   = input.int(4, "VI לבד — מינימום טיקים", minval = 1, maxval = 100, tooltip = "רווח סגירה/פתיחה שנספר כגאפ בפני עצמו. 4 טיקים = נקודה אחת ב-NQ/ES, 4 נקודות ב-YM.", group = grpGap)
-viMergeTicks = input.int(2, "VI שמתאחד עם FVG — מינימום טיקים", minval = 1, maxval = 100, tooltip = "רווח סגירה/פתיחה שמרחיב FVG של אותו נכס באותו נר.", group = grpGap)
+viMergeTicks = input.int(1, "VI שמתאחד עם FVG — מינימום טיקים", minval = 1, maxval = 100, tooltip = "רווח סגירה/פתיחה שמרחיב FVG של אותו נכס — משני הצדדים: בין נר 1 לנר 2 ובין נר 2 לנר 3.", group = grpGap)
 // כיבוי מחזיר את ההתנהגות הישנה: רק NQ מול ES, YM לא משתתף בכלל.
 useYM        = input.bool(true, "כלול את YM כנכס חלש", group = grpGap)
 maxGaps      = input.int(60, "מקסימום גאפים במיכל", minval = 5, maxval = 200, group = grpGap)
@@ -602,7 +603,7 @@ f_subName(int c, int t) =>
 // אותם חוקים בדיוק כמו הגרף הראשי, רק שהם רצים על נרות של מסגרת אחרת.
 // כל נכס מגיע כמערך של תשעה מספרים משלושת הנרות האחרונים שנסגרו:
 //   [0]=open0 [1]=high0 [2]=low0 [3]=close0 [4]=open1 [5]=close1
-//   [6]=high2 [7]=low2  [8]=close2
+//   [6]=high2 [7]=low2  [8]=close2 [9]=open2
 // כל המצב יושב באובייקט Engine, כך שאפשר להריץ כמה מנועים במקביל.
 //
 // הפאנל לא מציג מחירים, רק כיוון ודרגה — ולכן כאן אין את בעיית
@@ -850,6 +851,9 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
         float no0 = array.get(n, 0)
         float eo0 = array.get(s, 0)
         float yo0 = array.get(y, 0)
+        float no2 = array.get(n, 9)
+        float eo2 = array.get(s, 9)
+        float yo2 = array.get(y, 9)
 
         bool okN = not na(nh2) and not na(no1) and not na(nc0)
         bool okE = not na(eh2) and not na(eo1) and not na(ec0)
@@ -882,6 +886,17 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
         bool vBearN = mBearN and tiN >= viMinTicks
         bool vBearE = mBearE and tiE >= viMinTicks
         bool vBearY = mBearY and tiY >= viMinTicks
+        // VI בין נר 1 לנר 2 (close2 מול open1), ברצף — מרחיב את ה-FVG בקצה
+        // שליד נר 1. רק הרחבה, לא גאפ בפני עצמו. זהה לגרף.
+        int  piN = math.round(math.abs(no1 - nc2) / tkN)
+        int  piE = math.round(math.abs(eo1 - ec2) / tkE)
+        int  piY = math.round(math.abs(yo1 - yc2) / tkY)
+        bool pBullN = volImbOn and no1 > nc2 and nc2 > no2 and nc1 > no1 and piN >= viMergeTicks
+        bool pBullE = volImbOn and eo1 > ec2 and ec2 > eo2 and ec1 > eo1 and piE >= viMergeTicks
+        bool pBullY = volImbOn and yo1 > yc2 and yc2 > yo2 and yc1 > yo1 and piY >= viMergeTicks
+        bool pBearN = volImbOn and no1 < nc2 and nc2 < no2 and nc1 < no1 and piN >= viMergeTicks
+        bool pBearE = volImbOn and eo1 < ec2 and ec2 < eo2 and ec1 < eo1 and piE >= viMergeTicks
+        bool pBearY = volImbOn and yo1 < yc2 and yc2 < yo2 and yc1 < yo1 and piY >= viMergeTicks
 
         // שני הסוגים נספרים יחד — גאפ קולקטיבי יכול להיות FVG ב-NQ ו-VI ב-ES
         bool bullN = fBullN or vBullN
@@ -908,18 +923,24 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
                 if fBullN
                     nb  := (extendBodies and no1 > nh2) ? nc2 : nh2
                     nt  := (extendBodies and nl0 > nc1) ? no0 : nl0
+                    if pBullN
+                        nb := math.min(nb, nc2)
                 if vBullN or (fBullN and mBullN)
                     nb := na(nb) ? nc1 : math.min(nb, nc1)
                     nt := na(nt) ? no0 : math.max(nt, no0)
                 if fBullE
                     eb  := (extendBodies and eo1 > eh2) ? ec2 : eh2
                     et  := (extendBodies and el0 > ec1) ? eo0 : el0
+                    if pBullE
+                        eb := math.min(eb, ec2)
                 if vBullE or (fBullE and mBullE)
                     eb := na(eb) ? ec1 : math.min(eb, ec1)
                     et := na(et) ? eo0 : math.max(et, eo0)
                 if fBullY
                     yb := (extendBodies and yo1 > yh2) ? yc2 : yh2
                     yt := (extendBodies and yl0 > yc1) ? yo0 : yl0
+                    if pBullY
+                        yb := math.min(yb, yc2)
                 if vBullY or (fBullY and mBullY)
                     yb := na(yb) ? yc1 : math.min(yb, yc1)
                     yt := na(yt) ? yo0 : math.max(yt, yo0)
@@ -927,18 +948,24 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
                 if fBearN
                     nt  := (extendBodies and no1 < nl2) ? nc2 : nl2
                     nb  := (extendBodies and nh0 < nc1) ? no0 : nh0
+                    if pBearN
+                        nt := math.max(nt, nc2)
                 if vBearN or (fBearN and mBearN)
                     nt := na(nt) ? nc1 : math.max(nt, nc1)
                     nb := na(nb) ? no0 : math.min(nb, no0)
                 if fBearE
                     et  := (extendBodies and eo1 < el2) ? ec2 : el2
                     eb  := (extendBodies and eh0 < ec1) ? eo0 : eh0
+                    if pBearE
+                        et := math.max(et, ec2)
                 if vBearE or (fBearE and mBearE)
                     et := na(et) ? ec1 : math.max(et, ec1)
                     eb := na(eb) ? eo0 : math.min(eb, eo0)
                 if fBearY
                     yt := (extendBodies and yo1 < yl2) ? yc2 : yl2
                     yb := (extendBodies and yh0 < yc1) ? yo0 : yh0
+                    if pBearY
+                        yt := math.max(yt, yc2)
                 if vBearY or (fBearY and mBearY)
                     yt := na(yt) ? yc1 : math.max(yt, yc1)
                     yb := na(yb) ? yo0 : math.min(yb, yo0)
@@ -1009,7 +1036,7 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
 // מחזיק בעצמו את שני הנרות הקודמים ומזיז אותם אחרי כל צעד.
 f_pushLtf(Engine e, int t, float no, float nh, float nl, float nc, float eo, float eh, float el, float ec, float yo, float yh, float yl, float yc) =>
     if not na(t) and t != e.lastT and (not na(nc) or not na(ec))
-        f_step(e, t, array.from(no, nh, nl, nc, array.get(e.hN, 0), array.get(e.hN, 3), array.get(e.hN, 5), array.get(e.hN, 6), array.get(e.hN, 7)), array.from(eo, eh, el, ec, array.get(e.hE, 0), array.get(e.hE, 3), array.get(e.hE, 5), array.get(e.hE, 6), array.get(e.hE, 7)), array.from(yo, yh, yl, yc, array.get(e.hY, 0), array.get(e.hY, 3), array.get(e.hY, 5), array.get(e.hY, 6), array.get(e.hY, 7)))
+        f_step(e, t, array.from(no, nh, nl, nc, array.get(e.hN, 0), array.get(e.hN, 3), array.get(e.hN, 5), array.get(e.hN, 6), array.get(e.hN, 7), array.get(e.hN, 4)), array.from(eo, eh, el, ec, array.get(e.hE, 0), array.get(e.hE, 3), array.get(e.hE, 5), array.get(e.hE, 6), array.get(e.hE, 7), array.get(e.hE, 4)), array.from(yo, yh, yl, yc, array.get(e.hY, 0), array.get(e.hY, 3), array.get(e.hY, 5), array.get(e.hY, 6), array.get(e.hY, 7), array.get(e.hY, 4)))
         for q = 0 to 3
             array.set(e.hN, q + 4, array.get(e.hN, q))
             array.set(e.hE, q + 4, array.get(e.hE, q))
@@ -1222,6 +1249,18 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
     bool vBearN = rBearN and tiN >= viMinTicks
     bool vBearE = rBearE and tiE >= viMinTicks
     bool vBearY = rBearY and tiY >= viMinTicks
+    // VI בין נר 1 לנר 2 ([2] מול [1]), ברצף — מרחיב את ה-FVG בקצה שליד נר 1
+    // (התחתון בשורי, העליון בדובי). רק הרחבה של FVG, לא גאפ בפני עצמו —
+    // אותו VI כבר נבדק כגאפ עצמאי בנר הקודם. חייב להיות זהה למנוע.
+    int  piN = math.round(math.abs(nqO[1] - nqC[2]) / tkN)
+    int  piE = math.round(math.abs(esO[1] - esC[2]) / tkE)
+    int  piY = math.round(math.abs(ymO[1] - ymC[2]) / tkY)
+    bool pBullN = volImbOn and nqO[1] > nqC[2] and nqC[2] > nqO[2] and nqC[1] > nqO[1] and piN >= viMergeTicks
+    bool pBullE = volImbOn and esO[1] > esC[2] and esC[2] > esO[2] and esC[1] > esO[1] and piE >= viMergeTicks
+    bool pBullY = volImbOn and ymO[1] > ymC[2] and ymC[2] > ymO[2] and ymC[1] > ymO[1] and piY >= viMergeTicks
+    bool pBearN = volImbOn and nqO[1] < nqC[2] and nqC[2] < nqO[2] and nqC[1] < nqO[1] and piN >= viMergeTicks
+    bool pBearE = volImbOn and esO[1] < esC[2] and esC[2] < esO[2] and esC[1] < esO[1] and piE >= viMergeTicks
+    bool pBearY = volImbOn and ymO[1] < ymC[2] and ymC[2] < ymO[2] and ymC[1] < ymO[1] and piY >= viMergeTicks
 
     bool bullN = fBullN or vBullN
     bool bullE = fBullE or vBullE
@@ -1256,18 +1295,24 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
             if fBullN
                 nb  := (extendBodies and nqO[1] > nqH[2]) ? nqC[2] : nqH[2]
                 nt  := (extendBodies and nqL    > nqC[1]) ? nqO    : nqL
+                if pBullN
+                    nb := math.min(nb, nqC[2])
             if vBullN or (fBullN and mBullN)
                 nb := na(nb) ? nqC[1] : math.min(nb, nqC[1])
                 nt := na(nt) ? nqO    : math.max(nt, nqO)
             if fBullE
                 eb  := (extendBodies and esO[1] > esH[2]) ? esC[2] : esH[2]
                 et  := (extendBodies and esL    > esC[1]) ? esO    : esL
+                if pBullE
+                    eb := math.min(eb, esC[2])
             if vBullE or (fBullE and mBullE)
                 eb := na(eb) ? esC[1] : math.min(eb, esC[1])
                 et := na(et) ? esO    : math.max(et, esO)
             if fBullY
                 yb := (extendBodies and ymO[1] > ymH[2]) ? ymC[2] : ymH[2]
                 yt := (extendBodies and ymL    > ymC[1]) ? ymO    : ymL
+                if pBullY
+                    yb := math.min(yb, ymC[2])
             if vBullY or (fBullY and mBullY)
                 yb := na(yb) ? ymC[1] : math.min(yb, ymC[1])
                 yt := na(yt) ? ymO    : math.max(yt, ymO)
@@ -1275,18 +1320,24 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
             if fBearN
                 nt  := (extendBodies and nqO[1] < nqL[2]) ? nqC[2] : nqL[2]
                 nb  := (extendBodies and nqH    < nqC[1]) ? nqO    : nqH
+                if pBearN
+                    nt := math.max(nt, nqC[2])
             if vBearN or (fBearN and mBearN)
                 nt := na(nt) ? nqC[1] : math.max(nt, nqC[1])
                 nb := na(nb) ? nqO    : math.min(nb, nqO)
             if fBearE
                 et  := (extendBodies and esO[1] < esL[2]) ? esC[2] : esL[2]
                 eb  := (extendBodies and esH    < esC[1]) ? esO    : esH
+                if pBearE
+                    et := math.max(et, esC[2])
             if vBearE or (fBearE and mBearE)
                 et := na(et) ? esC[1] : math.max(et, esC[1])
                 eb := na(eb) ? esO    : math.min(eb, esO)
             if fBearY
                 yt := (extendBodies and ymO[1] < ymL[2]) ? ymC[2] : ymL[2]
                 yb := (extendBodies and ymH    < ymC[1]) ? ymO    : ymH
+                if pBearY
+                    yt := math.max(yt, ymC[2])
             if vBearY or (fBearY and mBearY)
                 yt := na(yt) ? ymC[1] : math.max(yt, ymC[1])
                 yb := na(yb) ? ymO    : math.min(yb, ymO)
@@ -1306,6 +1357,8 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
                 if chF
                     cb := (extendBodies and open[1] > high[2]) ? close[2] : high[2]
                     ct := (extendBodies and low      > close[1]) ? open  : low
+                    if volImbOn and open[1] > close[2] and close[2] > open[2] and close[1] > open[1] and math.round(math.abs(open[1] - close[2]) / syminfo.mintick) >= viMergeTicks
+                        cb := math.min(cb, close[2])
                 if volImbOn and open > close[1] and (cycEdge or (close[1] > open[1] and close > open)) and (chTi >= viMinTicks or (chF and chTi >= viMergeTicks))
                     cb := na(cb) ? close[1] : math.min(cb, close[1])
                     ct := na(ct) ? open     : math.max(ct, open)
@@ -1314,6 +1367,8 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
                 if chF
                     ct := (extendBodies and open[1] < low[2])  ? close[2] : low[2]
                     cb := (extendBodies and high     < close[1]) ? open  : high
+                    if volImbOn and open[1] < close[2] and close[2] < open[2] and close[1] < open[1] and math.round(math.abs(open[1] - close[2]) / syminfo.mintick) >= viMergeTicks
+                        ct := math.max(ct, close[2])
                 if volImbOn and open < close[1] and (cycEdge or (close[1] < open[1] and close < open)) and (chTi >= viMinTicks or (chF and chTi >= viMergeTicks))
                     ct := na(ct) ? close[1] : math.max(ct, close[1])
                     cb := na(cb) ? open     : math.min(cb, open)
@@ -1368,6 +1423,8 @@ if ownMode != "כבוי" and barstate.isconfirmed and tfClass != 0 and bar_index
             if oFB
                 ob := (extendBodies and open[1] > high[2]) ? close[2] : high[2]
                 ot := (extendBodies and low      > close[1]) ? open  : low
+                if volImbOn and open[1] > close[2] and close[2] > open[2] and close[1] > open[1] and math.round(math.abs(open[1] - close[2]) / syminfo.mintick) >= viMergeTicks
+                    ob := math.min(ob, close[2])
             if oVB
                 ob := na(ob) ? close[1] : math.min(ob, close[1])
                 ot := na(ot) ? open     : math.max(ot, open)
@@ -1375,6 +1432,8 @@ if ownMode != "כבוי" and barstate.isconfirmed and tfClass != 0 and bar_index
             if oFS
                 ot := (extendBodies and open[1] < low[2])  ? close[2] : low[2]
                 ob := (extendBodies and high     < close[1]) ? open  : high
+                if volImbOn and open[1] < close[2] and close[2] < open[2] and close[1] < open[1] and math.round(math.abs(open[1] - close[2]) / syminfo.mintick) >= viMergeTicks
+                    ot := math.max(ot, close[2])
             if oVS
                 ot := na(ot) ? close[1] : math.max(ot, close[1])
                 ob := na(ob) ? open     : math.min(ob, open)
@@ -1524,26 +1583,26 @@ tfl1 = not useL1 ? "12M" : cL1 == 1 ? "1" : cL1 == 2 ? "5" : cL1 == 3 ? "15" : c
 tfl2 = not useL2 ? "12M" : cL2 == 1 ? "1" : cL2 == 2 ? "5" : cL2 == 3 ? "15" : cL2 == 4 ? "60" : cL2 == 5 ? "240" : cL2 == 6 ? "D" : "W"
 tfl3 = not useL3 ? "12M" : cL3 == 1 ? "1" : cL3 == 2 ? "5" : cL3 == 3 ? "15" : cL3 == 4 ? "60" : cL3 == 5 ? "240" : cL3 == 6 ? "D" : "W"
 
-[t1, n1o0, n1h0, n1l0, n1c0, n1o1, n1c1, n1h2, n1l2, n1c2] = request.security(sNQ, tfs1, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
-[t2, n2o0, n2h0, n2l0, n2c0, n2o1, n2c1, n2h2, n2l2, n2c2] = request.security(sNQ, tfs2, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
-[t3, n3o0, n3h0, n3l0, n3c0, n3o1, n3c1, n3h2, n3l2, n3c2] = request.security(sNQ, tfs3, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
-[t4, n4o0, n4h0, n4l0, n4c0, n4o1, n4c1, n4h2, n4l2, n4c2] = request.security(sNQ, tfs4, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
-[t5, n5o0, n5h0, n5l0, n5c0, n5o1, n5c1, n5h2, n5l2, n5c2] = request.security(sNQ, tfs5, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
-[t6, n6o0, n6h0, n6l0, n6c0, n6o1, n6c1, n6h2, n6l2, n6c2] = request.security(sNQ, tfs6, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
+[t1, n1o0, n1h0, n1l0, n1c0, n1o1, n1c1, n1h2, n1l2, n1c2, n1o2] = request.security(sNQ, tfs1, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[t2, n2o0, n2h0, n2l0, n2c0, n2o1, n2c1, n2h2, n2l2, n2c2, n2o2] = request.security(sNQ, tfs2, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[t3, n3o0, n3h0, n3l0, n3c0, n3o1, n3c1, n3h2, n3l2, n3c2, n3o2] = request.security(sNQ, tfs3, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[t4, n4o0, n4h0, n4l0, n4c0, n4o1, n4c1, n4h2, n4l2, n4c2, n4o2] = request.security(sNQ, tfs4, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[t5, n5o0, n5h0, n5l0, n5c0, n5o1, n5c1, n5h2, n5l2, n5c2, n5o2] = request.security(sNQ, tfs5, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[t6, n6o0, n6h0, n6l0, n6c0, n6o1, n6c1, n6h2, n6l2, n6c2, n6o2] = request.security(sNQ, tfs6, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
 
-[u1, s1o0, s1h0, s1l0, s1c0, s1o1, s1c1, s1h2, s1l2, s1c2] = request.security(sES, tfs1, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
-[u2, s2o0, s2h0, s2l0, s2c0, s2o1, s2c1, s2h2, s2l2, s2c2] = request.security(sES, tfs2, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
-[u3, s3o0, s3h0, s3l0, s3c0, s3o1, s3c1, s3h2, s3l2, s3c2] = request.security(sES, tfs3, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
-[u4, s4o0, s4h0, s4l0, s4c0, s4o1, s4c1, s4h2, s4l2, s4c2] = request.security(sES, tfs4, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
-[u5, s5o0, s5h0, s5l0, s5c0, s5o1, s5c1, s5h2, s5l2, s5c2] = request.security(sES, tfs5, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
-[u6, s6o0, s6h0, s6l0, s6c0, s6o1, s6c1, s6h2, s6l2, s6c2] = request.security(sES, tfs6, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
+[u1, s1o0, s1h0, s1l0, s1c0, s1o1, s1c1, s1h2, s1l2, s1c2, s1o2] = request.security(sES, tfs1, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[u2, s2o0, s2h0, s2l0, s2c0, s2o1, s2c1, s2h2, s2l2, s2c2, s2o2] = request.security(sES, tfs2, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[u3, s3o0, s3h0, s3l0, s3c0, s3o1, s3c1, s3h2, s3l2, s3c2, s3o2] = request.security(sES, tfs3, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[u4, s4o0, s4h0, s4l0, s4c0, s4o1, s4c1, s4h2, s4l2, s4c2, s4o2] = request.security(sES, tfs4, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[u5, s5o0, s5h0, s5l0, s5c0, s5o1, s5c1, s5h2, s5l2, s5c2, s5o2] = request.security(sES, tfs5, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[u6, s6o0, s6h0, s6l0, s6c0, s6o1, s6c1, s6h2, s6l2, s6c2, s6o2] = request.security(sES, tfs6, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
 
-[v1, y1o0, y1h0, y1l0, y1c0, y1o1, y1c1, y1h2, y1l2, y1c2] = request.security(sYM, tfs1, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
-[v2, y2o0, y2h0, y2l0, y2c0, y2o1, y2c1, y2h2, y2l2, y2c2] = request.security(sYM, tfs2, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
-[v3, y3o0, y3h0, y3l0, y3c0, y3o1, y3c1, y3h2, y3l2, y3c2] = request.security(sYM, tfs3, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
-[v4, y4o0, y4h0, y4l0, y4c0, y4o1, y4c1, y4h2, y4l2, y4c2] = request.security(sYM, tfs4, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
-[v5, y5o0, y5h0, y5l0, y5c0, y5o1, y5c1, y5h2, y5l2, y5c2] = request.security(sYM, tfs5, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
-[v6, y6o0, y6h0, y6l0, y6c0, y6o1, y6c1, y6h2, y6l2, y6c2] = request.security(sYM, tfs6, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3]], lookahead = barmerge.lookahead_off)
+[v1, y1o0, y1h0, y1l0, y1c0, y1o1, y1c1, y1h2, y1l2, y1c2, y1o2] = request.security(sYM, tfs1, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[v2, y2o0, y2h0, y2l0, y2c0, y2o1, y2c1, y2h2, y2l2, y2c2, y2o2] = request.security(sYM, tfs2, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[v3, y3o0, y3h0, y3l0, y3c0, y3o1, y3c1, y3h2, y3l2, y3c2, y3o2] = request.security(sYM, tfs3, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[v4, y4o0, y4h0, y4l0, y4c0, y4o1, y4c1, y4h2, y4l2, y4c2, y4o2] = request.security(sYM, tfs4, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[v5, y5o0, y5h0, y5l0, y5c0, y5o1, y5c1, y5h2, y5l2, y5c2, y5o2] = request.security(sYM, tfs5, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[v6, y6o0, y6h0, y6l0, y6c0, y6o1, y6c1, y6h2, y6l2, y6c2, y6o2] = request.security(sYM, tfs6, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
 
 // ignore_invalid_timeframe מחזיר na במקום לעצור את הסקריפט כשהמדרגה הזאת
 // לא באמת מתחת לגרף (למשל גרף דקה, שאין מתחתיו כלום).
@@ -1616,17 +1675,17 @@ if mtfOn and barstate.isconfirmed
             Engine er = array.get(allEng, k)
             er.justFired := false
     if useH1
-        f_step(eg1, t1, array.from(n1o0, n1h0, n1l0, n1c0, n1o1, n1c1, n1h2, n1l2, n1c2), array.from(s1o0, s1h0, s1l0, s1c0, s1o1, s1c1, s1h2, s1l2, s1c2), array.from(y1o0, y1h0, y1l0, y1c0, y1o1, y1c1, y1h2, y1l2, y1c2))
+        f_step(eg1, t1, array.from(n1o0, n1h0, n1l0, n1c0, n1o1, n1c1, n1h2, n1l2, n1c2, n1o2), array.from(s1o0, s1h0, s1l0, s1c0, s1o1, s1c1, s1h2, s1l2, s1c2, s1o2), array.from(y1o0, y1h0, y1l0, y1c0, y1o1, y1c1, y1h2, y1l2, y1c2, y1o2))
     if useH2
-        f_step(eg2, t2, array.from(n2o0, n2h0, n2l0, n2c0, n2o1, n2c1, n2h2, n2l2, n2c2), array.from(s2o0, s2h0, s2l0, s2c0, s2o1, s2c1, s2h2, s2l2, s2c2), array.from(y2o0, y2h0, y2l0, y2c0, y2o1, y2c1, y2h2, y2l2, y2c2))
+        f_step(eg2, t2, array.from(n2o0, n2h0, n2l0, n2c0, n2o1, n2c1, n2h2, n2l2, n2c2, n2o2), array.from(s2o0, s2h0, s2l0, s2c0, s2o1, s2c1, s2h2, s2l2, s2c2, s2o2), array.from(y2o0, y2h0, y2l0, y2c0, y2o1, y2c1, y2h2, y2l2, y2c2, y2o2))
     if useH3
-        f_step(eg3, t3, array.from(n3o0, n3h0, n3l0, n3c0, n3o1, n3c1, n3h2, n3l2, n3c2), array.from(s3o0, s3h0, s3l0, s3c0, s3o1, s3c1, s3h2, s3l2, s3c2), array.from(y3o0, y3h0, y3l0, y3c0, y3o1, y3c1, y3h2, y3l2, y3c2))
+        f_step(eg3, t3, array.from(n3o0, n3h0, n3l0, n3c0, n3o1, n3c1, n3h2, n3l2, n3c2, n3o2), array.from(s3o0, s3h0, s3l0, s3c0, s3o1, s3c1, s3h2, s3l2, s3c2, s3o2), array.from(y3o0, y3h0, y3l0, y3c0, y3o1, y3c1, y3h2, y3l2, y3c2, y3o2))
     if useH4
-        f_step(eg4, t4, array.from(n4o0, n4h0, n4l0, n4c0, n4o1, n4c1, n4h2, n4l2, n4c2), array.from(s4o0, s4h0, s4l0, s4c0, s4o1, s4c1, s4h2, s4l2, s4c2), array.from(y4o0, y4h0, y4l0, y4c0, y4o1, y4c1, y4h2, y4l2, y4c2))
+        f_step(eg4, t4, array.from(n4o0, n4h0, n4l0, n4c0, n4o1, n4c1, n4h2, n4l2, n4c2, n4o2), array.from(s4o0, s4h0, s4l0, s4c0, s4o1, s4c1, s4h2, s4l2, s4c2, s4o2), array.from(y4o0, y4h0, y4l0, y4c0, y4o1, y4c1, y4h2, y4l2, y4c2, y4o2))
     if useH5
-        f_step(eg5, t5, array.from(n5o0, n5h0, n5l0, n5c0, n5o1, n5c1, n5h2, n5l2, n5c2), array.from(s5o0, s5h0, s5l0, s5c0, s5o1, s5c1, s5h2, s5l2, s5c2), array.from(y5o0, y5h0, y5l0, y5c0, y5o1, y5c1, y5h2, y5l2, y5c2))
+        f_step(eg5, t5, array.from(n5o0, n5h0, n5l0, n5c0, n5o1, n5c1, n5h2, n5l2, n5c2, n5o2), array.from(s5o0, s5h0, s5l0, s5c0, s5o1, s5c1, s5h2, s5l2, s5c2, s5o2), array.from(y5o0, y5h0, y5l0, y5c0, y5o1, y5c1, y5h2, y5l2, y5c2, y5o2))
     if useH6
-        f_step(eg6, t6, array.from(n6o0, n6h0, n6l0, n6c0, n6o1, n6c1, n6h2, n6l2, n6c2), array.from(s6o0, s6h0, s6l0, s6c0, s6o1, s6c1, s6h2, s6l2, s6c2), array.from(y6o0, y6h0, y6l0, y6c0, y6o1, y6c1, y6h2, y6l2, y6c2))
+        f_step(eg6, t6, array.from(n6o0, n6h0, n6l0, n6c0, n6o1, n6c1, n6h2, n6l2, n6c2, n6o2), array.from(s6o0, s6h0, s6l0, s6c0, s6o1, s6c1, s6h2, s6l2, s6c2, s6o2), array.from(y6o0, y6h0, y6l0, y6c0, y6o1, y6c1, y6h2, y6l2, y6c2, y6o2))
 
     // תת-נרות: כל נר של המסגרת הנמוכה מוזן בנפרד, לפי הסדר.
     // הגדלים נמדדים קודם דרך f_asz*, ואחר כך כל התנאים הם על מספרים
