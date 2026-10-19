@@ -38,7 +38,7 @@ indicator("SSMT Fill | Quarterly Theory", overlay = true, max_labels_count = 20,
 // מיפוי תת-מחזור/מיכל לכל מסגרת זמן:
 //   1M  — רבע 22.5m   → מיקרו-סשן    5M  — מיקרו-סשן → סשן
 //   15M — סשן          → יום מסחר      1H  — יום מסחר  → שבוע
-//   4H  — שבוע         → חודש          1D  — רבע-רבעון → שנה
+//   4H  — שבוע         → חודש          1D  — רבע-רבעון → רבעון
 //   1W  — רבעון        → שנה           Mo  — שנה       → מחזור 4 שנים
 //
 // הצנרת (זמן, סייקלים, תת-מחזור/מיכל) זהה ל-SSMT+HSSMT.
@@ -314,10 +314,11 @@ if tfClass == 8
     lifeCycleId := quadId
 else if tfClass == 7
     lifeCycleId := yearId
-// היומי שומר על מיכל שנתי. מיכל רבעוני היה מוחק את הרשימה ארבע פעמים
-// בשנה, ומיד אחרי כל מחיקה הגרף היומי נשאר על 0 גאפים חיים לשבועות.
+// המיכל של היומי הוא **הרבעון**: הרבעון מחולק לארבעה רבע-רבעונים, והם
+// תת-המחזורים שלו. גאפ של Q3 לא נשבר ב-Q4. תוצאת לוואי ידועה: בכל תחילת
+// רבעון הרשימה ריקה עד שהרבע-רבעון הראשון נגמר (~23 יום), כי ביומי אין זרע.
 else if tfClass == 6
-    lifeCycleId := yearId
+    lifeCycleId := qtrId
 else if tfClass == 5
     lifeCycleId := monthId
 else if tfClass == 4
@@ -701,7 +702,7 @@ f_setCycles(Engine e, int t) =>
     int  qqIx = math.min(3, math.max(0, int(math.floor(qDiQ * 4.0 / qLn))))
     int  qqId = qtId * 10 + qqIx
     int  rf   = c == 8 ? yy   : c == 7 ? qtId : c == 6 ? qqId : c == 5 ? wkId : c == 4 ? tdId : c == 3 ? ssId : c == 2 ? ucId : qrId
-    int  lf   = c == 8 ? qdId : c == 7 ? yy   : c == 6 ? yy   : c == 5 ? mnId : c == 4 ? wkId : c == 3 ? tdId : c == 2 ? ssId : ucId
+    int  lf   = c == 8 ? qdId : c == 7 ? yy   : c == 6 ? qtId : c == 5 ? mnId : c == 4 ? wkId : c == 3 ? tdId : c == 2 ? ssId : ucId
     e.curRef  := rf
     e.curLife := lf
     e.curDead := dead
@@ -737,7 +738,7 @@ f_lifeId(int c, int t) =>
     int  ssId = tdId * 10 + sIdx
     int  ucId = ssId * 10 + uIdx
     int  qdId = int(math.floor(yy / 4.0))
-    c == 8 ? qdId : c == 7 ? yy : c == 6 ? yy : c == 5 ? mnId : c == 4 ? wkId : c == 3 ? tdId : c == 2 ? ssId : ucId
+    c == 8 ? qdId : c == 7 ? yy : c == 6 ? yy * 10 + int(math.ceil(mm / 3.0)) : c == 5 ? mnId : c == 4 ? wkId : c == 3 ? tdId : c == 2 ? ssId : ucId
 
 // צעד אחד של המנוע.
 f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
@@ -1507,7 +1508,7 @@ if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK and array.
 // IFVG על הגאפ שלה, או החלפת מיכל.
 //   15M — שבירה של לונדון מלווה את שאר יום המסחר (NY-AM ו-NY-PM)
 //   1H  — של יום שני, עד סוף השבוע · 4H — של שבוע, עד סוף החודש
-//   1D  — של רבע-רבעון, עד סוף השנה · 1W — של רבעון, עד סוף השנה
+//   1D  — של רבע-רבעון, עד סוף הרבעון · 1W — של רבעון, עד סוף השנה
 //   Mo  — של שנה, עד סוף מחזור 4 השנים
 // מבין השבירות החיות מצוירת זו שקרתה אחרונה. שבירה נגדית לא מוחקת את
 // הקודמות — היא רק חדשה יותר ולכן קופצת לתצוגה. אם היא מתה ב-IFVG,
@@ -2065,7 +2066,7 @@ f_time(int b) =>
     b <= 0 or off < 0 ? "-" : str.format_time(time[off], "HH:mm", TZ)
 // תת-מחזור ומיכל בשמות, לאימות שהמיפוי נכון למסגרת הזמן שנבחרה
 f_cycleNames() =>
-    tfClass == 8 ? "שנה>4 שנים" : tfClass == 7 ? "רבעון>שנה" : tfClass == 6 ? "רבע-רבעון>שנה" : tfClass == 5 ? "שבוע>חודש" : tfClass == 4 ? "יום>שבוע" : tfClass == 3 ? "סשן>יום" : tfClass == 2 ? "מיקרו>סשן" : tfClass == 1 ? "רבע>מיקרו" : "לא נתמך"
+    tfClass == 8 ? "שנה>4 שנים" : tfClass == 7 ? "רבעון>שנה" : tfClass == 6 ? "רבע-רבעון>רבעון" : tfClass == 5 ? "שבוע>חודש" : tfClass == 4 ? "יום>שבוע" : tfClass == 3 ? "סשן>יום" : tfClass == 2 ? "מיקרו>סשן" : tfClass == 1 ? "רבע>מיקרו" : "לא נתמך"
 
 var table dbg = table.new(position.top_right, 4, 13, border_width = 1)
 if showDebug and barstate.islast
