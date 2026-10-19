@@ -48,7 +48,7 @@ showDebug  = input.bool(false, "הצג טבלת בדיקה", group = grpVis)
 //   1 → 1 / 2 / 4     2 → 2 / 3     3 → 3 / 4     4 → 4 / 1
 // למשל 323→333 אמיתי (2→3), 324→333 לא (4→3 אסור), 342→412 אמיתי.
 grpQS = "רצפי QS"
-qsMode  = input.string("רצף אמיתי (★ אם גם חם)", "רצף QS ליד השבירה", options = ["רצף אמיתי (★ אם גם חם)", "רק שבירות ברצף אמיתי", "תמיד, ★ ברצף חם", "תמיד, בלי ★", "רק שבירות ברצף חם", "כבוי"], group = grpQS, tooltip = "פעיל במדרגות התוך-יומיות בלבד: 15 שניות, דקה, 5 דקות, 15 דקות ושעה.\n• רצף אמיתי: השבירה מוצגת כרגיל, והרצף נכתב רק כשהשבירה היא רצף אמיתי — אז היא גם בצבע מלא, ו-★ נוסף כשאחד הרצפים גם ברשימה החמה. בפינה: ★ = אמיתי וחם.\n• רק שבירות ברצף אמיתי: שבירה תוך-יומית שאינה רצף אמיתי מוסתרת, גם על הגרף וגם בפינה.\n• תמיד: הרצף תמיד נכתב, ו-★ לפי הרשימה החמה (או בלי ★ בכלל).\n• רק שבירות ברצף חם: מסתיר כל שבירה תוך-יומית שאינה ברשימה החמה.")
+qsMode  = input.string("רצף אמיתי (★ אם גם חם)", "רצף QS ליד השבירה", options = ["רצף אמיתי (★ אם גם חם)", "רק שבירות ברצף אמיתי", "תמיד, ★ ברצף חם", "תמיד, בלי ★", "רק שבירות ברצף חם", "כבוי"], group = grpQS, tooltip = "פעיל במדרגות התוך-יומיות בלבד: 15 שניות, דקה, 5 דקות, 15 דקות ושעה.\n• רצף אמיתי: השבירה מוצגת כרגיל, והרצף נכתב רק כשהשבירה היא רצף אמיתי — אז היא גם בצבע מלא, ו-★ נוסף כשאחד הרצפים גם ברשימה החמה. בפינה: ★ = אמיתי וחם. ☆ = על הנכס הזה לא, אבל על נכס אחר השבירה ב-QS.\n• רק שבירות ברצף אמיתי: שבירה תוך-יומית שאינה רצף אמיתי מוסתרת, גם על הגרף וגם בפינה.\n• תמיד: הרצף תמיד נכתב, ו-★ לפי הרשימה החמה (או בלי ★ בכלל).\n• רק שבירות ברצף חם: מסתיר כל שבירה תוך-יומית שאינה ברשימה החמה.")
 hotList = input.string("111,114,141,144,411,414,441,444,222,333", "רצפים חמים", group = grpQS, tooltip = "מופרדים בפסיקים. נר שעומד בדיוק על התפר בין שני רבעים שייך לשניהם — ואם אחד מהשניים חם, השבירה חמה.")
 
 grpLogic = "לוגיקה"
@@ -578,11 +578,11 @@ f_str(bNQ, bES, bYM, isBull) =>
     s := (bYM and not isBull) ? s + "YM " : s
     str.trim(s)
 
-// חוזק השבירה, כשדובית ושורית חיות במקביל וצריך לבחור את הראשית:
-//   3 = HSSMT, 2 = SSMT, 1 = SSMT שהגרעין כבר סגר מעבר לו — (all/core closed).
-// הראשית היא החזקה; בחוזק שווה — האחרונה שנעשתה. שבירה שהתבטלה כבר לא חיה,
-// ולכן היא יוצאת מהבחירה לפני הכול.
-f_rank(int typ, string s) => typ == 2 ? 3 : str.contains(s, "closed)") ? 1 : 2
+// חוזק השבירה, כשדובית ושורית חיות במקביל וצריך לבחור את הראשית. קודם הסוג:
+//   HSSMT > SSMT > SSMT שהגרעין כבר סגר מעבר לו — (all/core closed).
+// בתוך אותו סוג — שבירה ב-QS (★ או ☆) חזקה משבירה שלא ב-QS. ורק אם גם זה
+// שווה — האחרונה שנעשתה. שבירה שהתבטלה כבר לא חיה, ולכן יוצאת לפני הכול.
+f_rank(int typ, string s, bool inQS) => (typ == 2 ? 3 : str.contains(s, "closed)") ? 1 : 2) * 2 + (inQS ? 1 : 0)
 
 // ═══════════════════════════════════════════════════════════════════
 // זיהוי — השבירה הכי עדכנית, בלתי-תלוי בנכס הגרף. לקיחה מצטברת.
@@ -697,6 +697,8 @@ cs = syminfo.tickerid
 isNQc = str.contains(cs, "NQ")
 isESc = str.contains(cs, "ES")
 isYMc = str.contains(cs, "YM")
+// אינדקס נכס הגרף: 0 = NQ, 1 = ES, 2 = YM
+cA = isNQc ? 0 : isESc ? 1 : 2
 
 // ═══════════════════════════════════════════════════════════════════
 // רצפי QS
@@ -721,8 +723,6 @@ hotKey     = "," + str.replace_all(hotList, " ", "") + ","
 f_qsMarked(bool tru, bool hot) => qsByTrue ? tru : (qsStarOn and hot)
 f_qsStar(bool tru, bool hot)   => qsByTrue ? (tru and hot) : (qsStarOn and hot)
 f_qsPass(bool tru, bool hot)   => qsFiltTrue ? tru : qsFiltHot ? hot : true
-// הסימון הקצר בפינה: רק ★ (רצף אמיתי וחם). רצף אמיתי בלבד לא מקבל סימן.
-f_qsTag(bool tru, bool hot)    => qsByTrue ? (tru and hot ? " ★" : "") : (qsStarOn and hot ? " ★" : "")
 
 f_qsChain(int cls, int t) =>
     mOD  = hour(t, TZ) * 60 + minute(t, TZ)
@@ -914,45 +914,6 @@ if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK and nLevel
         bullType := 0
         bullRefI := -1
 
-// ═══════════════════════════════════════════════════════════════════
-// בחירת מה מוצג
-// ═══════════════════════════════════════════════════════════════════
-
-showDir = 0
-if bearType != 0 and bullType != 0
-    rB = f_rank(bearType, bearStr)
-    rU = f_rank(bullType, bullStr)
-    showDir := rB != rU ? (rB > rU ? -1 : 1) : (bearSeq > bullSeq ? -1 : 1)
-else if bearType != 0
-    showDir := -1
-else if bullType != 0
-    showDir := 1
-
-// חידוד: שבירה שעתית מייצגת את השבוע (שני–חמישי) — ביום שישי היא כבר לא רלוונטית.
-if tfClass == 5 and tdDow == dayofweek.friday
-    showDir := 0
-
-dispType = showDir == -1 ? bearType : showDir == 1 ? bullType : 0
-dispStr  = showDir == -1 ? bearStr  : showDir == 1 ? bullStr  : ""
-dispLvl  = showDir == -1 ? bearLvl  : showDir == 1 ? bullLvl  : na
-dispRefB = showDir == -1 ? bearRefB : showDir == 1 ? bullRefB : 0
-dispSigB = showDir == -1 ? bearSigB : showDir == 1 ? bullSigB : 0
-dispYPos = showDir == -1 ? bearYPos : showDir == 1 ? bullYPos : na
-dispRefI = showDir == -1 ? bearRefI : showDir == 1 ? bullRefI : -1
-curSeq   = showDir == -1 ? bearSeq  : showDir == 1 ? bullSeq  : -1
-
-// ── השבירה החלשה: כששני הכיוונים חיים במקביל, זו שלא נבחרה כראשית (החלשה
-//    לפי f_rank, או בחוזק שווה — הישנה). היא מצוירת בנוסף לראשית, בצבע דהוי
-//    יותר, כדי שיהיה ברור מי העיקרית. ──
-secDir  = (showDir != 0 and bearType != 0 and bullType != 0) ? -showDir : 0
-secType = secDir == -1 ? bearType : secDir == 1 ? bullType : 0
-secStr  = secDir == -1 ? bearStr  : secDir == 1 ? bullStr  : ""
-secLvl  = secDir == -1 ? bearLvl  : secDir == 1 ? bullLvl  : na
-secRefB = secDir == -1 ? bearRefB : secDir == 1 ? bullRefB : 0
-secSigB = secDir == -1 ? bearSigB : secDir == 1 ? bullSigB : 0
-secYPos = secDir == -1 ? bearYPos : secDir == 1 ? bullYPos : na
-secRefI = secDir == -1 ? bearRefI : secDir == 1 ? bullRefI : -1
-
 // ארבעת מצברי הנכס של הגרף. הקצה הימני של הקו האלכסוני נגזר מהם, ולכן שינוי
 // שלהם מחייב ציור מחדש.
 cHb  = isNQc ? nqCHb  : isESc ? esCHb  : ymCHb
@@ -1005,18 +966,21 @@ f_col(color base, int typ, bool weak, bool hot) =>
     t = (hot ? 0 : typ == 2 ? 25 : 45) + (weak ? weakFade : 0)
     color.new(base, math.min(t, 95))
 
-// הסדרות של נכס הגרף שעליהן נמדדת השבירה: HSSMT **מסגירה לסגירה**, SSMT
-// מפתיל לפתיל — כל אחד על הסדרה שבה הוא באמת נמדד.
-f_ser(bool isBull, bool isH) =>
-    extA  = isH ? (isBull ? (isNQc ? nqLoCA  : isESc ? esLoCA  : ymLoCA)  : (isNQc ? nqHiCA  : isESc ? esHiCA  : ymHiCA))  : (isBull ? (isNQc ? nqLoA  : isESc ? esLoA  : ymLoA)  : (isNQc ? nqHiA  : isESc ? esHiA  : ymHiA))
-    extBA = isH ? (isBull ? (isNQc ? nqLoCBA : isESc ? esLoCBA : ymLoCBA) : (isNQc ? nqHiCBA : isESc ? esHiCBA : ymHiCBA)) : (isBull ? (isNQc ? nqLoBA : isESc ? esLoBA : ymLoBA) : (isNQc ? nqHiBA : isESc ? esHiBA : ymHiBA))
-    curE  = isH ? (isBull ? (isNQc ? nqCLC  : isESc ? esCLC  : ymCLC)  : (isNQc ? nqCHC  : isESc ? esCHC  : ymCHC))  : (isBull ? (isNQc ? nqCL  : isESc ? esCL  : ymCL)  : (isNQc ? nqCH  : isESc ? esCH  : ymCH))
-    curEB = isH ? (isBull ? (isNQc ? nqCLCb : isESc ? esCLCb : ymCLCb) : (isNQc ? nqCHCb : isESc ? esCHCb : ymCHCb)) : (isBull ? (isNQc ? nqCLb : isESc ? esCLb : ymCLb) : (isNQc ? nqCHb : isESc ? esCHb : ymCHb))
+// הסדרות של נכס (a: 0 = NQ, 1 = ES, 2 = YM) שעליהן נמדדת השבירה: HSSMT
+// **מסגירה לסגירה**, SSMT מפתיל לפתיל — כל אחד על הסדרה שבה הוא באמת נמדד.
+f_ser(int a, bool isBull, bool isH) =>
+    n0 = a == 0
+    e0 = a == 1
+    extA  = isH ? (isBull ? (n0 ? nqLoCA  : e0 ? esLoCA  : ymLoCA)  : (n0 ? nqHiCA  : e0 ? esHiCA  : ymHiCA))  : (isBull ? (n0 ? nqLoA  : e0 ? esLoA  : ymLoA)  : (n0 ? nqHiA  : e0 ? esHiA  : ymHiA))
+    extBA = isH ? (isBull ? (n0 ? nqLoCBA : e0 ? esLoCBA : ymLoCBA) : (n0 ? nqHiCBA : e0 ? esHiCBA : ymHiCBA)) : (isBull ? (n0 ? nqLoBA : e0 ? esLoBA : ymLoBA) : (n0 ? nqHiBA : e0 ? esHiBA : ymHiBA))
+    curE  = isH ? (isBull ? (n0 ? nqCLC  : e0 ? esCLC  : ymCLC)  : (n0 ? nqCHC  : e0 ? esCHC  : ymCHC))  : (isBull ? (n0 ? nqCL  : e0 ? esCL  : ymCL)  : (n0 ? nqCH  : e0 ? esCH  : ymCH))
+    curEB = isH ? (isBull ? (n0 ? nqCLCb : e0 ? esCLCb : ymCLCb) : (n0 ? nqCHCb : e0 ? esCHCb : ymCHCb)) : (isBull ? (n0 ? nqCLb : e0 ? esCLb : ymCLb) : (n0 ? nqCHb : e0 ? esCHb : ymCHb))
     [extA, extBA, curE, curEB]
 
-// שתי הנקודות של השבירה על נכס הגרף: הקיצון של תת-מחזור הייחוס (b1/p1),
-// והנר שלקח אותו (b2/p2). מהן נגזרים הקו האלכסוני, מיקום התווית והרצפים.
-f_brk(int dir, int typ, int refI) =>
+// שתי הנקודות של השבירה על נכס a: הקיצון של תת-מחזור הייחוס (b1/p1), והנר
+// שלקח אותו (b2/p2). על נכס הגרף מהן נגזרים הקו האלכסוני ומיקום התווית, ועל
+// כל אחד משלושת הנכסים — הרצפים.
+f_brk(int a, int dir, int typ, int refI) =>
     int   b1 = -1
     float p1 = na
     int   b2 = -1
@@ -1024,7 +988,7 @@ f_brk(int dir, int typ, int refI) =>
     bool  ok = false
     if dir != 0 and refI >= 0
         isBull = dir == 1
-        [extA, extBA, curE, curEB] = f_ser(isBull, typ == 2)
+        [extA, extBA, curE, curEB] = f_ser(a, isBull, typ == 2)
         if refI <= array.size(extA) - 1
             p1 := array.get(extA,  refI)
             b1 := array.get(extBA, refI)
@@ -1035,13 +999,16 @@ f_brk(int dir, int typ, int refI) =>
     [b1, p1, b2, p2, ok]
 
 // הטקסט של התווית. במצב "רצף אמיתי" הרצף נכתב רק כשהשבירה היא רצף אמיתי.
-f_lblTxt(int typ, string s, string chR, string chT, bool tru, bool hot) =>
-    star = f_qsStar(tru, hot) ? " ★" : ""
+// ★ = ב-QS על נכס הגרף. ☆ = לא על נכס הגרף, אבל ב-QS על נכס אחר — ואם על
+// נכס הגרף אין רצף להציג, נכתב הרצף של הנכס האחר.
+f_lblTxt(int typ, string s, string chR, string chT, bool tru, bool hot, bool xOn, string xR, string xT) =>
+    star = f_qsStar(tru, hot) ? " ★" : xOn ? " ☆" : ""
     string out = ""
     if lblStyle == "קלאסי"
         out := "W " + s + star
     else
-        top = chR != "" and (not qsByTrue or tru) ? chR + "-" + chT + star : ""
+        ownOK = chR != "" and (not qsByTrue or tru)
+        top = ownOK ? chR + "-" + chT + star : xOn and xR != "" ? xR + "-" + xT + star : ""
         bot = f_cycName(tfClass) + " " + (typ == 2 ? "HSSMT" : "SSMT") + " · " + f_assets(s)
         out := top == "" ? bot : top + "\n" + bot
     out
@@ -1061,7 +1028,7 @@ f_drawSet(int dir, int typ, float lvl, int refB, int refI, int sigB, float yPos,
             if lineMode != "אלכסוני"
                 ln := line.new(refB, lvl, bar_index, lvl, color = cFin, style = line.style_solid, width = lw)
             if lineMode != "אופקי" and ok
-                [extA, extBA, curE, curEB] = f_ser(isBull, typ == 2)
+                [extA, extBA, curE, curEB] = f_ser(cA, isBull, typ == 2)
                 pad = atr * linePad
                 sh = f_clearShift(isBull, b1, p1, b2, p2, extA, extBA, refI, pad)
                 y1 = isBull ? p1 - pad - sh : p1 + pad + sh
@@ -1077,29 +1044,30 @@ f_drawSet(int dir, int typ, float lvl, int refB, int refI, int sigB, float yPos,
             lb := label.new(sigB, yPos, txt, style = label.style_none, textcolor = cFin, size = labelSize, textalign = text.align_center)
     [lb, ln, dg]
 
-// ── נקודות השבירה, הרצפים וה-High Probability לשתי השבירות ──
-[pB1, pP1, pB2, pP2, pOk] = f_brk(showDir, dispType, dispRefI)
-[sB1, sP1, sB2, sP2, sOk] = f_brk(secDir,  secType,  secRefI)
-// ב-HSSMT גם נקודות הפתיל של אותה שבירה: אם לפי הסגירה הרצף לא אמיתי אבל
-// לפי הפתיל כן — נכתב הרצף של הפתיל. הקו עצמו נשאר מסגירה לסגירה.
-[pW1, pWp1, pW2, pWp2, pWOk] = f_brk(dispType == 2 ? showDir : 0, 1, dispRefI)
-[sW1, sWp1, sW2, sWp2, sWOk] = f_brk(secType  == 2 ? secDir  : 0, 1, secRefI)
+// ═══════════════════════════════════════════════════════════════════
+// רצפי QS לשתי השבירות, ובחירת הראשית
+// ═══════════════════════════════════════════════════════════════════
+
 qsOn  = qsUseCls(tfClass)
 durMs = tfSec * 1000
 
-// הרצפים של שבירה אחת על הגרף: לפי הסדרה שלה, ובשבירת HSSMT גם לפי הפתיל
-f_qsChart(bool ok, int b1, int b2, bool wOk, int w1, int w2) =>
+// הרצפים של שבירה על נכס אחד: לפי הסדרה שלה, ובשבירת HSSMT — אם לפי הסגירה
+// הרצף לא אמיתי — גם לפי הפתיל (הקו עצמו נשאר מסגירה לסגירה).
+f_qsAsset(int a, int dir, int typ, int refI) =>
     string cR = ""
     string cT = ""
     bool   tr = false
     bool   ht = false
+    [b1, p1, b2, p2, ok] = f_brk(a, dir, typ, refI)
     if ok
         [r1, t1, tr1, ht1] = f_qsEval(tfClass, time[bar_index - b1], time[bar_index - b2], durMs)
         cR := r1
         cT := t1
         tr := tr1
         ht := ht1
-        if wOk and not tr1
+    if typ == 2 and not tr
+        [w1, wp1, w2, wp2, wOk] = f_brk(a, dir, 1, refI)
+        if wOk
             [r2, t2, tr2, ht2] = f_qsEval(tfClass, time[bar_index - w1], time[bar_index - w2], durMs)
             if tr2
                 cR := r2
@@ -1108,27 +1076,103 @@ f_qsChart(bool ok, int b1, int b2, bool wOk, int w1, int w2) =>
                 ht := ht2
     [cR, cT, tr, ht]
 
-string pChR = ""
-string pChT = ""
-bool   pTru = false
-bool   pHot = false
-string sChR = ""
-string sChT = ""
-bool   sTru = false
-bool   sHot = false
-if qsOn
-    [a1, a2, a3, a4] = f_qsChart(pOk, pB1, pB2, pWOk, pW1, pW2)
-    [c1, c2, c3, c4] = f_qsChart(sOk, sB1, sB2, sWOk, sW1, sW2)
-    pChR := a1
-    pChT := a2
-    pTru := a3
-    pHot := a4
-    sChR := c1
-    sChT := c2
-    sTru := c3
-    sHot := c4
-pMk = qsOn and f_qsMarked(pTru, pHot)
-sMk = qsOn and f_qsMarked(sTru, sHot)
+// הרצפים של שבירה בכיוון אחד: על נכס הגרף (own), ועל הנכס האחר הראשון שבו
+// השבירה ב-QS (x) — בשביל ☆.
+f_qsDir(int dir, int typ, int refI) =>
+    string oR  = ""
+    string oT  = ""
+    bool   oTr = false
+    bool   oHt = false
+    bool   xOn = false
+    string xR  = ""
+    string xT  = ""
+    bool   xTr = false
+    bool   xHt = false
+    if qsOn and dir != 0 and typ != 0 and refI >= 0
+        for a = 0 to 2
+            [r, t, tr, ht] = f_qsAsset(a, dir, typ, refI)
+            if a == cA
+                oR  := r
+                oT  := t
+                oTr := tr
+                oHt := ht
+            else if not xOn and f_qsStar(tr, ht)
+                xOn := true
+                xR  := r
+                xT  := t
+                xTr := tr
+                xHt := ht
+    [oR, oT, oTr, oHt, xOn, xR, xT, xTr, xHt]
+
+[bqR, bqT, bqTr, bqHt, bqX, bxR, bxT, bxTr, bxHt] = f_qsDir(-1, bearType, bearRefI)
+[uqR, uqT, uqTr, uqHt, uqX, uxR, uxT, uxTr, uxHt] = f_qsDir(1,  bullType, bullRefI)
+bInQS = qsOn and (f_qsStar(bqTr, bqHt) or bqX)
+uInQS = qsOn and (f_qsStar(uqTr, uqHt) or uqX)
+
+// ── הראשית: קודם הסוג (HSSMT > SSMT > SSMT closed), אחר כך QS, ואחר כך
+//    האחרונה שנעשתה. השנייה מצוירת דהויה. ──
+showDir = 0
+if bearType != 0 and bullType != 0
+    rB = f_rank(bearType, bearStr, bInQS)
+    rU = f_rank(bullType, bullStr, uInQS)
+    showDir := rB != rU ? (rB > rU ? -1 : 1) : (bearSeq > bullSeq ? -1 : 1)
+else if bearType != 0
+    showDir := -1
+else if bullType != 0
+    showDir := 1
+
+// חידוד: שבירה שעתית מייצגת את השבוע (שני–חמישי) — ביום שישי היא כבר לא רלוונטית.
+if tfClass == 5 and tdDow == dayofweek.friday
+    showDir := 0
+
+dispType = showDir == -1 ? bearType : showDir == 1 ? bullType : 0
+dispStr  = showDir == -1 ? bearStr  : showDir == 1 ? bullStr  : ""
+dispLvl  = showDir == -1 ? bearLvl  : showDir == 1 ? bullLvl  : na
+dispRefB = showDir == -1 ? bearRefB : showDir == 1 ? bullRefB : 0
+dispSigB = showDir == -1 ? bearSigB : showDir == 1 ? bullSigB : 0
+dispYPos = showDir == -1 ? bearYPos : showDir == 1 ? bullYPos : na
+dispRefI = showDir == -1 ? bearRefI : showDir == 1 ? bullRefI : -1
+curSeq   = showDir == -1 ? bearSeq  : showDir == 1 ? bullSeq  : -1
+
+// ── השבירה החלשה: כששני הכיוונים חיים במקביל, זו שלא נבחרה כראשית. היא
+//    מצוירת בנוסף לראשית, בצבע דהוי יותר, כדי שיהיה ברור מי העיקרית. ──
+secDir  = (showDir != 0 and bearType != 0 and bullType != 0) ? -showDir : 0
+secType = secDir == -1 ? bearType : secDir == 1 ? bullType : 0
+secStr  = secDir == -1 ? bearStr  : secDir == 1 ? bullStr  : ""
+secLvl  = secDir == -1 ? bearLvl  : secDir == 1 ? bullLvl  : na
+secRefB = secDir == -1 ? bearRefB : secDir == 1 ? bullRefB : 0
+secSigB = secDir == -1 ? bearSigB : secDir == 1 ? bullSigB : 0
+secYPos = secDir == -1 ? bearYPos : secDir == 1 ? bullYPos : na
+secRefI = secDir == -1 ? bearRefI : secDir == 1 ? bullRefI : -1
+
+// הרצפים של הראשית (p) ושל השנייה (s)
+pBear = showDir == -1
+sBear = secDir == -1
+pChR = pBear ? bqR  : uqR
+pChT = pBear ? bqT  : uqT
+pTru = showDir != 0 and (pBear ? bqTr : uqTr)
+pHot = showDir != 0 and (pBear ? bqHt : uqHt)
+pX   = showDir != 0 and (pBear ? bqX  : uqX)
+pXR  = pBear ? bxR  : uxR
+pXT  = pBear ? bxT  : uxT
+pXTr = pBear ? bxTr : uxTr
+pXHt = pBear ? bxHt : uxHt
+sChR = sBear ? bqR  : uqR
+sChT = sBear ? bqT  : uqT
+sTru = secDir != 0 and (sBear ? bqTr : uqTr)
+sHot = secDir != 0 and (sBear ? bqHt : uqHt)
+sX   = secDir != 0 and (sBear ? bqX  : uqX)
+sXR  = sBear ? bxR  : uxR
+sXT  = sBear ? bxT  : uxT
+sXTr = sBear ? bxTr : uxTr
+sXHt = sBear ? bxHt : uxHt
+
+// ── נקודות השבירה על נכס הגרף — לקו ולתווית ──
+[pB1, pP1, pB2, pP2, pOk] = f_brk(cA, showDir, dispType, dispRefI)
+[sB1, sP1, sB2, sP2, sOk] = f_brk(cA, secDir,  secType,  secRefI)
+// שבירה מסומנת (צבע מלא): לפי המצב על נכס הגרף, או ☆ מנכס אחר
+pMk = qsOn and (f_qsMarked(pTru, pHot) or pX)
+sMk = qsOn and (f_qsMarked(sTru, sHot) or sX)
 // הקיצון של נר השבירה — כדי שהתווית תשב מעליו/מתחתיו ולא על הנר
 // (ב-if ולא בטרנרי, כדי שלא תיקרא היסטוריה במרחק לא חוקי כשאין שבירה)
 float pHiB2 = na
@@ -1144,11 +1188,12 @@ if sOk
     sHiB2 := high[bar_index - sB2]
     sLoB2 := low[bar_index - sB2]
 
-// סינון: במצבי "רק שבירות ב..." שבירה תוך-יומית שלא עומדת בתנאי לא מצוירת בכלל
-drawDir = qsOn and not f_qsPass(pTru, pHot) ? 0 : showDir
-drawSec = qsOn and not f_qsPass(sTru, sHot) ? 0 : secDir
-txtA = f_lblTxt(dispType, dispStr, pChR, pChT, pTru and qsOn, pHot and qsOn)
-txtB = f_lblTxt(secType,  secStr,  sChR, sChT, sTru and qsOn, sHot and qsOn)
+// סינון: במצבי "רק שבירות ב..." שבירה תוך-יומית שלא עומדת בתנאי — לא על נכס
+// הגרף ולא על נכס אחר — לא מצוירת בכלל
+drawDir = qsOn and not f_qsPass(pTru or pXTr, pHot or pXHt) ? 0 : showDir
+drawSec = qsOn and not f_qsPass(sTru or sXTr, sHot or sXHt) ? 0 : secDir
+txtA = f_lblTxt(dispType, dispStr, pChR, pChT, pTru, pHot, pX, pXR, pXT)
+txtB = f_lblTxt(secType,  secStr,  sChR, sChT, sTru, sHot, sX, sXR, sXT)
 
 var label aLbl  = na
 var line  aLine = na
@@ -1360,21 +1405,78 @@ type Eng
     array<float> yLoA
     array<float> yHcA
     array<float> yLcA
-    // זמני הקיצונים של נכס הגרף — בשביל רצפי ה-QS (איפה ישב הקיצון ואיפה נלקח)
-    array<int>   tHiA
-    array<int>   tLoA
-    array<int>   tHcA
-    array<int>   tLcA
-    int    tH
-    int    tL
-    int    tHC
-    int    tLC
+    // זמני הקיצונים של שלושת הנכסים — בשביל רצפי ה-QS (איפה ישב הקיצון ואיפה
+    // נלקח). 12 ערכים לכל תת-מחזור: לכל נכס a (0 NQ, 1 ES, 2 YM) ארבעה —
+    // a*4+0 פתיל עליון, +1 פתיל תחתון, +2 סגירה עליונה, +3 סגירה תחתונה.
+    array<int>   tF     // תת-המחזורים שנסגרו, ברצף, 12 לכל אחד
+    array<int>   tC     // תת-המחזור הנוכחי
     bool   hot
     bool   tru
     int    barMs    // אורך נר הקלט במילישניות (15 שניות מנרות דקה = 60000)
 
 f_newEng(int cls, int barMs) =>
-    Eng.new(cls, 0, 0, 0, false, false, "", 0, "", 0, 0, 0, "", "", 0, 0, 0, -1, -1, na, na, na, na, na, na, na, na, na, na, na, na, array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_int(), array.new_int(), array.new_int(), array.new_int(), 0, 0, 0, 0, false, false, barMs)
+    Eng.new(cls, 0, 0, 0, false, false, "", 0, "", 0, 0, 0, "", "", 0, 0, 0, -1, -1, na, na, na, na, na, na, na, na, na, na, na, na, array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_int(), array.new_int(12, 0), false, false, barMs)
+
+// מערך הערכים של נכס a במנוע, לפי כיוון וסוג (פתיל / סגירה)
+f_engVA(Eng e, int a, bool isB, bool isH) =>
+    a == 0 ? (isB ? (isH ? e.nLcA : e.nLoA) : (isH ? e.nHcA : e.nHiA)) : a == 1 ? (isB ? (isH ? e.eLcA : e.eLoA) : (isH ? e.eHcA : e.eHiA)) : (isB ? (isH ? e.yLcA : e.yLoA) : (isH ? e.yHcA : e.yHiA))
+
+// הקיצון הנוכחי של נכס a במנוע
+f_engCV(Eng e, int a, bool isB, bool isH) =>
+    a == 0 ? (isB ? (isH ? e.nLC : e.nL) : (isH ? e.nHC : e.nH)) : a == 1 ? (isB ? (isH ? e.eLC : e.eL) : (isH ? e.eHC : e.eH)) : (isB ? (isH ? e.yLC : e.yL) : (isH ? e.yHC : e.yH))
+
+// זמן הנר שלקח את הרמה: הקיצון המצטבר מאז תת-מחזור הייחוס (כמו f_takeBar)
+f_engTake(bool isB, array<float> vA, array<int> tF, int sl, int refI, float cV, int cT) =>
+    float bp = cV
+    int   bt = cT
+    n = array.size(vA)
+    if n > 0 and refI + 1 <= n - 1 and array.size(tF) >= n * 12
+        for k = refI + 1 to n - 1
+            v = array.get(vA, k)
+            if isB ? v < bp : v > bp
+                bp := v
+                bt := array.get(tF, k * 12 + sl)
+    bt
+
+// רצף QS של שבירה על נכס אחד במנוע. ב-HSSMT קודם לפי הסגירה, ואם הרצף לא
+// אמיתי — גם לפי הפתיל.
+f_engQSa(Eng e, int a, bool isB, int ty, int rI) =>
+    bool tr = false
+    bool ht = false
+    for ps = 0 to 1
+        isH = ty == 2 and ps == 0
+        if (ps == 0 or (ty == 2 and not tr)) and rI >= 0
+            vA = f_engVA(e, a, isB, isH)
+            if rI <= array.size(vA) - 1 and array.size(e.tF) >= array.size(vA) * 12
+                sl = a * 4 + (isB ? (isH ? 3 : 1) : (isH ? 2 : 0))
+                tT = f_engTake(isB, vA, e.tF, sl, rI, f_engCV(e, a, isB, isH), array.get(e.tC, sl))
+                [qR, qT, qTr, qHt] = f_qsEval(e.cls, array.get(e.tF, rI * 12 + sl), tT, e.barMs)
+                if ps == 0
+                    tr := qTr
+                    ht := qHt
+                else if qTr
+                    tr := true
+                    ht := qHt
+    [tr, ht]
+
+// רצף QS של שבירה בכיוון אחד במנוע: על נכס הגרף, ועל הנכס האחר הראשון שבו
+// היא ב-QS (בשביל ☆)
+f_engQS(Eng e, bool isB, int ty, int rI) =>
+    bool oTr = false
+    bool oHt = false
+    bool xOn = false
+    bool xTr = false
+    bool xHt = false
+    for a = 0 to 2
+        [tr, ht] = f_engQSa(e, a, isB, ty, rI)
+        if a == cA
+            oTr := tr
+            oHt := ht
+        else if not xOn and f_qsStar(tr, ht)
+            xOn := true
+            xTr := tr
+            xHt := ht
+    [oTr, oHt, xOn, xTr, xHt]
 
 // צעד אחד: נר סגור אחד של המסגרת שהמנוע מייצג
 f_engStep(Eng e, int t, float nh, float nl, float nc, float eh, float el, float ec, float yh, float yl, float yc) =>
@@ -1399,15 +1501,10 @@ f_engStep(Eng e, int t, float nh, float nl, float nc, float eh, float el, float 
                 array.clear(e.yLoA)
                 array.clear(e.yHcA)
                 array.clear(e.yLcA)
-                array.clear(e.tHiA)
-                array.clear(e.tLoA)
-                array.clear(e.tHcA)
-                array.clear(e.tLcA)
+                array.clear(e.tF)
             if ((not newLife) or kL) and not na(e.nH)
-                array.push(e.tHiA, e.tH)
-                array.push(e.tLoA, e.tL)
-                array.push(e.tHcA, e.tHC)
-                array.push(e.tLcA, e.tLC)
+                for k = 0 to 11
+                    array.push(e.tF, array.get(e.tC, k))
                 array.push(e.nHiA, e.nH)
                 array.push(e.nLoA, e.nL)
                 array.push(e.nHcA, e.nHC)
@@ -1433,14 +1530,10 @@ f_engStep(Eng e, int t, float nh, float nl, float nc, float eh, float el, float 
                 array.remove(e.yLoA, 0)
                 array.remove(e.yHcA, 0)
                 array.remove(e.yLcA, 0)
-                array.remove(e.tHiA, 0)
-                array.remove(e.tLoA, 0)
-                array.remove(e.tHcA, 0)
-                array.remove(e.tLcA, 0)
-            e.tH  := t
-            e.tL  := t
-            e.tHC := t
-            e.tLC := t
+                if array.size(e.tF) >= 12
+                    for k = 0 to 11
+                        array.shift(e.tF)
+            array.fill(e.tC, t)
             e.nH := nh
             e.nL := nl
             e.nHC := nc
@@ -1454,22 +1547,23 @@ f_engStep(Eng e, int t, float nh, float nl, float nc, float eh, float el, float 
             e.yHC := yc
             e.yLC := yc
         else
-            // זמן הקיצון של נכס הגרף מתעדכן לפני הערכים — ההשוואה היא מול הקיצון הישן
-            float oH  = isNQc ? e.nH  : isESc ? e.eH  : e.yH
-            float oL  = isNQc ? e.nL  : isESc ? e.eL  : e.yL
-            float oHC = isNQc ? e.nHC : isESc ? e.eHC : e.yHC
-            float oLC = isNQc ? e.nLC : isESc ? e.eLC : e.yLC
-            float xH  = isNQc ? nh : isESc ? eh : yh
-            float xL  = isNQc ? nl : isESc ? el : yl
-            float xC  = isNQc ? nc : isESc ? ec : yc
-            if na(oH) or xH > oH
-                e.tH := t
-            if na(oL) or xL < oL
-                e.tL := t
-            if na(oHC) or xC > oHC
-                e.tHC := t
-            if na(oLC) or xC < oLC
-                e.tLC := t
+            // זמני הקיצונים מתעדכנים לפני הערכים — ההשוואה היא מול הקיצון הישן
+            for a = 0 to 2
+                float oH  = a == 0 ? e.nH  : a == 1 ? e.eH  : e.yH
+                float oL  = a == 0 ? e.nL  : a == 1 ? e.eL  : e.yL
+                float oHC = a == 0 ? e.nHC : a == 1 ? e.eHC : e.yHC
+                float oLC = a == 0 ? e.nLC : a == 1 ? e.eLC : e.yLC
+                float xH  = a == 0 ? nh : a == 1 ? eh : yh
+                float xL  = a == 0 ? nl : a == 1 ? el : yl
+                float xC  = a == 0 ? nc : a == 1 ? ec : yc
+                if na(oH) or xH > oH
+                    array.set(e.tC, a * 4, t)
+                if na(oL) or xL < oL
+                    array.set(e.tC, a * 4 + 1, t)
+                if na(oHC) or xC > oHC
+                    array.set(e.tC, a * 4 + 2, t)
+                if na(oLC) or xC < oLC
+                    array.set(e.tC, a * 4 + 3, t)
             e.nH  := na(e.nH)  or nh > e.nH  ? nh : e.nH
             e.nL  := na(e.nL)  or nl < e.nL  ? nl : e.nL
             e.nHC := na(e.nHC) or nc > e.nHC ? nc : e.nHC
@@ -1517,9 +1611,9 @@ f_engStep(Eng e, int t, float nh, float nl, float nc, float eh, float el, float 
             nuS := xuS
         // זרע ב-15M — אותו תנאי כמו על הגרף: נקודת השבירה ב-Q1 ברצף 1/4
         if e.cls == 4 and e.sAct
-            if nbT != 0 and nbI == 0 and not (f_seedOK(4, e.tH, e.barMs) or (nbT == 2 and f_seedOK(4, e.tHC, e.barMs)))
+            if nbT != 0 and nbI == 0 and not (f_seedOK(4, array.get(e.tC, cA * 4), e.barMs) or (nbT == 2 and f_seedOK(4, array.get(e.tC, cA * 4 + 2), e.barMs)))
                 nbT := 0
-            if nuT != 0 and nuI == 0 and not (f_seedOK(4, e.tL, e.barMs) or (nuT == 2 and f_seedOK(4, e.tLC, e.barMs)))
+            if nuT != 0 and nuI == 0 and not (f_seedOK(4, array.get(e.tC, cA * 4 + 1), e.barMs) or (nuT == 2 and f_seedOK(4, array.get(e.tC, cA * 4 + 3), e.barMs)))
                 nuT := 0
 
         // ── שני הכיוונים חיים במקביל, אבל בפינה מוצג רק אחד: החזק, ובחוזק שווה
@@ -1545,42 +1639,48 @@ f_engStep(Eng e, int t, float nh, float nl, float nc, float eh, float el, float 
             e.uTy   := 0
             e.uRefI := -1
 
-        // הראשית: החזקה (HSSMT > SSMT > SSMT closed), ובחוזק שווה — האחרונה
-        rkB = f_rank(e.bTy, e.bStr)
-        rkU = f_rank(e.uTy, e.uStr)
+        // רצפי QS לשני הכיוונים — על נכס הגרף ועל הנכסים האחרים (☆)
+        bool bTr = false
+        bool bHt = false
+        bool bX  = false
+        bool bXTr = false
+        bool bXHt = false
+        bool uTr = false
+        bool uHt = false
+        bool uX  = false
+        bool uXTr = false
+        bool uXHt = false
+        qsE = qsUseCls(e.cls)
+        if qsE and e.bTy != 0
+            [x1, x2, x3, x4, x5] = f_engQS(e, false, e.bTy, e.bRefI)
+            bTr  := x1
+            bHt  := x2
+            bX   := x3
+            bXTr := x4
+            bXHt := x5
+        if qsE and e.uTy != 0
+            [y1, y2, y3, y4, y5] = f_engQS(e, true, e.uTy, e.uRefI)
+            uTr  := y1
+            uHt  := y2
+            uX   := y3
+            uXTr := y4
+            uXHt := y5
+        // הראשית: קודם הסוג (HSSMT > SSMT > SSMT closed), אחר כך QS, ואחר כך האחרונה
+        rkB = f_rank(e.bTy, e.bStr, qsE and (f_qsStar(bTr, bHt) or bX))
+        rkU = f_rank(e.uTy, e.uStr, qsE and (f_qsStar(uTr, uHt) or uX))
         d = e.bTy != 0 and e.uTy != 0 ? (rkB != rkU ? (rkB > rkU ? -1 : 1) : (e.bSeq > e.uSeq ? -1 : 1)) : e.bTy != 0 ? -1 : e.uTy != 0 ? 1 : 0
         e.dir := d
-        // רצף QS של השבירה המוצגת — אותו חישוב כמו על הגרף, על נכס הגרף:
-        // זמן הקיצון של תת-מחזור הייחוס, וזמן הנר שלקח אותו. ב-HSSMT נבדק
-        // קודם לפי הסגירה, ואם הרצף לא אמיתי — גם לפי הפתיל.
-        bool truNow = false
-        bool hotNow = false
-        if d != 0 and qsUseCls(e.cls)
-            isB = d == 1
-            ty  = isB ? e.uTy : e.bTy
-            rI  = isB ? e.uRefI : e.bRefI
-            for ps = 0 to 1
-                isH = ty == 2 and ps == 0
-                if (ps == 0 or (ty == 2 and not truNow)) and rI >= 0
-                    vA = isNQc ? (isB ? (isH ? e.nLcA : e.nLoA) : (isH ? e.nHcA : e.nHiA)) : isESc ? (isB ? (isH ? e.eLcA : e.eLoA) : (isH ? e.eHcA : e.eHiA)) : (isB ? (isH ? e.yLcA : e.yLoA) : (isH ? e.yHcA : e.yHiA))
-                    cV = isNQc ? (isB ? (isH ? e.nLC : e.nL) : (isH ? e.nHC : e.nH)) : isESc ? (isB ? (isH ? e.eLC : e.eL) : (isH ? e.eHC : e.eH)) : (isB ? (isH ? e.yLC : e.yL) : (isH ? e.yHC : e.yH))
-                    tA = isB ? (isH ? e.tLcA : e.tLoA) : (isH ? e.tHcA : e.tHiA)
-                    cT = isB ? (isH ? e.tLC : e.tL) : (isH ? e.tHC : e.tH)
-                    if rI <= array.size(vA) - 1 and array.size(tA) == array.size(vA)
-                        [tpx, tT] = f_takeBar(isB, vA, tA, rI, cV, cT)
-                        [qR, qT, qTr, qHt] = f_qsEval(e.cls, array.get(tA, rI), tT, e.barMs)
-                        if ps == 0
-                            truNow := qTr
-                            hotNow := qHt
-                        else if qTr
-                            truNow := true
-                            hotNow := qHt
-        e.tru := truNow
-        e.hot := hotNow
-        tag = qsUseCls(e.cls) ? f_qsTag(truNow, hotNow) : ""
+        dTr  = d == -1 ? bTr  : uTr
+        dHt  = d == -1 ? bHt  : uHt
+        dX   = d == -1 ? bX   : uX
+        dXTr = d == -1 ? bXTr : uXTr
+        dXHt = d == -1 ? bXHt : uXHt
+        e.tru := dTr
+        e.hot := dHt
+        tag = not qsE ? "" : f_qsStar(dTr, dHt) ? " ★" : dX ? " ☆" : ""
         e.txt := d == -1 ? "▼" + e.bStr + tag : d == 1 ? "▲" + e.uStr + tag : ""
-        // מצבי הסינון — מדרגה תוך-יומית שלא עומדת בתנאי לא נכתבת בפינה
-        if qsUseCls(e.cls) and not f_qsPass(truNow, hotNow)
+        // מצבי הסינון — מדרגה תוך-יומית שלא עומדת בתנאי (על אף נכס) לא נכתבת בפינה
+        if qsE and d != 0 and not f_qsPass(dTr or dXTr, dHt or dXHt)
             e.txt := ""
         // השבירה החלשה — הכיוון ההפוך, רק כששניהם חיים במקביל
         d2 = (e.bTy != 0 and e.uTy != 0) ? -d : 0
@@ -1727,7 +1827,7 @@ if mtfOn and barstate.islast and tfClass != 0
     // בפינה נכתבת **רק השבירה העדכנית** של כל מסגרת. השבירה החלשה עדיין מצוירת
     // על הגרף בצבע דהוי, אבל לא בכיתוב — כדי שהשורה תישאר קצרה וקריאה.
     // (הנתונים שלה זמינים ב-egX.txt2 / egX.dir2 אם אי פעם נרצה להחזיר אותה.)
-    pTag = qsOn ? f_qsTag(pTru, pHot) : ""
+    pTag = not qsOn ? "" : f_qsStar(pTru, pHot) ? " ★" : pX ? " ☆" : ""
     sC = drawDir == -1 ? "▼" + bearStr + pTag : drawDir == 1 ? "▲" + bullStr + pTag : ""
 
     clsArr = array.from(cU3, cU2, cU1, tfClass, cD1, cD2)
