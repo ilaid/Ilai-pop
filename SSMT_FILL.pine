@@ -439,6 +439,8 @@ type OwnGap
     int    collId   // הגאפ הקולקטיבי שנולד איתו באותו נר, 0 = אין
 
 var array<OwnGap> owns = array.new<OwnGap>()
+// שם הנכס שהגרף מציג — לכיתוב של הגאפים הלא קורלטיביים
+ownName = isNQc ? "NQ" : isESc ? "ES" : isYMc ? "YM" : syminfo.ticker
 
 // ── הרשימה מלאה: מי יוצא ──
 // array.shift הוציא תמיד את הגאפ ה**ישן ביותר**, גם אם הוא נשא שבירה חיה —
@@ -593,6 +595,19 @@ f_subName(int c, int t) =>
     else if c == 8
         r := str.tostring(yy)
     r
+
+// מתי הגאפ נוצר (הנר האמצעי), בשעון ניו יורק. עד 1H מספיקה השעה — האזור
+// כבר אומר איזה סשן/יום. ב-4H צריך גם תאריך, ומהיומי ומעלה רק תאריך.
+f_bornTxt(int c, int t) =>
+    c <= 4 ? str.format_time(t, "HH:mm", TZ) : c == 5 ? str.format_time(t, "dd/MM HH:mm", TZ) : str.format_time(t, "dd/MM", TZ)
+
+// מי משתתף בגאפ הקולקטיבי — "NQ+ES" וכו', ו-"ALL" כשכל השלושה.
+// YM שיצא מהגאפ (סגר מעבר לו) כבר לא נספר.
+f_legsTxt(Gap g) =>
+    bool n = not na(g.nqTop)
+    bool e = not na(g.esTop)
+    bool y = not na(g.ymTop)
+    n and e and y ? "ALL" : (n ? "NQ" : "") + (n and (e or y) ? "+" : "") + (e ? "ES" : "") + (e and y ? "+" : "") + (y ? "YM" : "")
 
 // ═══════════════════════════════════════════════════════════════════
 // מנוע עצמאי למסגרת זמן אחרת
@@ -1977,8 +1992,8 @@ if selIdx != -1 and boxLen == "עד הנר הנוכחי"
 //   1H  ביום שלישי  → רק של יום שני (ברביעי: שני + שלישי)
 //   15m ב-NY-AM     → רק של אסיה ולונדון של אותו יום מסחר
 //   4H  בשבוע 3     → רק של שבוע 1 ושבוע 2 של אותו חודש
-// כל קופסה מסומנת ב-#id ובשם תת-המחזור שבו נולדה, כדי שאפשר יהיה לראות
-// את זה בעין. (קודם הוצגו גם גאפים לא דרוכים, עם ✕ — זה הוסר.)
+// כל קופסה מסומנת באזור (תת-המחזור), בשעה שבה נולדה ובמי שמשתתף בה —
+// NQ+ES / ES+YM / ALL — כדי שאפשר יהיה לראות את זה בעין. (קודם הוצגו גם גאפים לא דרוכים, עם ✕ — זה הוסר.)
 // ═══════════════════════════════════════════════════════════════════
 
 var array<box> dbgBoxes = array.new<box>()
@@ -2008,7 +2023,8 @@ if barstate.islast
                 if not na(zTop)
                     color  zCol = gz.dir == 1 ? colBull : colBear
                     // V = גאפ סגירה/פתיחה בין שני נרות, ולא FVG של שלושה
-                    string zTxt = "#" + str.tostring(gz.id) + " " + f_subName(tfClass, gz.birthT) + (gz.volImb ? " V" : "")
+                    // האזור, שעת היצירה ומי משתתף. V = כולו VI.
+                    string zTxt = f_subName(tfClass, gz.birthT) + " " + f_bornTxt(tfClass, gz.birthT) + " " + f_legsTxt(gz) + (gz.volImb ? " V" : "")
                     array.push(dbgBoxes, box.new(gz.origin, zTop, bar_index, zBot, border_color = color.new(zCol, peekEdge), border_width = 1, bgcolor = color.new(zCol, peekFill), text = zTxt, text_color = color.new(zCol, 20), text_size = size.tiny, text_halign = text.align_left, text_valign = text.align_top))
 
 // ── הגאפים של הגרף עצמו (לא קורלטיביים), בצבע נפרד ──
@@ -2033,7 +2049,8 @@ if barstate.islast
                             dup := true
                 if not dup
                     color oCol = og.dir == 1 ? ownBull : ownBear
-                    string oTxt = f_subName(tfClass, og.birthT) + (og.volImb ? " V" : "")
+                    // גאפ של נכס אחד — רק השם שלו
+                    string oTxt = f_subName(tfClass, og.birthT) + " " + f_bornTxt(tfClass, og.birthT) + " " + ownName + (og.volImb ? " V" : "")
                     array.push(ownBoxes, box.new(og.origin, og.top, bar_index, og.bot, border_color = color.new(oCol, peekEdge), border_width = 1, bgcolor = color.new(oCol, peekFill), text = oTxt, text_color = color.new(oCol, 25), text_size = size.tiny, text_halign = text.align_left, text_valign = text.align_top))
 
 // ═══════════════════════════════════════════════════════════════════
