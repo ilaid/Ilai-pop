@@ -578,6 +578,12 @@ f_str(bNQ, bES, bYM, isBull) =>
     s := (bYM and not isBull) ? s + "YM " : s
     str.trim(s)
 
+// חוזק השבירה, כשדובית ושורית חיות במקביל וצריך לבחור את הראשית:
+//   3 = HSSMT, 2 = SSMT, 1 = SSMT שהגרעין כבר סגר מעבר לו — (all/core closed).
+// הראשית היא החזקה; בחוזק שווה — האחרונה שנעשתה. שבירה שהתבטלה כבר לא חיה,
+// ולכן היא יוצאת מהבחירה לפני הכול.
+f_rank(int typ, string s) => typ == 2 ? 3 : str.contains(s, "closed)") ? 1 : 2
+
 // ═══════════════════════════════════════════════════════════════════
 // זיהוי — השבירה הכי עדכנית, בלתי-תלוי בנכס הגרף. לקיחה מצטברת.
 // HSSMT = סגר מעבר (ביטול כשכולם סגרו). SSMT = פתיל מעבר (ביטול כשכולם סחפו).
@@ -914,7 +920,9 @@ if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK and nLevel
 
 showDir = 0
 if bearType != 0 and bullType != 0
-    showDir := bearSeq > bullSeq ? -1 : 1
+    rB = f_rank(bearType, bearStr)
+    rU = f_rank(bullType, bullStr)
+    showDir := rB != rU ? (rB > rU ? -1 : 1) : (bearSeq > bullSeq ? -1 : 1)
 else if bearType != 0
     showDir := -1
 else if bullType != 0
@@ -933,8 +941,9 @@ dispYPos = showDir == -1 ? bearYPos : showDir == 1 ? bullYPos : na
 dispRefI = showDir == -1 ? bearRefI : showDir == 1 ? bullRefI : -1
 curSeq   = showDir == -1 ? bearSeq  : showDir == 1 ? bullSeq  : -1
 
-// ── השבירה החלשה: כששני הכיוונים חיים במקביל, זה הישן מביניהם. הוא מצויר
-//    בנוסף לעדכני, בצבע דהוי יותר, כדי שיהיה ברור מי העיקרי. ──
+// ── השבירה החלשה: כששני הכיוונים חיים במקביל, זו שלא נבחרה כראשית (החלשה
+//    לפי f_rank, או בחוזק שווה — הישנה). היא מצוירת בנוסף לראשית, בצבע דהוי
+//    יותר, כדי שיהיה ברור מי העיקרית. ──
 secDir  = (showDir != 0 and bearType != 0 and bullType != 0) ? -showDir : 0
 secType = secDir == -1 ? bearType : secDir == 1 ? bullType : 0
 secStr  = secDir == -1 ? bearStr  : secDir == 1 ? bullStr  : ""
@@ -1513,8 +1522,8 @@ f_engStep(Eng e, int t, float nh, float nl, float nc, float eh, float el, float 
             if nuT != 0 and nuI == 0 and not (f_seedOK(4, e.tL, e.barMs) or (nuT == 2 and f_seedOK(4, e.tLC, e.barMs)))
                 nuT := 0
 
-        // ── שני הכיוונים חיים במקביל, אבל מוצג רק אחד: הכי חדש. כשהוא מתבטל
-        //    (הגרעין לקח את הרמה) הישן התקף חוזר להיצג מעצמו. ──
+        // ── שני הכיוונים חיים במקביל, אבל בפינה מוצג רק אחד: החזק, ובחוזק שווה
+        //    הכי חדש. כשהוא מתבטל (הגרעין לקח את הרמה) השני חוזר להיצג מעצמו. ──
         if nbT != 0
             if e.bTy == 0 or nbI != e.bRefI      // כיוון שהיה כבוי, או התעגנות לייחוס אחר = שבירה חדשה
                 e.seqC := e.seqC + 1
@@ -1536,7 +1545,10 @@ f_engStep(Eng e, int t, float nh, float nl, float nc, float eh, float el, float 
             e.uTy   := 0
             e.uRefI := -1
 
-        d = e.bTy != 0 and e.uTy != 0 ? (e.bSeq > e.uSeq ? -1 : 1) : e.bTy != 0 ? -1 : e.uTy != 0 ? 1 : 0
+        // הראשית: החזקה (HSSMT > SSMT > SSMT closed), ובחוזק שווה — האחרונה
+        rkB = f_rank(e.bTy, e.bStr)
+        rkU = f_rank(e.uTy, e.uStr)
+        d = e.bTy != 0 and e.uTy != 0 ? (rkB != rkU ? (rkB > rkU ? -1 : 1) : (e.bSeq > e.uSeq ? -1 : 1)) : e.bTy != 0 ? -1 : e.uTy != 0 ? 1 : 0
         e.dir := d
         // רצף QS של השבירה המוצגת — אותו חישוב כמו על הגרף, על נכס הגרף:
         // זמן הקיצון של תת-מחזור הייחוס, וזמן הנר שלקח אותו. ב-HSSMT נבדק
