@@ -258,14 +258,15 @@ newLifeCycle = ta.change(lifeCycleId) != 0
 // "זרע" = תת-המחזור הראשון של מיכל חדש משווה גם לתת-המחזור האחרון של המיכל
 // הקודם (Q4 → Q1), והזרע נמחק ברגע שתת-המחזור הראשון נסגר. כלומר ההשוואה
 // החוצה-מיכל אפשרית **רק** בין האחרון לראשון, לא הלאה.
-//   15S / 1M / 5M — כן. למשל ב-5M: המיקרו האחרון של לונדון מול המיקרו הראשון
+//   15S / 1M / 5M — תמיד. למשל ב-5M: המיקרו האחרון של לונדון מול המיקרו הראשון
 //                   של ניו-יורק AM. חל בכל החלפת מיכל, כולל מעבר יום מסחר וסוף שבוע.
-//   15M           — לא. הסשנים משווים רק בתוך אותו יום מסחר.
-//   1H            — כן: יום שני משווה גם ליום שישי שעבר.
+//   15M           — רק ברצף 1/4: הסשן האחרון (PM) מול אסיה של היום הבא, והשבירה
+//                   קיימת רק אם הרצף של נקודת השבירה (יום-סשן-מיקרו) בנוי רק
+//                   מ-1 ו-4. שבירה כזו שלא עומדת בתנאי לא קיימת בכלל.
+//   1H            — תמיד: יום שני משווה גם ליום שישי שעבר, בלי תנאי רצף.
 //   4H            — לא. המחזור החודשי עומד בפני עצמו, בלי חודש קודם.
-//   1D / 1W / 1Mo — כן: רבע-הרבעון / הרבעון / השנה הראשונים מול האחרונים
-//                   של המיכל הקודם.
-keepLast = tfClass <= 3 or tfClass == 5 or tfClass >= 7
+//   1D / 1W / 1Mo — לא. אין להם רצף QS, ולכן גם אין שבירה בין המיכלים.
+keepLast = tfClass >= 1 and tfClass <= 5
 
 // ═══════════════════════════════════════════════════════════════════
 // True Open
@@ -752,6 +753,14 @@ f_qsChain(int cls, int t) =>
 
 f_qsHot(string s) => str.length(s) == 3 and str.contains(hotKey, "," + s + ",")
 
+// רצף שבנוי רק מ-1 ו-4 (111, 114, 141, 144, 411, 414, 441, 444)
+f_only14(string s) => str.length(s) == 3 and not str.contains(s, "2") and not str.contains(s, "3") and not str.contains(s, "·")
+
+// שבירת זרע ב-15M קיימת רק כשנקודת השבירה ב-Q1 יושבת ברצף 1/4. נר שחוצה
+// תפר שייך לשני הרבעים, ולכן נבדקים תחילת הנר והרגע האחרון שלו.
+seedNeedQS = tfClass == 4
+f_seedOK(int cls, int t, int durMs) => f_only14(f_qsChain(cls, t)) or f_only14(f_qsChain(cls, t + durMs - 1))
+
 // מעבר מותר של ספרה אחת: נשארת כמו שהיא, או 1→2/4, 2→3, 3→4, 4→1.
 // ספרה שאין לה מספר (·) מותרת רק אם היא נשארת כמו שהיא.
 f_qsStep(string a, string b) => a == b or (a == "1" and (b == "2" or b == "4")) or (a == "2" and b == "3") or (a == "3" and b == "4") or (a == "4" and b == "1")
@@ -852,6 +861,13 @@ if dropSeedNow
 if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK and nLevels > 0
 
     [nbT, nbI, nbS] = f_findBear(nqHiA, esHiA, ymHiA, nqHiCA, esHiCA, ymHiCA, nqCH, esCH, ymCH, nqCHC, esCHC, ymCHC)
+    // זרע ב-15M: כל עוד הזרע פעיל הוא היחיד במערך, ונקודת השבירה היא הקיצון
+    // של תת-המחזור הנוכחי (Q1). בודקים את הפתיל, וב-HSSMT גם את הסגירה.
+    if nbT != 0 and seedNeedQS and seedActive and nbI == 0
+        bW = isNQc ? nqCHb  : isESc ? esCHb  : ymCHb
+        bC = isNQc ? nqCHCb : isESc ? esCHCb : ymCHCb
+        if not (f_seedOK(4, time[bar_index - bW], tfSec * 1000) or (nbT == 2 and f_seedOK(4, time[bar_index - bC], tfSec * 1000)))
+            nbT := 0
     if nbT != 0 and bearOK
         // שבירה חדשה = כיוון שהיה כבוי, או התעגנות לתת-מחזור ייחוס אחר (גם אם הכיוון כבר היה חי)
         if bearType == 0 or nbI != bearRefI
@@ -869,6 +885,11 @@ if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK and nLevel
         bearRefI := -1
 
     [nuT, nuI, nuS] = f_findBull(nqLoA, esLoA, ymLoA, nqLoCA, esLoCA, ymLoCA, nqCL, esCL, ymCL, nqCLC, esCLC, ymCLC)
+    if nuT != 0 and seedNeedQS and seedActive and nuI == 0
+        bW = isNQc ? nqCLb  : isESc ? esCLb  : ymCLb
+        bC = isNQc ? nqCLCb : isESc ? esCLCb : ymCLCb
+        if not (f_seedOK(4, time[bar_index - bW], tfSec * 1000) or (nuT == 2 and f_seedOK(4, time[bar_index - bC], tfSec * 1000)))
+            nuT := 0
     if nuT != 0 and bullOK
         // שבירה חדשה = כיוון שהיה כבוי, או התעגנות לתת-מחזור ייחוס אחר (גם אם הכיוון כבר היה חי)
         if bullType == 0 or nuI != bullRefI
@@ -1279,7 +1300,7 @@ f_cycT(int cls, int t) =>
     qsId = qrId * 10 + qsIdx
     rId = cls == 9 ? qYear : cls == 8 ? qrId : cls == 7 ? qsId : cls == 6 ? wkId : cls == 5 ? tdId : cls == 4 ? seId : cls == 3 ? miId : cls == 2 ? quId : sqId
     lId = cls == 9 ? c4Id  : cls == 8 ? qYear : cls == 7 ? qrId : cls == 6 ? moId : cls == 5 ? wkId : cls == 4 ? tdId : cls == 3 ? seId : cls == 2 ? miId : quId
-    kL  = cls <= 3 or cls == 5 or cls >= 7
+    kL  = cls >= 1 and cls <= 5
     blk = ((cls == 6 or cls == 5) and dw == dayofweek.friday) or (cls == 6 and blockDeadWeek and dead)
     [rId, lId, kL, blk]
 
@@ -1483,6 +1504,12 @@ f_engStep(Eng e, int t, float nh, float nl, float nc, float eh, float el, float 
             nuT := xuT
             nuI := xuI
             nuS := xuS
+        // זרע ב-15M — אותו תנאי כמו על הגרף: נקודת השבירה ב-Q1 ברצף 1/4
+        if e.cls == 4 and e.sAct
+            if nbT != 0 and nbI == 0 and not (f_seedOK(4, e.tH, e.barMs) or (nbT == 2 and f_seedOK(4, e.tHC, e.barMs)))
+                nbT := 0
+            if nuT != 0 and nuI == 0 and not (f_seedOK(4, e.tL, e.barMs) or (nuT == 2 and f_seedOK(4, e.tLC, e.barMs)))
+                nuT := 0
 
         // ── שני הכיוונים חיים במקביל, אבל מוצג רק אחד: הכי חדש. כשהוא מתבטל
         //    (הגרעין לקח את הרמה) הישן התקף חוזר להיצג מעצמו. ──
