@@ -416,6 +416,11 @@ type Gap
     int    fSigB    // הנר שבו נרשמה
     int    fSeq     // מונה רץ — הגבוה ביותר הוא זה שמצויר
     float  fYPos    // גובה התווית
+    // ── תיקון באותו ביקור ──
+    // fVis = הביקור שבו השבירה נרשמה או עלתה לאחרונה. fPrev = הדרגה שנשארה
+    // מביקורים קודמים, שאליה חוזרים אם המפגר משלים באותו ביקור.
+    int    fVis
+    int    fPrev
     // ── גבולות לציור בלבד, בסקאלה של הגרף עצמו ──
     // na = לנכס שהגרף מציג אין את הגאפ הזה, ואז פשוט אין קופסה.
     float  drwBot
@@ -773,7 +778,8 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
                 if array.size(e.gaps) > 0
                     for i = 0 to array.size(e.gaps) - 1
                         Gap gc = array.get(e.gaps, i)
-                        gc.fDeg := 0
+                        gc.fDeg  := 0
+                        gc.fPrev := 0
                 e.seedRefId  := prevRef
                 e.seedActive := array.size(e.gaps) > 0
             else
@@ -992,24 +998,34 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
                 bool tagNow = (cycEdge and anyVi) or not anyFvg
                 int  gRef   = tagNow ? rf : (rfMid == 0 ? rf : rfMid)
                 int  gWhen  = tagNow ? tOpen : (tMid == 0 ? tOpen : tMid)
-                Gap gn = Gap.new(e.gapCounter, nd, nb, nt, eb, et, yb, yt, gRef, bar_index, gWhen, bar_index, nd == 1 ? nt : nb, nd == 1 ? et : eb, nd == 1 ? yt : yb, 0, 0, false, false, false, 0, "", 0, 0, na, na, na, not anyFvg)
+                Gap gn = Gap.new(e.gapCounter, nd, nb, nt, eb, et, yb, yt, gRef, bar_index, gWhen, bar_index, nd == 1 ? nt : nb, nd == 1 ? et : eb, nd == 1 ? yt : yb, 0, 0, false, false, false, 0, "", 0, 0, na, na, na, not anyFvg, 0, 0)
                 array.push(e.gaps, gn)
                 f_trim(e.gaps)
 
         // ── רישום שבירות ──
         bool blockDW  = e.cls == 5 and blockDeadWeek and deadW
         bool blockFri = (e.cls == 5 or e.cls == 4) and dow == dayofweek.friday
-        if not blockDW and not blockFri and array.size(e.gaps) > 0
+        // תיקון באותו ביקור — זהה לגרף: אם המפגר השלים לפני שהמחיר יצא מהגאפ,
+        // השבירה של הביקור הזה מתבטלת. רץ גם כשהרישום חסום.
+        bool canReg = not blockDW and not blockFri
+        if array.size(e.gaps) > 0
             for i = 0 to array.size(e.gaps) - 1
                 Gap gr = array.get(e.gaps, i)
                 if not gr.dead and gr.armed
                     int deg = gr.fracDeg()
-                    if deg > gr.fDeg
+                    if canReg and deg > gr.fDeg
+                        if gr.fVis != gr.visits
+                            gr.fPrev := gr.fDeg
+                            gr.fVis  := gr.visits
                         e.seqCounter := e.seqCounter + 1
                         gr.fSeq  := e.seqCounter
                         gr.fSigB := bar_index
                         gr.fDeg  := deg
                         gr.fLead := gr.fracTxt()
+                    else if gr.inVisit and gr.fVis == gr.visits and deg < gr.fDeg
+                        gr.fDeg := math.max(deg, gr.fPrev)
+                        if deg > 0 and deg >= gr.fPrev
+                            gr.fLead := gr.fracTxt()
 
         // ── בחירת השבירה המוצגת (החיה העדכנית ביותר) ──
         int selI = -1
@@ -1100,7 +1116,8 @@ if newLifeCycle
         if array.size(gaps) > 0
             for i = 0 to array.size(gaps) - 1
                 Gap gc = array.get(gaps, i)
-                gc.fDeg := 0
+                gc.fDeg  := 0
+                gc.fPrev := 0
         seedRefId  := prevRef
         seedActive := array.size(gaps) > 0
     else
@@ -1394,7 +1411,7 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
             bool tagNow = (cycEdge and anyVi) or not anyFvg
             gapCounter += 1
             // origin לפי anyFvg בלבד — קצה הקופסה. עם FVG היא מכסה את השלישייה.
-            Gap gn = Gap.new(gapCounter, newDir, nb, nt, eb, et, yb, yt, tagNow ? refCycleId : refCycleId[1], bar_index, tagNow ? time : time[1], anyFvg ? bar_index - 2 : bar_index - 1, newDir == 1 ? nt : nb, newDir == 1 ? et : eb, newDir == 1 ? yt : yb, 0, 0, false, false, false, 0, "", 0, 0, na, cb, ct, not anyFvg)
+            Gap gn = Gap.new(gapCounter, newDir, nb, nt, eb, et, yb, yt, tagNow ? refCycleId : refCycleId[1], bar_index, tagNow ? time : time[1], anyFvg ? bar_index - 2 : bar_index - 1, newDir == 1 ? nt : nb, newDir == 1 ? et : eb, newDir == 1 ? yt : yb, 0, 0, false, false, false, 0, "", 0, 0, na, cb, ct, not anyFvg, 0, 0)
             array.push(gaps, gn)
             f_trim(gaps)
             if not na(ct)
@@ -1480,12 +1497,21 @@ var int seqCounter = 0
 // יגיעו כהתראה אחת ולא כמה נפרדות.
 string alertMsg = ""
 
-if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK and array.size(gaps) > 0
+// **תיקון באותו ביקור.** אם המפגר משלים את המילוי לפני שהמחיר יוצא מהגאפ,
+// השבירה שנרשמה בביקור הזה מתבטלת: הם הסכימו בסוף, ולכן אין סטייה. דוגמה:
+// ES מילא את כל הגאפ ב-08:00 (נרשם F3), NQ השלים ב-09:00 — אין שבירה.
+// שבירה מביקור קודם לא נמחקת — חוזרים לדרגה שהייתה לפני הביקור (fPrev).
+// אחרי שהביקור נגמר השבירה קבועה. התיקון רץ גם כשהרישום חסום (שישי וכו').
+if barstate.isconfirmed and tfClass != 0 and array.size(gaps) > 0
+    bool canReg = not friBlock and cycleOK
     for i = 0 to array.size(gaps) - 1
         Gap gr = array.get(gaps, i)
         if not gr.dead and gr.armed
             int deg = gr.fracDeg()
-            if deg > gr.fDeg
+            if canReg and deg > gr.fDeg
+                if gr.fVis != gr.visits
+                    gr.fPrev := gr.fDeg
+                    gr.fVis  := gr.visits
                 // כל עליית דרגה היא אירוע חדש ומרעננת את המונה, כך שמה
                 // שמוצג הוא תמיד השבירה שקרתה אחרונה.
                 seqCounter += 1
@@ -1497,6 +1523,10 @@ if barstate.isconfirmed and tfClass != 0 and not friBlock and cycleOK and array.
                 if alertOn and deg >= alertMinDeg
                     string one = "[" + f_clsName(tfClass) + "] " + syminfo.ticker + " · שבירה " + (gr.dir == 1 ? "שורית" : "דובית") + " " + f_degTxt(deg) + " · " + gr.fLead
                     alertMsg := alertMsg == "" ? one : alertMsg + "\n" + one
+            else if gr.inVisit and gr.fVis == gr.visits and deg < gr.fDeg
+                gr.fDeg := math.max(deg, gr.fPrev)
+                if deg > 0 and deg >= gr.fPrev
+                    gr.fLead := gr.fracTxt()
 
 // ההתראה עצמה נשלחת בסוף הקובץ, אחרי שגם המנועים של שאר המסגרות
 // הספיקו להוסיף את השבירות שלהם לאותה הודעה.
