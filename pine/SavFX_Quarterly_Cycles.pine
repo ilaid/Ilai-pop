@@ -61,7 +61,10 @@ indicator("Sav FX - Semi / Quarterly Cycles", shorttitle="Sav FX", overlay=false
 //
 //  Per timeframe: the monthly and weekly charts show the four year cycle and its
 //  quarters, the daily chart the current year, its quarters and their splits, and
-//  the week row starts on 12H and below.
+//  the week row starts on 12H and below. The fast rows each reach down to the
+//  chart whose bar is about the width of their cell: the 22.5 min row to 15m and
+//  the 5.625 min row to 5m. A cell narrower than a bar or two has no room for a
+//  three link chain, so drop "Levels Per Label" on those charts.
 //
 //  Levels that carry no quarter number are drawn without colour and without a
 //  number, and they contribute no link to the chain:
@@ -137,8 +140,8 @@ en4 = showWeekly and tfs >= 1800  and tfs <= 43200      // cell = 1 week, off on
 en5 = showDaily  and tfs >= 60    and tfs <= 43200      // cell = 1 trading day
 en6 = show6H     and tfs >= 60    and tfs <= 21600      // cell = 1 session
 en7 = show90     and tfs <= 2700                        // cell = 90 min
-en8 = show225    and tfs <= 540                         // cell = 22.5 min
-en9 = show5625   and tfs <= 120                         // cell = 5.625 min
+en8 = show225    and tfs <= 900                         // cell = 22.5 min, down to 15m
+en9 = show5625   and tfs <= 300                         // cell = 5.625 min, down to 5m
 
 // each row owns one unit of vertical space; the slowest cycle sits at the bottom
 y1 = 1
