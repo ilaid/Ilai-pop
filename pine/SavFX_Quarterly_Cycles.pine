@@ -61,10 +61,11 @@ indicator("Sav FX - Semi / Quarterly Cycles", shorttitle="Sav FX", overlay=false
 //
 //  Per timeframe: the monthly and weekly charts show the four year cycle and its
 //  quarters, the daily chart the current year, its quarters and their splits, and
-//  the week row starts on 12H and below. The fast rows each reach down to the
-//  chart whose bar is about the width of their cell: the 22.5 min row to 15m and
-//  the 5.625 min row to 5m. A cell narrower than a bar or two has no room for a
-//  three link chain, so drop "Levels Per Label" on those charts.
+//  the week row starts on 12H and below. Lower down a row drops off its own end
+//  as a finer one comes in, so the pane never stacks more than four of them: the
+//  week row ends below 30m, the daily row below 10m, and the 5.625 min row comes
+//  in at 5m. A cell a bar or two wide has no room for a three link chain, so
+//  drop "Levels Per Label" on the fastest charts.
 //
 //  Levels that carry no quarter number are drawn without colour and without a
 //  number, and they contribute no link to the chain:
@@ -137,10 +138,10 @@ en1 = showCyc4   and tfs >= 21600 and tfs <= 10368000   // cell = 1 year
 en2 = showQtYear and tfs >= 21600 and tfs <= 10368000   // cell = 1 quarter
 en3 = showSplit  and isDay1                             // cell = a quarter of a quarter
 en4 = showWeekly and tfs >= 1800  and tfs <= 43200      // cell = 1 week, off on 1D and up
-en5 = showDaily  and tfs >= 60    and tfs <= 43200      // cell = 1 trading day
+en5 = showDaily  and tfs >= 600   and tfs <= 43200      // cell = 1 trading day, off below 10m
 en6 = show6H     and tfs >= 60    and tfs <= 21600      // cell = 1 session
 en7 = show90     and tfs <= 2700                        // cell = 90 min
-en8 = show225    and tfs <= 900                         // cell = 22.5 min, down to 15m
+en8 = show225    and tfs <= 540                         // cell = 22.5 min, down to 9m
 en9 = show5625   and tfs <= 300                         // cell = 5.625 min, down to 5m
 
 // each row owns one unit of vertical space; the slowest cycle sits at the bottom
