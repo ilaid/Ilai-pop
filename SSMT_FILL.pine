@@ -72,9 +72,11 @@ extendBodies = input.bool(true, "הרחב גאפ לגופי הנרות (רווח
 //   VI לבד   — נספר מ-viMinTicks טיקים ומעלה.
 //   VI + FVG — מרחיב את ה-FVG של אותו נכס כבר מ-viMergeTicks, משני הצדדים:
 //              נר 1→2 מרחיב את הקצה הקרוב לנר 1, נר 2→3 את הקצה הקרוב לנר 3.
+//              אותו סף חל גם על הרחבת הפתיל לגוף (extendBodies) — בלעדיו ההרחבה
+//              הזאת עקפה את הסף, ושינוי המספר לא עשה הבדל.
 volImbOn     = input.bool(true, "זהה גם גאפ סגירה/פתיחה בין שני נרות", tooltip = "Volume Imbalance — הרווח בין הסגירה של נר לפתיחה של הנר שאחריו. נספר יחד עם FVG רגיל לאותו גאפ קולקטיבי, ומסומן V בהצצה כשכל הרגליים הן VI.", group = grpGap)
 viMinTicks   = input.int(4, "VI לבד — מינימום טיקים", minval = 1, maxval = 100, tooltip = "רווח סגירה/פתיחה שנספר כגאפ בפני עצמו. 4 טיקים = נקודה אחת ב-NQ/ES, 4 נקודות ב-YM.", group = grpGap)
-viMergeTicks = input.int(1, "VI שמתאחד עם FVG — מינימום טיקים", minval = 1, maxval = 100, tooltip = "רווח סגירה/פתיחה שמרחיב FVG של אותו נכס — משני הצדדים: בין נר 1 לנר 2 ובין נר 2 לנר 3.", group = grpGap)
+viMergeTicks = input.int(1, "VI שמתאחד עם FVG — מינימום טיקים", minval = 1, maxval = 100, tooltip = "רווח סגירה/פתיחה שמרחיב FVG של אותו נכס — משני הצדדים: בין נר 1 לנר 2 ובין נר 2 לנר 3. חל גם על הרחבת הפתיל לגוף: רווח קטן מהסף לא מרחיב את הגאפ בכלל.", group = grpGap)
 // כיבוי מחזיר את ההתנהגות הישנה: רק NQ מול ES, YM לא משתתף בכלל.
 useYM        = input.bool(true, "כלול את YM כנכס חלש", group = grpGap)
 maxGaps      = input.int(60, "מקסימום גאפים במיכל", minval = 5, maxval = 200, group = grpGap)
@@ -941,24 +943,24 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
             // של העליונים. if ואחריו if — לא else if. זהה לגרף.
             if nd == 1
                 if fBullN
-                    nb  := (extendBodies and no1 > nh2) ? nc2 : nh2
-                    nt  := (extendBodies and nl0 > nc1) ? no0 : nl0
+                    nb  := (extendBodies and no1 > nh2 and piN >= viMergeTicks) ? nc2 : nh2
+                    nt  := (extendBodies and nl0 > nc1 and tiN >= viMergeTicks) ? no0 : nl0
                     if pBullN
                         nb := math.min(nb, nc2)
                 if vBullN or (fBullN and mBullN)
                     nb := na(nb) ? nc1 : math.min(nb, nc1)
                     nt := na(nt) ? no0 : math.max(nt, no0)
                 if fBullE
-                    eb  := (extendBodies and eo1 > eh2) ? ec2 : eh2
-                    et  := (extendBodies and el0 > ec1) ? eo0 : el0
+                    eb  := (extendBodies and eo1 > eh2 and piE >= viMergeTicks) ? ec2 : eh2
+                    et  := (extendBodies and el0 > ec1 and tiE >= viMergeTicks) ? eo0 : el0
                     if pBullE
                         eb := math.min(eb, ec2)
                 if vBullE or (fBullE and mBullE)
                     eb := na(eb) ? ec1 : math.min(eb, ec1)
                     et := na(et) ? eo0 : math.max(et, eo0)
                 if fBullY
-                    yb := (extendBodies and yo1 > yh2) ? yc2 : yh2
-                    yt := (extendBodies and yl0 > yc1) ? yo0 : yl0
+                    yb := (extendBodies and yo1 > yh2 and piY >= viMergeTicks) ? yc2 : yh2
+                    yt := (extendBodies and yl0 > yc1 and tiY >= viMergeTicks) ? yo0 : yl0
                     if pBullY
                         yb := math.min(yb, yc2)
                 if vBullY or (fBullY and mBullY)
@@ -966,24 +968,24 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
                     yt := na(yt) ? yo0 : math.max(yt, yo0)
             else
                 if fBearN
-                    nt  := (extendBodies and no1 < nl2) ? nc2 : nl2
-                    nb  := (extendBodies and nh0 < nc1) ? no0 : nh0
+                    nt  := (extendBodies and no1 < nl2 and piN >= viMergeTicks) ? nc2 : nl2
+                    nb  := (extendBodies and nh0 < nc1 and tiN >= viMergeTicks) ? no0 : nh0
                     if pBearN
                         nt := math.max(nt, nc2)
                 if vBearN or (fBearN and mBearN)
                     nt := na(nt) ? nc1 : math.max(nt, nc1)
                     nb := na(nb) ? no0 : math.min(nb, no0)
                 if fBearE
-                    et  := (extendBodies and eo1 < el2) ? ec2 : el2
-                    eb  := (extendBodies and eh0 < ec1) ? eo0 : eh0
+                    et  := (extendBodies and eo1 < el2 and piE >= viMergeTicks) ? ec2 : el2
+                    eb  := (extendBodies and eh0 < ec1 and tiE >= viMergeTicks) ? eo0 : eh0
                     if pBearE
                         et := math.max(et, ec2)
                 if vBearE or (fBearE and mBearE)
                     et := na(et) ? ec1 : math.max(et, ec1)
                     eb := na(eb) ? eo0 : math.min(eb, eo0)
                 if fBearY
-                    yt := (extendBodies and yo1 < yl2) ? yc2 : yl2
-                    yb := (extendBodies and yh0 < yc1) ? yo0 : yh0
+                    yt := (extendBodies and yo1 < yl2 and piY >= viMergeTicks) ? yc2 : yl2
+                    yb := (extendBodies and yh0 < yc1 and tiY >= viMergeTicks) ? yo0 : yh0
                     if pBearY
                         yt := math.max(yt, yc2)
                 if vBearY or (fBearY and mBearY)
@@ -1216,6 +1218,7 @@ if array.size(gaps) > 0
 //
 // 1) **FVG של שלושה נרות.** הגבול נמדד בפתיל, ומורחב לגוף רק כשיש באותו
 //    צד רווח אמיתי שלא נסחר — כלומר הנר הבא נפתח מעבר לפתיל של הנר הקודם.
+//    הרווח הזה חייב לעבור את viMergeTicks, כמו כל הרחבה אחרת.
 //      שורי  — תחתון: high[2] → close[2] אם open[1] > high[2]
 //               עליון:  low[0]  → open[0]  אם low[0]  > close[1]
 //      דובי  — עליון:  low[2]   → close[2] אם open[1] < low[2]
@@ -1323,24 +1326,24 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
         // na(x) ? v : min/max — כי math.min(na, x) מחזיר na.
         if newDir == 1
             if fBullN
-                nb  := (extendBodies and nqO[1] > nqH[2]) ? nqC[2] : nqH[2]
-                nt  := (extendBodies and nqL    > nqC[1]) ? nqO    : nqL
+                nb  := (extendBodies and nqO[1] > nqH[2] and piN >= viMergeTicks) ? nqC[2] : nqH[2]
+                nt  := (extendBodies and nqL    > nqC[1] and tiN >= viMergeTicks) ? nqO    : nqL
                 if pBullN
                     nb := math.min(nb, nqC[2])
             if vBullN or (fBullN and mBullN)
                 nb := na(nb) ? nqC[1] : math.min(nb, nqC[1])
                 nt := na(nt) ? nqO    : math.max(nt, nqO)
             if fBullE
-                eb  := (extendBodies and esO[1] > esH[2]) ? esC[2] : esH[2]
-                et  := (extendBodies and esL    > esC[1]) ? esO    : esL
+                eb  := (extendBodies and esO[1] > esH[2] and piE >= viMergeTicks) ? esC[2] : esH[2]
+                et  := (extendBodies and esL    > esC[1] and tiE >= viMergeTicks) ? esO    : esL
                 if pBullE
                     eb := math.min(eb, esC[2])
             if vBullE or (fBullE and mBullE)
                 eb := na(eb) ? esC[1] : math.min(eb, esC[1])
                 et := na(et) ? esO    : math.max(et, esO)
             if fBullY
-                yb := (extendBodies and ymO[1] > ymH[2]) ? ymC[2] : ymH[2]
-                yt := (extendBodies and ymL    > ymC[1]) ? ymO    : ymL
+                yb := (extendBodies and ymO[1] > ymH[2] and piY >= viMergeTicks) ? ymC[2] : ymH[2]
+                yt := (extendBodies and ymL    > ymC[1] and tiY >= viMergeTicks) ? ymO    : ymL
                 if pBullY
                     yb := math.min(yb, ymC[2])
             if vBullY or (fBullY and mBullY)
@@ -1348,24 +1351,24 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
                 yt := na(yt) ? ymO    : math.max(yt, ymO)
         else
             if fBearN
-                nt  := (extendBodies and nqO[1] < nqL[2]) ? nqC[2] : nqL[2]
-                nb  := (extendBodies and nqH    < nqC[1]) ? nqO    : nqH
+                nt  := (extendBodies and nqO[1] < nqL[2] and piN >= viMergeTicks) ? nqC[2] : nqL[2]
+                nb  := (extendBodies and nqH    < nqC[1] and tiN >= viMergeTicks) ? nqO    : nqH
                 if pBearN
                     nt := math.max(nt, nqC[2])
             if vBearN or (fBearN and mBearN)
                 nt := na(nt) ? nqC[1] : math.max(nt, nqC[1])
                 nb := na(nb) ? nqO    : math.min(nb, nqO)
             if fBearE
-                et  := (extendBodies and esO[1] < esL[2]) ? esC[2] : esL[2]
-                eb  := (extendBodies and esH    < esC[1]) ? esO    : esH
+                et  := (extendBodies and esO[1] < esL[2] and piE >= viMergeTicks) ? esC[2] : esL[2]
+                eb  := (extendBodies and esH    < esC[1] and tiE >= viMergeTicks) ? esO    : esH
                 if pBearE
                     et := math.max(et, esC[2])
             if vBearE or (fBearE and mBearE)
                 et := na(et) ? esC[1] : math.max(et, esC[1])
                 eb := na(eb) ? esO    : math.min(eb, esO)
             if fBearY
-                yt := (extendBodies and ymO[1] < ymL[2]) ? ymC[2] : ymL[2]
-                yb := (extendBodies and ymH    < ymC[1]) ? ymO    : ymH
+                yt := (extendBodies and ymO[1] < ymL[2] and piY >= viMergeTicks) ? ymC[2] : ymL[2]
+                yb := (extendBodies and ymH    < ymC[1] and tiY >= viMergeTicks) ? ymO    : ymH
                 if pBearY
                     yt := math.max(yt, ymC[2])
             if vBearY or (fBearY and mBearY)
@@ -1382,11 +1385,12 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
             float cb = na
             float ct = na
             int   chTi = math.round(math.abs(open - close[1]) / syminfo.mintick)
+            int   chPi = math.round(math.abs(open[1] - close[2]) / syminfo.mintick)
             if legOnChart and newDir == 1
                 bool chF = low > high[2]
                 if chF
-                    cb := (extendBodies and open[1] > high[2]) ? close[2] : high[2]
-                    ct := (extendBodies and low      > close[1]) ? open  : low
+                    cb := (extendBodies and open[1] > high[2] and chPi >= viMergeTicks) ? close[2] : high[2]
+                    ct := (extendBodies and low      > close[1] and chTi >= viMergeTicks) ? open  : low
                     if volImbOn and open[1] > close[2] and close[2] > open[2] and close[1] > open[1] and math.round(math.abs(open[1] - close[2]) / syminfo.mintick) >= viMergeTicks
                         cb := math.min(cb, close[2])
                 if volImbOn and open > close[1] and (cycEdge or (close[1] > open[1] and close > open)) and (chTi >= viMinTicks or (chF and chTi >= viMergeTicks))
@@ -1395,8 +1399,8 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
             if legOnChart and newDir == -1
                 bool chF = high < low[2]
                 if chF
-                    ct := (extendBodies and open[1] < low[2])  ? close[2] : low[2]
-                    cb := (extendBodies and high     < close[1]) ? open  : high
+                    ct := (extendBodies and open[1] < low[2] and chPi >= viMergeTicks)  ? close[2] : low[2]
+                    cb := (extendBodies and high     < close[1] and chTi >= viMergeTicks) ? open  : high
                     if volImbOn and open[1] < close[2] and close[2] < open[2] and close[1] < open[1] and math.round(math.abs(open[1] - close[2]) / syminfo.mintick) >= viMergeTicks
                         ct := math.max(ct, close[2])
                 if volImbOn and open < close[1] and (cycEdge or (close[1] < open[1] and close < open)) and (chTi >= viMinTicks or (chF and chTi >= viMergeTicks))
@@ -1439,6 +1443,7 @@ if barstate.isconfirmed and tfClass != 0 and array.size(owns) > 0
 if ownMode != "כבוי" and barstate.isconfirmed and tfClass != 0 and bar_index > 2
     bool oEdge = newRefCycle
     int  oTi   = math.round(math.abs(open - close[1]) / syminfo.mintick)
+    int  oPi   = math.round(math.abs(open[1] - close[2]) / syminfo.mintick)
     bool oFB   = low > high[2]
     bool oFS   = high < low[2]
     bool oVB   = volImbOn and open > close[1] and (oEdge or (close[1] > open[1] and close > open)) and (oTi >= viMinTicks or (oFB and oTi >= viMergeTicks))
@@ -1451,8 +1456,8 @@ if ownMode != "כבוי" and barstate.isconfirmed and tfClass != 0 and bar_index
         bool  oV = oDir == 1 ? oVB : oVS
         if oDir == 1
             if oFB
-                ob := (extendBodies and open[1] > high[2]) ? close[2] : high[2]
-                ot := (extendBodies and low      > close[1]) ? open  : low
+                ob := (extendBodies and open[1] > high[2] and oPi >= viMergeTicks) ? close[2] : high[2]
+                ot := (extendBodies and low      > close[1] and oTi >= viMergeTicks) ? open  : low
                 if volImbOn and open[1] > close[2] and close[2] > open[2] and close[1] > open[1] and math.round(math.abs(open[1] - close[2]) / syminfo.mintick) >= viMergeTicks
                     ob := math.min(ob, close[2])
             if oVB
@@ -1460,8 +1465,8 @@ if ownMode != "כבוי" and barstate.isconfirmed and tfClass != 0 and bar_index
                 ot := na(ot) ? open     : math.max(ot, open)
         else
             if oFS
-                ot := (extendBodies and open[1] < low[2])  ? close[2] : low[2]
-                ob := (extendBodies and high     < close[1]) ? open  : high
+                ot := (extendBodies and open[1] < low[2] and oPi >= viMergeTicks)  ? close[2] : low[2]
+                ob := (extendBodies and high     < close[1] and oTi >= viMergeTicks) ? open  : high
                 if volImbOn and open[1] < close[2] and close[2] < open[2] and close[1] < open[1] and math.round(math.abs(open[1] - close[2]) / syminfo.mintick) >= viMergeTicks
                     ot := math.max(ot, close[2])
             if oVS
