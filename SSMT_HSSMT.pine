@@ -64,7 +64,7 @@ mtfMarkPos = input.string("שמאל למטה", "מיקום הסימון", option
 mtfPanel   = input.bool(false, "הצג פאנל מסגרות זמן", group = grpMTF)
 mtfPanPos  = input.string("ימין למטה", "מיקום הפאנל", options = ["ימין למטה", "ימין למעלה", "שמאל למטה", "שמאל למעלה"], group = grpMTF)
 mtfColor   = input.color(color.white, "צבע הסימון והפאנל", group = grpMTF)
-mtfAlert   = input.bool(true,  "כלול שבירות ממסגרות אחרות בהתראה", group = grpMTF)
+mtfAlert   = input.bool(true,  "כלול שבירות ממסגרות אחרות בהתראה", group = grpMTF, tooltip = "ההתראה כותבת רק את המסגרת שבה קרתה שבירה חדשה וכיוונה, למשל QT SSMT: 5m ▼. שבירות 15 שניות לא מתריעות. כבוי = רק מסגרת הגרף.")
 // נתוני שניות כבויים כברירת מחדל: TradingView זורק שגיאת ריצה RE10063
 // ("seconds-based timeframes ... Premium and higher-tier plans") על עצם הבקשה
 // למסגרת שניות, ו-ignore_invalid_timeframe לא מכסה את זה. כשהמתג כבוי, מדרגת
@@ -1851,7 +1851,11 @@ if mtfOn and tfClass != 0
 panPos  = mtfPanPos == "ימין למטה" ? position.bottom_right : mtfPanPos == "ימין למעלה" ? position.top_right : mtfPanPos == "שמאל למטה" ? position.bottom_left : position.top_left
 markPos = mtfMarkPos == "שמאל למטה" ? position.bottom_left : mtfMarkPos == "שמאל למעלה" ? position.top_left : mtfMarkPos == "אמצע למטה" ? position.bottom_center : position.bottom_right
 
-var string mtfPrev = ""
+// מפתח השבירה המוצגת בכל אחת משש השורות (כיוון:מונה). התראה יוצאת רק כשהמפתח
+// משתנה — כלומר שבירה חדשה. עדכון של שבירה קיימת (עוד נכס, S→H) לא מתריע שוב.
+var array<string> alKey = array.new_string(6, "")
+var bool alReady = false
+f_engKey(Eng e) => e.dir == 0 ? "" : str.tostring(e.dir) + ":" + str.tostring(e.dir == -1 ? e.bSeq : e.uSeq)
 var table mtfTbl  = table.new(panPos,  2, 8, border_width = 0)
 // תא נפרד לכל שבירה, כדי שכל אחת תיצבע בצבע ובשקיפות שלה. מסגרת יכולה לתרום
 // שני תאים — העדכנית והחלשה — ולכן יש כאן מקום לשתיים לכל מדרגה.
@@ -1873,7 +1877,6 @@ if mtfOn and barstate.islast and tfClass != 0
     useArr = array.from(useU3, useU2, useU1, true, useD1, useD2)
 
     bg = color.new(color.black, 100)
-    mark = ""
     prevC = -1
     row = 0
     mcol = 1
@@ -1887,7 +1890,6 @@ if mtfOn and barstate.islast and tfClass != 0
             // צבע הכיוון של האינדיקטור עצמו — אדום לדובי, ירוק לשורי
             cl = d == -1 ? colBear : d == 1 ? colBull : mtfColor
             if st != ""
-                mark := mark + f_tfName(c) + " " + st + "   "
                 // את מסגרת הגרף עצמה לא כותבים בפינה — היא כבר מצוירת על הגרף.
                 // בפאנל ובהתראה היא כן נשארת.
                 if mtfMark and c != tfClass and mcol <= 11
@@ -1899,16 +1901,29 @@ if mtfOn and barstate.islast and tfClass != 0
                 table.cell(mtfTbl, 1, row, st == "" ? "—" : st, text_color = cl, text_size = size.small, bgcolor = bg)
             row := row + 1
             prevC := c
-    mark := str.trim(mark)
     if mtfPanel
         table.cell(mtfTbl, 0, row, "QT", text_color = mtfColor, text_size = size.small, bgcolor = bg)
         table.cell(mtfTbl, 1, row, "", bgcolor = bg)
     if mtfMark and mcol > 1
         table.cell(markTbl, 0, 0, "QT", text_color = mtfColor, text_size = size.small, bgcolor = bg)
 
-    if mtfAlert and mark != mtfPrev and mark != ""
-        alert("QT SSMT: " + mark, alert.freq_once_per_bar)
-    mtfPrev := mark
+    // התראה: רק המסגרת שבה קרתה שבירה חדשה וכיוונה (למשל "QT SSMT: 5m ▼"), בלי
+    // כל השורה. 15 שניות לא מתריעות. בלי "כלול מסגרות אחרות" — רק מסגרת הגרף.
+    // בטעינה הראשונה לא מתריעים על שבירות שכבר קיימות.
+    keyArr = array.from(f_engKey(egU3), f_engKey(egU2), f_engKey(egU1), drawDir == 0 ? "" : str.tostring(drawDir) + ":" + str.tostring(curSeq), f_engKey(egD1), f_engKey(egD2))
+    string alTxt = ""
+    int    alPc  = -1
+    for i = 0 to 5
+        c = array.get(clsArr, i)
+        k = array.get(keyArr, i)
+        if array.get(useArr, i) and c != alPc
+            if k != "" and array.get(stArr, i) != "" and k != array.get(alKey, i) and c != 1 and (mtfAlert or c == tfClass)
+                alTxt := alTxt + (alTxt == "" ? "" : " · ") + f_tfName(c) + " " + (array.get(dirArr, i) == -1 ? "▼" : "▲")
+            alPc := c
+        array.set(alKey, i, k)
+    if alReady and alTxt != ""
+        alert("QT SSMT: " + alTxt, alert.freq_once_per_bar)
+    alReady := true
 
 // ═══════════════════════════════════════════════════════════════════
 // טבלת בדיקה (אבחון — כבויה כברירת מחדל)
