@@ -65,12 +65,13 @@ mtfPanel   = input.bool(false, "הצג פאנל מסגרות זמן", group = gr
 mtfPanPos  = input.string("ימין למטה", "מיקום הפאנל", options = ["ימין למטה", "ימין למעלה", "שמאל למטה", "שמאל למעלה"], group = grpMTF)
 mtfColor   = input.color(color.white, "צבע הסימון והפאנל", group = grpMTF)
 mtfAlert   = input.bool(true,  "כלול שבירות ממסגרות אחרות בהתראה", group = grpMTF)
-// מדרגת 15 השניות כבויה כברירת מחדל: TradingView זורק שגיאת ריצה RE10063
+// נתוני שניות כבויים כברירת מחדל: TradingView זורק שגיאת ריצה RE10063
 // ("seconds-based timeframes ... Premium and higher-tier plans") על עצם הבקשה
-// למסגרת שניות, ו-ignore_invalid_timeframe לא מכסה את זה. כשהמתג כבוי, המדרגה
-// הנמוכה ביותר היא דקה, ו-15 שניות לא נסרקות ולא נכתבות בפינה. להדליק אחרי
-// שדרוג המנוי.
-use15s     = input.bool(false, "הצג מדרגת 15 שניות (דורש Premium)", group = grpMTF, tooltip = "כבוי = מדרגת 15 השניות לא מחושבת ולא מוצגת בפינה. להדליק אחרי שדרוג המנוי.")
+// למסגרת שניות, ו-ignore_invalid_timeframe לא מכסה את זה. כשהמתג כבוי, מדרגת
+// 15 השניות (שבירה בין תת-רבעים של 5.625 דק') מחושבת מנרות **דקה** — בלי
+// Premium ובלי שום בקשה במסגרת שניות. זה קירוב: נר דקה שחוצה גבול של תת-רבע
+// משויך לתת-הרבע שבו הוא נפתח (וברצף ה-QS הוא נחשב לשניהם).
+use15s     = input.bool(false, "15 שניות מנתוני שניות אמיתיים (דורש Premium)", group = grpMTF, tooltip = "כבוי = מדרגת 15 השניות מחושבת מנרות דקה, בלי צורך במנוי.")
 
 // ═══════════════════════════════════════════════════════════════════
 // בחירת סימבולים
@@ -1748,12 +1749,13 @@ f_tfName(int cls) => cls == 1 ? "15s" : cls == 2 ? "1m" : cls == 3 ? "5m" : cls 
 
 // שלוש מסגרות מעל הגרף ושתיים מתחת, אבל **לא מעל 4H**: 1D ו-1W לא נסרקים
 // ולא מוצגים בפינה. מסגרת הגרף עצמה תמיד מוצגת, גם אם היא יומית או שבועית.
-// המדרגה התחתונה היא 15 שניות (רק עם Premium) או דקה; מתחתיה אין כלום.
+// המדרגה התחתונה היא 15 שניות; מתחתיה אין כלום.
 cU1 = math.min(tfClass + 1, 6)
 cU2 = math.min(tfClass + 2, 6)
 cU3 = math.min(tfClass + 3, 6)
-// המדרגה הנמוכה ביותר: 15 שניות רק כשהמתג של Premium דלוק, אחרת דקה
-minCls = use15s ? 1 : 2
+// המדרגה הנמוכה ביותר היא תמיד 15 שניות — עם Premium מנתוני שניות, ובלי
+// Premium מנרות דקה (ראה use15s)
+minCls = 1
 cD1 = math.max(tfClass - 1, minCls)
 cD2 = math.max(tfClass - 2, minCls)
 
@@ -1762,8 +1764,8 @@ cD2 = math.max(tfClass - 2, minCls)
 tU1 = cU1 == 1 ? "15S" : cU1 == 2 ? "1" : cU1 == 3 ? "5" : cU1 == 4 ? "15" : cU1 == 5 ? "60" : cU1 == 6 ? "240" : cU1 == 7 ? "D" : cU1 == 8 ? "W" : "M"
 tU2 = cU2 == 1 ? "15S" : cU2 == 2 ? "1" : cU2 == 3 ? "5" : cU2 == 4 ? "15" : cU2 == 5 ? "60" : cU2 == 6 ? "240" : cU2 == 7 ? "D" : cU2 == 8 ? "W" : "M"
 tU3 = cU3 == 1 ? "15S" : cU3 == 2 ? "1" : cU3 == 3 ? "5" : cU3 == 4 ? "15" : cU3 == 5 ? "60" : cU3 == 6 ? "240" : cU3 == 7 ? "D" : cU3 == 8 ? "W" : "M"
-tD1 = cD1 == 1 ? "15S" : cD1 == 2 ? "1" : cD1 == 3 ? "5" : cD1 == 4 ? "15" : cD1 == 5 ? "60" : cD1 == 6 ? "240" : cD1 == 7 ? "D" : cD1 == 8 ? "W" : "M"
-tD2 = cD2 == 1 ? "15S" : cD2 == 2 ? "1" : cD2 == 3 ? "5" : cD2 == 4 ? "15" : cD2 == 5 ? "60" : cD2 == 6 ? "240" : cD2 == 7 ? "D" : cD2 == 8 ? "W" : "M"
+tD1 = cD1 == 1 ? (use15s ? "15S" : "1") : cD1 == 2 ? "1" : cD1 == 3 ? "5" : cD1 == 4 ? "15" : cD1 == 5 ? "60" : cD1 == 6 ? "240" : cD1 == 7 ? "D" : cD1 == 8 ? "W" : "M"
+tD2 = cD2 == 1 ? (use15s ? "15S" : "1") : cD2 == 2 ? "1" : cD2 == 3 ? "5" : cD2 == 4 ? "15" : cD2 == 5 ? "60" : cD2 == 6 ? "240" : cD2 == 7 ? "D" : cD2 == 8 ? "W" : "M"
 
 lkh = barmerge.lookahead_off
 
@@ -1789,11 +1791,14 @@ lkh = barmerge.lookahead_off
 [fEt, fEh, fEl, fEc] = request.security_lower_tf(sES, tD2, [time, high, low, close], ignore_invalid_timeframe = true)
 [fYt, fYh, fYl, fYc] = request.security_lower_tf(sYM, tD2, [time, high, low, close], ignore_invalid_timeframe = true)
 
+// מדרגת 15 שניות בלי Premium מוזנת בנרות דקה, ולכן אורך הנר שלה הוא דקה
+f_inMs(int cls) => cls == 1 and not use15s ? 60000 : f_clsMs(cls)
+
 var Eng egU1 = f_newEng(cU1, f_clsMs(cU1))
 var Eng egU2 = f_newEng(cU2, f_clsMs(cU2))
 var Eng egU3 = f_newEng(cU3, f_clsMs(cU3))
-var Eng egD1 = f_newEng(cD1, f_clsMs(cD1))
-var Eng egD2 = f_newEng(cD2, f_clsMs(cD2))
+var Eng egD1 = f_newEng(cD1, f_inMs(cD1))
+var Eng egD2 = f_newEng(cD2, f_inMs(cD2))
 
 useU1 = tfClass + 1 <= 6
 useU2 = tfClass + 2 <= 6
@@ -1815,7 +1820,12 @@ if mtfOn and tfClass != 0
     // תת-הנרות מזווגים לפי זמן: הזמנים של NQ הם המפתח, וסמן רץ מוצא לכל נכס
     // את הנר שלו באותו זמן. נכס שחסרה לו הדקה הזאת נשאר על הנר הקודם שלו —
     // וזה בטוח, כי המצברים לוקחים מקסימום/מינימום וערך שכבר נכלל לא משנה כלום.
-    if useD1 and array.size(dNc) > 0 and array.size(dEc) > 0 and array.size(dYc) > 0
+    // בגרף דקה בלי Premium, מדרגת 15 השניות מוזנת ישירות בנרות הגרף עצמו —
+    // "מתחת" לדקה אין מה למשוך בלי נתוני שניות.
+    d1Direct = tfClass == 2 and cD1 == 1 and not use15s
+    if useD1 and d1Direct and not na(nqC) and not na(esC) and not na(ymC)
+        f_engStep(egD1, time, nqH, nqL, nqC, esH, esL, esC, ymH, ymL, ymC)
+    if useD1 and not d1Direct and array.size(dNc) > 0 and array.size(dEc) > 0 and array.size(dYc) > 0
         int ke = 0
         int ky = 0
         for j = 0 to array.size(dNc) - 1
