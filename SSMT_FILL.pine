@@ -125,6 +125,10 @@ ownSec    = input.int(20, "כמה שניות בהצצה", minval = 1, maxval = 6
 ownMaxTf  = input.string("Mo", "הצג במסגרות עד", options = ["1m", "5m", "15m", "1H", "4H", "1D", "1W", "Mo"], group = grpOwn)
 ownBull   = input.color(#42a5f5, "צבע שורי", group = grpOwn)
 ownBear   = input.color(#ffa726, "צבע דובי", group = grpOwn)
+// במסגרות הנמוכות אפשר שהגאפים יישארו על המסך תמיד, ובגבוהות רק בהצצה.
+// חל רק כשההצגה היא "הצצה". ברירת מחדל: כבוי — הצצה בכל המסגרות.
+ownAlwTf  = input.string("כבוי", "תמיד במסגרות עד", options = ["כבוי", "1m", "5m", "15m", "1H", "4H", "1D", "1W", "Mo"], tooltip = "כשההצגה היא הצצה: במסגרות האלה ומטה הגאפים מוצגים תמיד, ומעליהן רק בהצצה. למשל 5m = תמיד ב-1m וב-5m, הצצה בשאר.", group = grpOwn)
+ownAlwCls = ownAlwTf == "1m" ? 1 : ownAlwTf == "5m" ? 2 : ownAlwTf == "15m" ? 3 : ownAlwTf == "1H" ? 4 : ownAlwTf == "4H" ? 5 : ownAlwTf == "1D" ? 6 : ownAlwTf == "1W" ? 7 : ownAlwTf == "Mo" ? 8 : 0
 ownMaxCls = ownMaxTf == "1m" ? 1 : ownMaxTf == "5m" ? 2 : ownMaxTf == "15m" ? 3 : ownMaxTf == "1H" ? 4 : ownMaxTf == "4H" ? 5 : ownMaxTf == "1D" ? 6 : ownMaxTf == "1W" ? 7 : 8
 
 grpLogic = "לוגיקה"
@@ -2066,7 +2070,7 @@ if barstate.islast
 
 // ── הגאפים של הגרף עצמו (לא קורלטיביים), בצבע נפרד ──
 var array<box> ownBoxes = array.new<box>()
-drawOwn = tfClass != 0 and tfClass <= ownMaxCls and (ownMode == "תמיד" or (ownMode == "הצצה" and timenow - bootT <= ownSec * 1000))
+drawOwn = tfClass != 0 and tfClass <= ownMaxCls and (ownMode == "תמיד" or (ownMode == "הצצה" and (tfClass <= ownAlwCls or timenow - bootT <= ownSec * 1000)))
 
 if barstate.islast
     if array.size(ownBoxes) > 0
@@ -2077,17 +2081,24 @@ if barstate.islast
         for i = 0 to array.size(owns) - 1
             OwnGap og = array.get(owns, i)
             if og.armed
-                // גאפ שהוא גם קולקטיבי וכבר מצויר בהצצה — לא מציירים שוב
-                bool dup = false
-                if drawAllGaps and og.collId != 0 and array.size(gaps) > 0
+                // גאפ שהוא גם קולקטיבי וכבר מצויר בהצצה — לא מציירים שוב.
+                // ואם הקולקטיבי חי אבל לא מצויר כרגע (ההצצה שלו נגמרה), הגאפ
+                // של הגרף מוצג **כקולקטיבי**: בצבעים שלו ועם המשתתפים, ולא
+                // כ-"NQ" בלבד. כך על הגרף יש תמיד קופסה אחת לכל גאפ.
+                bool   dup  = false
+                string legs = ""
+                if og.collId != 0 and array.size(gaps) > 0
                     for j = 0 to array.size(gaps) - 1
                         Gap gk = array.get(gaps, j)
-                        if gk.id == og.collId and not gk.dead and gk.armed and not na(gk.drwTop)
-                            dup := true
+                        if gk.id == og.collId and not gk.dead
+                            legs := f_legsTxt(gk)
+                            if drawAllGaps and gk.armed and not na(gk.drwTop)
+                                dup := true
                 if not dup
-                    color oCol = og.dir == 1 ? ownBull : ownBear
-                    // גאפ של נכס אחד — רק השם שלו
-                    string oTxt = f_subName(tfClass, og.birthT) + " " + f_bornTxt(tfClass, og.birthT) + " " + ownName + (og.volImb ? " V" : "")
+                    bool  isColl = legs != ""
+                    color oCol   = og.dir == 1 ? (isColl ? colBull : ownBull) : (isColl ? colBear : ownBear)
+                    // גאפ של נכס אחד — רק השם שלו. קולקטיבי — המשתתפים.
+                    string oTxt = f_subName(tfClass, og.birthT) + " " + f_bornTxt(tfClass, og.birthT) + " " + (isColl ? legs : ownName) + (og.volImb ? " V" : "")
                     array.push(ownBoxes, box.new(og.origin, og.top, bar_index, og.bot, border_color = color.new(oCol, peekEdge), border_width = 1, bgcolor = color.new(oCol, peekFill), text = oTxt, text_color = color.new(oCol, 25), text_size = size.tiny, text_halign = text.align_left, text_valign = text.align_top))
 
 // ═══════════════════════════════════════════════════════════════════
