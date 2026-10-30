@@ -287,8 +287,9 @@ keepLast = tfClass == 1 or tfClass == 2 or tfClass == 3 or tfClass == 5
 // True Open
 // ═══════════════════════════════════════════════════════════════════
 
-inCyc4Q2    = yearInCyc == 1         // השנה השנייה במחזור ה-4 (2025, 2029)
-inYearlyQ2  = qtQtrNum == 2          // Q2 של שנת QT = יול/אוג/ספט
+inCyc4Q2    = yearInCyc == 1         // השנה השנייה במחזור ה-4 הקלנדרי (2024, 2028)
+// מחיר הפתיחה של השנה = תחילת האביב, 1 באפריל — תחילת שנת QT (ספר החוקים §9)
+inYearlyQ2  = qtQtrNum == 1
 inQtrQ2     = qSubIdx == 1           // רבע-הרבעון השני בתוך הרבעון — ה-True Open היומי
 inMonthlyQ2 = qtWeekNum == 2
 inWeeklyQ2  = tdDow == dayofweek.tuesday

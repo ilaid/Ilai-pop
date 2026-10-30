@@ -5,7 +5,8 @@ indicator("Sav FX - Dynamic P&D + Devil Marks", overlay = true, max_boxes_count 
 //  PART A — True Opens  (Quarterly Theory ladder) + Bias + zone box
 //  Every time here is New York. The whole model runs on an 18:00-to-18:00
 //  trading day, and every level is the open of the SECOND sub-cycle inside
-//  its container — except TYO / T4YO, which mark their period's own start.
+//  its container — except TYO, which marks the QT year's own start (April).
+//  T4YO is the second year of the calendar 4 year cycle (2024, 2028).
 //  A level lives only as long as its container: when the container closes
 //  the line disappears until the next container prints its own open.
 // ══════════════════════════════════════════════════════════════════════════
@@ -28,7 +29,7 @@ useTDO  = input.bool(true, "TDO    - 2nd session in the day",          group = g
 useTWO  = input.bool(true, "TWO   - 2nd day in the week",              group = gLv, tooltip = "Monday 18:00. Shown from the 5 minute to the daily chart.")
 useTMO  = input.bool(true, "TMO   - 2nd week in the month",            group = gLv, tooltip = "The Sunday 18:00 that opens the week whose Tuesday falls on the 8th-14th. Shown from the 15 minute chart up.")
 useTYO  = input.bool(true, "TYO    - QT year open (1 April)",          group = gLv, tooltip = "Daily chart and above.")
-useT4YO = input.bool(true, "T4YO  - 4 year cycle open (2023, 2027)",   group = gLv, tooltip = "Daily chart and above.")
+useT4YO = input.bool(true, "T4YO  - 2nd year in the 4 year cycle (2024, 2028)", group = gLv, tooltip = "The cycle is calendar years 2023–2026, 2027–2030. Its True Open is the first candle of the second year. During the first year there is no T4YO. Daily chart and above.")
 
 IsSession(sess, timezone) =>
     not na(time(timeframe.period, sess, timezone))
@@ -106,8 +107,11 @@ int tgtTMO = timestamp(TZ, year(wk2SunNoon, TZ), month(wk2SunNoon, TZ), dayofmon
 // ---------- QT year and the 4 year cycle ----------
 int qtYear = tdM >= 4 ? tdY : tdY - 1
 int tgtTYO = timestamp(TZ, qtYear, 3, 31, 18, 0, 0)   // 1 April opens at 31 March 18:00
-int cycStart = qtYear - (((qtYear - 2023) % 4) + 4) % 4
-int tgtT4YO = timestamp(TZ, cycStart, 3, 31, 18, 0, 0)
+// The 4 year cycle is calendar years from 2023 (2023–2026, 2027–2030), and
+// like every other level its True Open is the SECOND sub-cycle: the opening
+// of the cycle's second year. 1 January opens at 31 December 18:00.
+int cycStart = tdY - (((tdY - 2023) % 4) + 4) % 4
+int tgtT4YO = timestamp(TZ, cycStart, 12, 31, 18, 0, 0)
 
 // ---------- Hit test ----------
 // THE candle that OPENS the level: the first one starting at or after the
