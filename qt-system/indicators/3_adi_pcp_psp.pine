@@ -1,0 +1,1655 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0
+// © Ilai - Asset Divergence Detector (PCP / PSP) v5.33
+// Pine Script V5
+//
+// v5.33 — 1H and 4H are never muted; only their container ends them.
+//  v5.30 drew a Friday PSP on 1H, and a 4H PSP on a Friday, in a dead week or
+//  in week 1, as a plain dot and kept it out of the line. That was wrong for
+//  how these are traded: a PSP on either timeframe is an ordinary PSP, alive
+//  until it is taken or its container ends — the week on 1H, the month on 4H.
+//  Daily and weekly keep their muting unchanged.
+//
+// v5.32 — YM counts on the 1m chart too, under the strength rule only.
+//  It was switched off on 1m altogether. It now takes part exactly as on 5m
+//  and 15m: YM up while ES and/or NQ are down is a divergence. Weakness stays
+//  daily-and-above, so on 1m it cannot fire. The chart's own engine already
+//  read YM on 1m; this brings the markers in line with it.
+//
+// v5.31 — the 5m/15m box names who is STILL HOLDING the swing, and only that.
+//  The box read the PSP off the last closed bar and never looked again, so
+//  once a wick took the swing candle's extreme it went on announcing a PSP
+//  that, on the chart you were looking at, was already gone. Its names were
+//  the assets that had diverged, not the ones still defending.
+//  Each request now also reports, per asset, whether the swing candle's
+//  extreme has been crossed since — by the confirming bar or by the one still
+//  forming — and the box applies the line's own rule: names are the assets
+//  still defending, NQ and ES decide, YM never does. A PSP nobody is holding
+//  any more is not shown. Free: the two flags ride inside the number that
+//  already carried the swing (+4 high taken, +8 low taken). Still 138 series.
+//
+// v5.30 — Quarterly Theory decides how long a PSP lives and whether it counts.
+//  Every timeframe compares the quarters of a larger cycle — its container —
+//  and when the container rolls, everything resets. So a break now carries
+//  the container it was born in and dies when that container ends, taken or
+//  not: 1m a 90-minute micro, 5m a 6-hour session, 15m a trading day, 1H a
+//  week, 4H a month (a week belongs to its Tuesday's month), 1D a QT quarter,
+//  1W a QT year (April to March). New York time, the day opening at 18:00.
+//  A PSP born where its timeframe cannot carry a break — Friday on 1H and 4H,
+//  a dead week on 4H, and the first quarter of a container that has no seed
+//  (4H week 1, the first quarter-of-quarter on 1D, April–June on 1W) — never
+//  enters the line and is drawn as a plain dot instead of a marker. The dot
+//  stays until it is taken or its container ends; it never becomes a PSP.
+//  Cost: none. The clock each request carried, time_close[1], becomes time[2]
+//  — the swing candle's own open, which moves exactly when the old clock did
+//  and is also the birth time the container is read from. Still 138 series.
+//  Also: one list of shapes, and a PSP on another asset now has exactly the
+//  same shape as one on the chart's own — only the fade tells them apart.
+//  The debug panel gains a row with the birth date of each timeframe's break
+//  on display, so "which candle is this?" is one screenshot.
+//
+// v5.29 — the marker sits where you tell it to, not where yloc decides.
+//  yloc.abovebar leaves a gap that grows with the label's size, so making the
+//  markers readable in v5.28 pushed them away from the candles. The label is
+//  priced now — high[1] plus a gap, low[1] minus it — and the gap is an input
+//  measured as a percentage of ATR, which means the same spacing on NQ as on
+//  YM and on a 5m chart as on a weekly one. 0 puts it on the wick itself.
+//
+// v5.28 — the marker has a size and a shape you choose.
+//  Moving to labels in v5.25 left the glyph and the size hard-coded, and
+//  size.tiny on a label is smaller than the same name was on a plotchar.
+//  Two inputs now: five sizes, and five shapes — full triangle, the small
+//  triangle this had, circle, diamond, or two characters you type yourself.
+//  Filled still means the swing was on the chart's own asset and hollow means
+//  it was on another, so the one thing the marker always told you survives
+//  every shape. Drawing only; nothing here decides anything.
+//
+// v5.27 — one engine per timeframe, so "1H" says the same thing everywhere.
+//  On a 5m chart the 1H entry came from the stepped engine. On a 1H chart
+//  3600 > 3600 is false, so that entry was hidden and the chart's own engine
+//  took its place under the same "1H" label — a different engine, built from
+//  a different series over a different history. Two answers for one
+//  timeframe, and which one you got depended on where you were standing.
+//  The listed timeframes now come from the stepped engine whenever they are
+//  at or above the chart, and the chart's own entry appears only when it is
+//  not already one of them. Requesting a timeframe equal to the chart's is
+//  safe in a way requesting a lower one is not: one sample per chart bar is
+//  exactly one bar of that timeframe, nothing is skipped.
+//  Nothing in the detection changed. This is which of two existing answers
+//  the line shows.
+//
+// v5.26 — who decides that a marker is taken is now a setting.
+//  v5.25 handed the markers the breaks line's rule: NQ and ES both have to
+//  cross before anything is erased. On a chart that is one of them, that rule
+//  keeps markers you can see were traded through — your eyes are on NQ, the
+//  marker is waiting on ES as well.
+//  A marker is a chart object sitting on a candle in front of you, so the
+//  default is now the simple thing: once THIS chart has traded through that
+//  candle's own extreme, the marker goes. The stricter rules are still there
+//  for anyone who wants the markers and the line to say the same thing.
+//  Only the erasing changed. Which candles get marked in the first place is
+//  the same code it was.
+//
+// v5.25 — a marker whose candle was taken is erased from the chart.
+//  plotchar cannot do this. Its value for a historical bar is frozen the
+//  moment that bar is processed, and "taken later" is future information
+//  there. The four PSP markers become labels, which can be deleted, and each
+//  one carries the same Brk the breaks line uses — the swing candle's extreme
+//  on each asset — so it is judged by exactly the same rule: NQ and ES decide,
+//  YM never does, a level erased as it falls.
+//  What this costs, and it is not nothing: Pine allows at most 500 label
+//  objects, so markers are only drawn over a window of recent bars, 200 by
+//  default. Older history shows nothing at all. That is the trade for being
+//  able to erase, and the window is an input.
+//  The ◦ pending dots stay plotchar — they only ever sit on the unfinished bar
+//  and clear themselves when it closes, so they never need deleting.
+//
+// v5.24 — the ◦ carries its own timeframe, "◦4H".
+//  Giving it a cell of its own fixed the colour and broke the reading: in
+//  "1W ▲ NQ ES ◦ 1D ▼ ALL ◦" there is nothing to say whether a ◦ belongs to
+//  the entry before it or the one after. Two characters settle it.
+//
+// v5.23 — the ◦ gets a cell of its own, so it can be its own colour.
+//  A standing break and a candle waiting on its swing verdict are two
+//  unrelated things, and v5.18 put them in one cell. A Pine table cell carries
+//  a single text colour, so the ◦ came out red beside a bearish break and read
+//  as part of it — the exact confusion it was added to prevent.
+//  It is now a separate cell, always in the pending colour, whatever the break
+//  beside it is doing. The line goes to twelve columns to make room; columns
+//  cost nothing and empty ones render as nothing.
+//
+// v5.22 — the pending ◦ is black, not washed-out grey.
+//  #9e9e9e at 25% transparency all but disappeared on a light chart. Black
+//  and opaque by default; it is an input, so a dark theme wants it changed.
+//  One thing it cannot fix: a ◦ riding next to a LIVE break shares that
+//  break's cell, and a Pine table cell carries a single text colour, so there
+//  it comes out in the break's colour. Splitting it into a cell of its own
+//  would cost a column in the line.
+//
+// v5.21 — every asset defends the candle, and NQ+ES decide:
+//  The real fault was upstream of the majority rule. A level was stored only
+//  for an asset that MADE the swing, so a break born off a YM swing alone had
+//  no level on NQ or ES at all — and an asset with no level can never take
+//  anything. NQ and ES could be long past that candle and the break lived on,
+//  not because they were holding it, but because nobody was watching them.
+//  The swing now decides only WHICH CANDLE and WHICH DIRECTION. After that
+//  every enabled asset defends that candle's own extreme on its own chart,
+//  and the break dies once NQ and ES have both taken it. YM is tracked and
+//  named in the line, and never decides — unless NQ and ES are both switched
+//  off, where there is nobody else to ask.
+//  Making no swing there means nothing either way: an asset that never swung
+//  but has not crossed that candle's extreme is still defending it, and that
+//  is exactly why the hourly YM-only PSP stays valid while the other two have
+//  not gone past. Only an actual crossing counts.
+//  hi2 and lo2 are already fetched for all three assets, so this costs no
+//  extra request.security. Still 138 series across 21 calls.
+//  The "YM alone" special case is gone with it — it existed only because a
+//  YM-born break had no other level to count.
+//
+// v5.20 — a majority decides, and the line names who is still defending:
+//  v5.17 let a break live while ANY asset that made it still held its level.
+//  That fixed YM killing breaks on its own and created the mirror fault: the
+//  Dow often has nothing to do with the other two, so its swing survives while
+//  both of theirs are taken, and the break rides on YM alone.
+//  A break now dies once a MAJORITY of the levels it was born with is gone,
+//  and never rides on YM alone — unless YM was the only asset that ever held a
+//  level for it, in which case there is no majority to speak of.
+//  The names in the line change meaning with it: they used to say who made the
+//  divergence, fixed at birth. They now say who is STILL DEFENDING, so
+//  "4H ▼ NQ ES" becomes "4H ▼ ES" the moment NQ's level is taken, and you can
+//  read what is holding the break up without opening anything.
+//  Note what that costs: a level is only stored for an asset that made the
+//  SWING, not for every asset that diverged, so the list is shorter than the
+//  old one by design. It is the honest answer to "what is keeping this alive".
+//
+// v5.19 — YM weakness moves up to daily and above.
+//  It was 4H and above. 4H now joins 1H in never carrying it, so the rule
+//  lives on 1D and 1W only, and on the chart's own bars only when the chart
+//  is daily or higher.
+//
+// v5.18 — two things that were both "it is not showing what I can see":
+//
+//  1. A break was only ever tested against the last CLOSED bar of its
+//     timeframe. On a 4H chart that means you watch price blow through a
+//     swing high and the engine keeps the break alive for up to four hours.
+//     A level is taken the moment price reaches it, closed bar or not.
+//     This costs NO extra request.security: the running high and low of the
+//     bar still forming can be accumulated from the CHART's own bars, which
+//     are already fetched for all three assets. The accumulator resets when
+//     that timeframe's clock rolls, so it always covers exactly the bar in
+//     progress. Still 138 series across 21 calls.
+//     Wick-based only — with the close rule an unfinished bar has no close
+//     to test, so that setting keeps the old behaviour untouched.
+//
+//  2. The early warning was in the code and unreachable. f_rec read
+//     "live ? break : pending ? ◦ : nothing", so the grey ◦ — a bar that
+//     closed with a divergence and is waiting on its swing verdict — could
+//     only ever appear on a timeframe with NO standing break. Exactly the
+//     timeframes you watch always have one. The ◦ now rides alongside a live
+//     break instead of being hidden by it.
+//
+// v5.17 — one asset could kill a break the others were still holding:
+//  The invalidation test was an OR across the three levels, so whichever asset
+//  took its own level first killed the whole break. In practice that asset was
+//  usually YM — the smallest and noisiest of the three — wiping out bearish
+//  breaks whose swing highs NQ and ES had never gone near. That is why the
+//  line kept falling back to an older bullish break: the newer bearish ones
+//  were being removed by YM alone.
+//  A break now survives while ANY asset that made it still defends its level.
+//  The level each asset took is erased as it is taken, and the break dies only
+//  when the last one is gone — which also fixes the half of this that an OR
+//  could never express: the test only ever sees the bar that just closed, so a
+//  level taken last week and another taken today would never have been true at
+//  the same moment. Erasing them as they fall is what accumulates.
+//  One input to go back to the old reading, off by default.
+//
+// v5.16 — the debug panel shows the stacks themselves:
+//  "the line says up when there have been three downs" has two possible
+//  causes that look identical from outside: the bearish breaks were never
+//  recorded, or they were recorded and their swing highs were taken, leaving
+//  an older bullish one as the newest survivor. Guessing between them is how
+//  the last three rounds of this file went wrong, so the panel now prints
+//  each timeframe's stack as arrows, newest first. One screenshot settles it.
+//
+// v5.15 — a wick through the level kills the break:
+//  The switch was already there and defaulted to the other reading: only a
+//  CLOSE beyond the swing level counted, so a bar that pierced the level and
+//  came back left the break standing. The level is the thing being defended,
+//  and touching it is taking it. Default flipped; the old behaviour is one
+//  checkbox away.
+//
+// v5.14 — a timeframe remembers more than one break:
+//  Each timeframe held exactly ONE break, and a new PSP overwrote it. So a
+//  fresh PSP that got taken straight away wiped out an older one whose level
+//  had never been touched, and the timeframe went blank — or worse, showed a
+//  direction that no longer matched anything on the chart.
+//  Each timeframe now keeps a small stack of breaks, newest first. Every close
+//  tests EVERY stored break against its own level and its own direction, and
+//  drops the ones that were taken; the one on display is simply the newest
+//  survivor. Take out the new one and the previous one comes back, exactly as
+//  long as it is still untaken. Depth is an input, default 5.
+//  The levels moved into the stacked break where they belong — one break, one
+//  set of levels — so the separate Lv type is gone.
+//
+// v5.13 — a hue for YM weakness, because dimness is already spoken for:
+//  v5.12 drew it in the same colour, faded. That collides: a faded marker
+//  already means "the swing was on another asset, not the one on your chart",
+//  so two different things would have arrived as the same visual signal and
+//  a faded-and-hollow marker would have been unreadable. Weakness goes back to
+//  its own colour, amber by default — hue says WHICH RULE fired, dimness still
+//  says WHERE the swing was, and the two stay independent.
+//  The "↑"/"↓" tags from v5.11 do not come back; the colour is enough and the
+//  line stays short.
+//
+//  Worth stating since it is the other half of the question: YM weakness never
+//  overrides a normal divergence. It is tested only after ES-vs-NQ and YM
+//  strength have both come up empty, so a bar where ES and NQ already disagree
+//  is an ordinary break in ordinary colours, whatever YM did on it.
+//
+// v5.11 — YM weakness is a category at all: YM DOWN while the others are up,
+//  tested only after ES-vs-NQ and YM strength both come up empty. It was 4H
+//  and above when introduced; v5.19 moved it to daily and above.
+// v5.10 — the breaks line is 1H and above, full stop; the chart's own
+//  timeframe joins it only when the chart is 1H or higher.
+// v5.9 — the 5m/15m heads-up gets a box of its own, PCP included, plus a real
+//  alert(). NOTE: alert() delivers nothing until an alert is created on the
+//  indicator in TradingView with the condition "Any alert() function call".
+// v5.8 — CME futures default to the SETTLEMENT price as the daily close and a
+//  chart's per-symbol override never reaches request.security, so the script
+//  was reading a different candle than the one on screen. ticker.modify fixes
+//  it; the setting defaults to OFF, matching a chart with the box unticked.
+// v5.6 — each timeframe's clock rides INSIDE its request tuple. Timing it from
+//  the built-in time_close(tf) desynchronises it from the data it times.
+// v5.5 — "Memory limits exceeded" is a LOAD-time failure that compiles clean.
+//  Every tuple element of every request.security is a full series held over
+//  the chart's history, and the budget is shared with every other indicator on
+//  the chart. 210 series failed; this file holds 138 across 21 calls by
+//  reducing direction and swing INSIDE each request. Keep the tuples small.
+// v5.4..v5.0 — the chart's own timeframe needs no request at all; the line
+//  lists every standing break side by side; "live" is a flag of its own so dir
+//  and who survive an invalidation.
+// v4.x — YM strength rule; swings detected on every included asset (solid
+//  marker = swing on the chart symbol, hollow = on another asset only);
+//  pending dot; weekly as a full category; three input.symbol fields.
+
+//@version=5
+indicator("Asset Divergence | PCP & PSP v5", shorttitle="ADI v5",
+     overlay          = true,
+     max_bars_back    = 5000,
+     max_labels_count = 500)
+
+// ══════════════════════════════════════════════════════════════
+//  INPUTS
+//  Hebrew labels. Every option string below is also compared in code —
+//  translating one without the other silently breaks the setting.
+// ══════════════════════════════════════════════════════════════
+
+grp_mode   = "═══  זיהוי  ═══"
+i_ignore_doji = input.bool(false, title="התעלם מדוג'י (סגירה = פתיחה)",
+     tooltip="כבוי (ברירת מחדל): דוג'י נחשב כיוון שונה ויכול ליצור PCP.\nדלוק: דוג'י ניטרלי ולעולם לא יוצר PCP.",
+     group=grp_mode)
+
+grp_assets = "═══  נכסים  ═══"
+i_sym_nq   = input.symbol("NQ1!", title="סימבול NQ", group=grp_assets,
+     tooltip="למעבר למיקרו — החלף את שלושת השדות ל-MNQ1! / MES1! / MYM1!\nחשוב לשמור על שלושתם מאותה משפחת חוזים; ערבוב גדלי טיק מעוות את ההשוואה.")
+i_sym_es   = input.symbol("ES1!", title="סימבול ES", group=grp_assets)
+i_sym_ym   = input.symbol("YM1!", title="סימבול YM", group=grp_assets)
+i_use_nq   = input.bool(true,  title="כלול NQ", group=grp_assets)
+i_use_es   = input.bool(true,  title="כלול ES", group=grp_assets)
+i_use_ym   = input.bool(true,  title="כלול YM",
+     tooltip="חוזקה: YM נסגר בעלייה בזמן ש-ES ו/או NQ נסגרים בירידה.",
+     group=grp_assets)
+i_ym_weak  = input.bool(true, title="כלול גם חולשת YM (יומי ומעלה)",
+     tooltip="YM נסגר בירידה בזמן ש-ES ו-NQ נסגרים בעלייה. מצויר בצבע נפרד.\nנספר רק כשאין כבר דיברגנס אחר — אם ES ו-NQ חלוקים ביניהם, זו שבירה רגילה בצבע רגיל, גם אם YM ירד.\nפעיל רק על נרות יומיים ומעלה; מתחת לזה חולשה של מדד בודד היא רעש.",
+     group=grp_assets)
+i_settle   = input.string("כבוי — כמו הגרף", title="Settlement כסגירה יומית",
+     options=["כבוי — כמו הגרף", "דלוק", "ברירת המחדל של הסימבול"],
+     tooltip="בחוזי CME ברירת המחדל היא שהסגירה היומית היא מחיר הסילוק, לא הסגירה הרגילה.\nהגדרת הגרף שלך לא עוברת ל-request.security, ולכן בלי זה הסקריפט קורא נר אחר ממה שאתה רואה.\nהשאר על 'כבוי' אם ההגדרה בגרף לא מסומנת.",
+     group=grp_assets)
+
+grp_tf     = "═══  מסגרת הגרף  ═══"
+i_tf_1m    = input.bool(true,  title="1m",     group=grp_tf)
+i_tf_5m    = input.bool(true,  title="5m",     group=grp_tf)
+i_tf_15m   = input.bool(true,  title="15m",    group=grp_tf)
+i_tf_1h    = input.bool(true,  title="1H",     group=grp_tf)
+i_tf_4h    = input.bool(true,  title="4H",     group=grp_tf)
+i_tf_1d    = input.bool(true,  title="יומי",   group=grp_tf)
+i_tf_1w    = input.bool(true,  title="שבועי",  group=grp_tf)
+
+grp_col    = "═══  סימונים וצבעים  ═══"
+i_col_bull = input.color(color.new(#00e5ff, 0), title="אות שורי", group=grp_col)
+i_col_bear = input.color(color.new(#ff1744, 0), title="אות דובי", group=grp_col)
+i_col_weak = input.color(color.new(#ff9100, 0), title="אות חולשת YM",
+     tooltip="צבע נפרד, לא עמעום — עמעום כבר תפוס לסימון שהסווינג קרה בנכס אחר.\nכל סימון בצבע הזה הגיע מחולשת YM ולא מדיברגנס רגיל.",
+     group=grp_col)
+i_ext_transp = input.int(45, title="עמעום סימון של נכס אחר", minval=0, maxval=90,
+     tooltip="כשהסווינג קרה בנכס אחר ולא בסימבול שעל הגרף, הסימון יוצא באותה צורה בדיוק — רק שקוף יותר. זה המספר.",
+     group=grp_col)
+i_show_pending = input.bool(true, title="הצג סימון PCP ממתין (•)",
+     tooltip="נר PCP מוכרע רק כשהנר שאחריו נסגר. עד אז הוא מסומן בנקודה עמומה.",
+     group=grp_col)
+i_col_pend = input.color(color.new(#000000, 0), title="צבע PCP ממתין",
+     tooltip="צובע את ה-◦ בשורה וגם את הנקודות על הנרות.\nשחור ואטום כברירת מחדל, כי אפור שקוף נבלע בגרף בהיר. על ערכת נושא כהה תחליף לבן.\nכש-◦ מופיע לצד שבירה חיה הוא יוצא בצבע של השבירה — תא בטבלה נושא צבע טקסט אחד.",
+     group=grp_col)
+i_mark_sz = input.string("רגיל", title="גודל הסימון",
+     options=["זעיר", "קטן", "רגיל", "גדול", "ענק"],
+     tooltip="\"זעיר\" הוא מה שהיה עד עכשיו — על label זה יוצא קטן יותר מאותו שם על plotchar, ולכן הסימונים נראו זעירים.",
+     group=grp_col)
+i_mark_gl = input.string("משולש גדול ▲", title="צורת הסימון",
+     options=["משולש גדול ▲", "משולש קטן ▴", "עיגול ●", "נקודה •", "ריבוע ■", "יהלום ◆", "חץ ⬇", "כוכב ★", "איקס ✕", "טקסט משלי"],
+     tooltip="אותה צורה לסווינג בנכס שעל הגרף ולסווינג בנכס אחר — ההבדל היחיד הוא העמעום.\nמשולשים: ▲ מעל נר דובי, ▼ מתחת לנר שורי. חץ: מצביע אל הנר.\nהגודל נקבע בנפרד.",
+     group=grp_col)
+i_mark_tx_bear = input.string("▲", title="טקסט משלי — דובי (מעל הנר)", group=grp_col)
+i_mark_tx_bull = input.string("▼", title="טקסט משלי — שורי (מתחת לנר)", group=grp_col)
+i_mark_gap = input.int(15, title="מרחק הסימון מהנר (% מ-ATR)", minval=0, maxval=300,
+     tooltip="נמדד כאחוז מה-ATR ולא בנקודות, כדי שאותו מספר ייתן אותו מרווח על כל נכס ועל כל מסגרת זמן.\n0 = הסימון יושב על הפתיל עצמו. הגדלת הסימון כבר לא מרחיקה אותו מהנר.",
+     group=grp_col)
+i_mark_erase = input.bool(true, title="מחק סימון שנלקח מהנרות",
+     tooltip="כשהנר שמתחת לסימון נלקח — באותו כלל של השורה: NQ וגם ES חצו את הקצה שלו — הסימון נמחק מהמסך ולא נשאר שם.\nכבוי: הסימונים נשארים עד שהם יוצאים מחלון הסימון.",
+     group=grp_col)
+i_mark_rule = input.string("הנכס של הגרף", title="מתי סימון נחשב נלקח",
+     options=["הנכס של הגרף", "NQ וגם ES", "כל שלושת הנכסים"],
+     tooltip="הנכס של הגרף: ברגע שהגרף שאתה עליו עבר את הקצה של אותו נר. זה מה שהעין רואה, וזה המהיר ביותר.\nNQ וגם ES: בדיוק החוק של השורה בצד — שניהם צריכים לעבור, YM לא מכריע.\nכל שלושת הנכסים: גם YM צריך לעבור. הכי שמרני, הסימונים נשארים הכי הרבה זמן.",
+     group=grp_col)
+i_mark_keep = input.int(200, title="חלון סימון (נרות אחורה)", minval=20, maxval=450,
+     tooltip="פיין מרשה 500 אובייקטים בלבד, ולכן הסימונים מצוירים רק על החלון האחרון. היסטוריה ישנה יותר לא תסומן בכלל.\nזה המחיר של האפשרות למחוק סימון שנלקח.",
+     group=grp_col)
+i_show_pcp_bars = input.bool(false, title="צבע את כל נרות ה-PCP", group=grp_col)
+i_col_pcp  = input.color(color.new(#ffd54f, 80), title="גוון נרות PCP", group=grp_col)
+
+grp_mtf    = "═══  מסגרות זמן גבוהות  ═══"
+i_mtf_on   = input.bool(true, title="הצג שורת שבירות",
+     tooltip="שורה אחת בפינה: השבירה העומדת בכל מסגרת.\nלידה מופיע ◦ עם שם המסגרת — למשל ◦4H — שאומר שנר חדש באותה מסגרת נסגר עם דיברגנס ומחכה לסגירה הבאה כדי לדעת אם הוא סווינג. זה לא קשור לשבירה שלידו.\nמוצגות רק מסגרות גבוהות ממסגרת הגרף.",
+     group=grp_mtf)
+i_mtf_v    = input.string("למטה", title="גובה השורה",
+     options=["למעלה", "באמצע", "למטה"], group=grp_mtf)
+i_mtf_h    = input.string("שמאל", title="צד השורה",
+     options=["שמאל", "מרכז", "ימין"], group=grp_mtf)
+i_mtf_pad  = input.int(0, title="הרחקת השורה מהקצה (שורות)", minval=0, maxval=12,
+     tooltip="מוסיף שורות ריקות בין השורה לקצה הגרף, כדי להרים אותה מעל שורה של אינדיקטור אחר שיושב באותה פינה.",
+     group=grp_mtf)
+i_depth    = input.int(5, title="כמה שבירות לזכור לכל מסגרת", minval=1, maxval=10,
+     tooltip="שבירה חדשה לא מוחקת את הקודמת. אם החדשה נלקחת, חוזרים להצגת הקודמת — כל עוד הרמה שלה עצמה לא נלקחה.\nהמספר הוא כמה אחורה לשמור.",
+     group=grp_mtf)
+i_kill_all = input.bool(true, title="ביטול לפי NQ ו-ES (YM לא מכריע)",
+     tooltip="דלוק (ברירת מחדל): הסווינג קובע איזה נר ואיזה כיוון, ואז כל נכס מגן על הקצה של אותו נר אצלו — גם נכס שלא עשה שם סווינג. השבירה מתה כש-NQ וגם ES חצו אותו. YM נמדד ומוצג אבל לא מכריע.\nכבוי: מספיק שנכס אחד חוצה את הרמה שלו כדי לבטל.\nהשמות בשורה מראים מי עדיין מגן.",
+     group=grp_mtf)
+i_qt_on    = input.bool(true, title="Quarterly Theory — תפוגה ומשמעות",
+     tooltip="דלוק: שבירה מתה כשהמיכל שלה נגמר, גם אם לא נלקחה — 1m: מיקרו 90 דק׳, 5m: סשן, 15m: יום מסחר, 1H: שבוע, 4H: חודש, יומי: רבעון QT, שבועי: שנת QT.\nב-1H וב-4H כל PSP הוא רגיל — כולל שישי, שבוע 1 ושבוע מת — וחי עד שנלקח או עד שהשבוע / החודש נגמר.\nרק ביומי (רבע-הרבעון הראשון) ובשבועי (אפריל–יוני) PSP לא נכנס לשורה ומסומן בנקודה בלבד.\nשעון ניו יורק, היום מתחיל ב-18:00. מסגרות אחרות (2H, 6H...) לא מושפעות.",
+     group=grp_mtf)
+i_inv_wick = input.bool(true, title="בטל שבירה לפי פתיל",
+     tooltip="דלוק (ברירת מחדל): מספיק שפתיל חוצה את רמת הסווינג כדי שהשבירה תפסיק להיחשב.\nכבוי: רק נר שנסגר מעבר לרמה מבטל, ופתיל שחורג וחוזר לא סופר.",
+     group=grp_mtf)
+i_pnl_on   = input.bool(false, title="הצג פאנל מסגרות",
+     tooltip="תצוגה מלאה: שורה לכל מסגרת עם השבירה החיה שלה. משלימה את השורה, שמראה רק את האחרונה.",
+     group=grp_mtf)
+i_pnl_v    = input.string("למטה", title="גובה הפאנל",
+     options=["למעלה", "באמצע", "למטה"], group=grp_mtf)
+i_pnl_h    = input.string("ימין", title="צד הפאנל",
+     options=["שמאל", "מרכז", "ימין"], group=grp_mtf)
+i_pnl_pad  = input.int(0, title="הרחקת הפאנל מהקצה (שורות)", minval=0, maxval=12, group=grp_mtf)
+i_col_neut = input.color(color.new(#ffffff, 15), title="צבע טקסט נייטרלי", group=grp_mtf)
+i_mtf_alert = input.bool(true, title="התראה על שבירה חדשה ועל ביטול", group=grp_mtf)
+i_debug    = input.bool(false, title="הצג ערכי בדיקה (בפאנל)",
+     tooltip="מוסיף לפאנל את הפתיחה והסגירה שהסקריפט קרא לכל נכס, את הכיוון שנגזר מהן, ואת שורת stk.\nstk = כל השבירות שכל מסגרת עדיין מחזיקה, חץ לכל שבירה, החדשה משמאל. '—' = ריק.\nצריך להדליק גם את הפאנל.",
+     group=grp_mtf)
+
+grp_fast   = "═══  התרעה מהירה 5m / 15m  ═══"
+i_fast_on  = input.bool(true, title="הצג התרעת 5m / 15m",
+     tooltip="תיבה נפרדת משלה, לא שורת השבירות. מופיעה בכל גרף חוץ ממסגרת ההתרעה עצמה — 5 דקות לא תוצג על גרף 5 דקות, 15 דקות לא על גרף 15 דקות.\nנעלמת מעצמה בסגירת הנר הבא של אותה מסגרת.",
+     group=grp_fast)
+i_fast_pcp = input.bool(true, title="כלול גם PCP (דיברגנס בלי סווינג)",
+     tooltip="PSP מוצג בצבע עם ⚡, והשמות לידו הם הנכסים שעוד לא חצו את הקצה של נר הסווינג — כמו בשורה. PSP שאף אחד כבר לא מחזיק לא מוצג.\nPCP מוצג באפור עם ◦, ומופיע נר אחד מוקדם יותר כי הוא לא מחכה לסווינג.\nPCP הרבה יותר שכיח — כבה את זה אם זה מרעיש.",
+     group=grp_fast)
+i_fast_v   = input.string("למעלה", title="גובה ההתרעה",
+     options=["למעלה", "באמצע", "למטה"], group=grp_fast)
+i_fast_h   = input.string("ימין", title="צד ההתרעה",
+     options=["שמאל", "מרכז", "ימין"], group=grp_fast)
+i_fast_pad = input.int(0, title="הרחקת ההתרעה מהקצה (שורות)", minval=0, maxval=12, group=grp_fast)
+i_fast_sz  = input.string("גדול", title="גודל הטקסט",
+     options=["קטן", "רגיל", "גדול", "ענק"], group=grp_fast)
+i_fast_bg  = input.bool(true, title="רקע מודגש", group=grp_fast)
+i_fast_idle = input.bool(true, title="החזק את התיבה גם כשאין אות",
+     tooltip="מציג \"15m —\" ו-\"5m —\" באפור כשאין כלום, כדי שאפשר יהיה לראות שהתיבה חיה ואיפה היא יושבת.\nכבה את זה אחרי שווידאת.",
+     group=grp_fast)
+i_fast_alert = input.bool(true, title="התראה (alert) על PSP מהיר",
+     tooltip="שולח alert של TradingView כשנוצר PSP מהיר, כדי שאפשר יהיה לקבל התראה לנייד.\nלכל היותר אחת לנר של הגרף — על גרף שעתי זו אחת לשעה.",
+     group=grp_fast)
+
+// ══════════════════════════════════════════════════════════════
+//  TIMEFRAME GATE  (chart drawing only — the corner line is independent)
+// ══════════════════════════════════════════════════════════════
+
+tf_str = timeframe.period
+
+is_1m  = tf_str == "1"
+is_5m  = tf_str == "5"
+is_15m = tf_str == "15"
+is_1h  = tf_str == "60"
+is_4h  = tf_str == "240"
+is_1d  = tf_str == "D"
+is_1w  = tf_str == "W"
+
+// Which Quarterly Theory ladder the chart's own bars sit on. 0 = none, and a
+// timeframe with no ladder simply never expires and is never muted.
+chKind = is_1m ? 1 : is_5m ? 2 : is_15m ? 3 : is_1h ? 4 : is_4h ? 5 : is_1d ? 6 : is_1w ? 7 : 0
+
+// chartSec lives here rather than down beside the line, because the weakness
+// rule needs it before the detection below.
+chartSec = timeframe.in_seconds(timeframe.period)
+
+// YM weakness is a DAILY-and-above rule. On the chart's own bars that means
+// the chart itself has to be 1D or higher; the stepped 1D/1W engines carry it
+// whatever chart you are standing on, because it is a property of the candle,
+// not of where you are looking from.
+ymwTfOk = i_ym_weak and chartSec >= timeframe.in_seconds("D")
+
+tf_allowed = (is_1m  and i_tf_1m)  or
+             (is_5m  and i_tf_5m)  or
+             (is_15m and i_tf_15m) or
+             (is_1h  and i_tf_1h)  or
+             (is_4h  and i_tf_4h)  or
+             (is_1d  and i_tf_1d)  or
+             (is_1w  and i_tf_1w)
+
+// ══════════════════════════════════════════════════════════════
+//  CANDLE DIRECTION  (+1 Bull / -1 Bear / 0 Doji)
+// ══════════════════════════════════════════════════════════════
+
+f_dir(float o, float c) =>
+    c > o ? 1 : c < o ? -1 : 0
+
+// ══════════════════════════════════════════════════════════════
+//  CHART-TIMEFRAME FETCHES
+//  lookahead_off → proper backtest support for all timeframes
+//  gaps_off      → no na bars when the external symbol has no tick
+// ══════════════════════════════════════════════════════════════
+
+settleMode = i_settle == "דלוק" ? settlement_as_close.on : i_settle == "ברירת המחדל של הסימבול" ? settlement_as_close.inherit : settlement_as_close.off
+
+tk_nq = ticker.modify(i_sym_nq, settlement_as_close = settleMode)
+tk_es = ticker.modify(i_sym_es, settlement_as_close = settleMode)
+tk_ym = ticker.modify(i_sym_ym, settlement_as_close = settleMode)
+
+f_sec(simple string sym) =>
+    [o, h, l, c] = request.security(sym, timeframe.period,
+         [open, high, low, close],
+         lookahead = barmerge.lookahead_off,
+         gaps      = barmerge.gaps_off)
+    [o, h, l, c]
+
+[a_nq_o, a_nq_h, a_nq_l, a_nq_c] = f_sec(tk_nq)
+[a_es_o, a_es_h, a_es_l, a_es_c] = f_sec(tk_es)
+[a_ym_o, a_ym_h, a_ym_l, a_ym_c] = f_sec(tk_ym)
+
+nq_dir = f_dir(a_nq_o, a_nq_c)
+es_dir = f_dir(a_es_o, a_es_c)
+ym_dir = f_dir(a_ym_o, a_ym_c)
+
+// ══════════════════════════════════════════════════════════════
+//  PCP DETECTION
+//
+//  ES vs NQ : any direction mismatch is a divergence.
+//  YM up    : STRENGTH — YM closes UP while ES and/or NQ close DOWN.
+//  YM down  : WEAKNESS — YM closes DOWN while the others close UP. A separate
+//             category, DAILY and above only, and only when neither of the two
+//             rules above already fired: if ES and NQ are split, that split is
+//             the signal. Since they must agree for this to be reachable,
+//             "at least one of them up" means both of them up in practice.
+//  1m       : strength only — weakness is daily and above, so it never
+//             reaches a 1m bar.
+// ══════════════════════════════════════════════════════════════
+
+nq_ok = i_use_nq and (not i_ignore_doji or nq_dir != 0)
+es_ok = i_use_es and (not i_ignore_doji or es_dir != 0)
+ym_ok = i_use_ym and (not i_ignore_doji or ym_dir != 0)
+
+div_es_nq = nq_ok and es_ok and (nq_dir != es_dir)
+
+div_ym = ym_ok and ym_dir > 0 and
+         ((es_ok and es_dir < 0) or (nq_ok and nq_dir < 0))
+
+div_ymw = ymwTfOk and ym_ok and ym_dir < 0 and
+          ((es_ok and es_dir > 0) or (nq_ok and nq_dir > 0)) and
+          not div_es_nq and not div_ym
+
+is_pcp = div_es_nq or div_ym or div_ymw
+
+// ══════════════════════════════════════════════════════════════
+//  PSP DETECTION  — 3-Bar Swing, Zero Repaint, No Flicker
+//
+//  Timeline:   bar[2] ←  bar[1]  ← bar[0]
+//                       (SWING)    (confirms, current CLOSED bar)
+//
+//  The swing is checked on EVERY included asset, not only on the chart
+//  symbol, so a swing that happens on NQ while the chart shows ES is
+//  still marked — just faded, so it is never confused with a swing on the
+//  bars in front of you.
+// ══════════════════════════════════════════════════════════════
+
+f_sw_hi(float h) => h[1] > h[2] and h[1] > h[0]
+f_sw_lo(float l) => l[1] < l[2] and l[1] < l[0]
+
+own_hi = f_sw_hi(high)
+own_lo = f_sw_lo(low)
+
+ext_hi = (i_use_nq  and f_sw_hi(a_nq_h)) or
+         (i_use_es  and f_sw_hi(a_es_h)) or
+         ((div_ym[1] or div_ymw[1]) and f_sw_hi(a_ym_h))
+
+ext_lo = (i_use_nq  and f_sw_lo(a_nq_l)) or
+         (i_use_es  and f_sw_lo(a_es_l)) or
+         ((div_ym[1] or div_ymw[1]) and f_sw_lo(a_ym_l))
+
+confirmed = barstate.isconfirmed
+pcp_at_1  = is_pcp[1]          // immutable — bar[1] is fully closed
+
+psp_base     = tf_allowed and confirmed and pcp_at_1
+
+psp_bear_own = psp_base and own_hi
+psp_bear_ext = psp_base and ext_hi and not own_hi
+psp_bull_own = psp_base and own_lo
+psp_bull_ext = psp_base and ext_lo and not own_lo
+
+// ══════════════════════════════════════════════════════════════
+//  PSP MARKERS
+//  offset = -1 places the marker on bar[1] — the bar that was resolved.
+// ══════════════════════════════════════════════════════════════
+
+// plotchar takes a series colour, so the weakness signal needs no extra plots
+// — the same four markers simply come out amber when bar[1]'s divergence came
+// off YM weakness. Two axes that never interfere: the HUE says which rule
+// fired, the transparency says whether the swing was on the chart's own asset.
+wk1 = div_ymw[1]
+
+c_bear_own = wk1 ? i_col_weak : i_col_bear
+c_bull_own = wk1 ? i_col_weak : i_col_bull
+c_bear_ext = color.new(c_bear_own, i_ext_transp)
+c_bull_ext = color.new(c_bull_own, i_ext_transp)
+
+// The four PSP markers are drawn further down, as labels, because a marker
+// has to be removable once its candle is taken and plotchar is frozen the
+// moment its bar is processed. The colours are computed here because that is
+// where wk1 lives.
+
+// ── Pending: self-clearing, because a bar is undecided exactly while
+//    barstate.isconfirmed is false. Historical bars are always confirmed.
+pending = tf_allowed and i_show_pending and not confirmed
+
+plotchar(pending and is_pcp    ? 1 : na, title="PCP Pending — Live Bar",
+     char="•", location=location.abovebar, color=i_col_pend, size=size.tiny)
+
+plotchar(pending and is_pcp[1] ? 1 : na, title="PCP Pending — Previous Bar",
+     char="•", location=location.abovebar, color=i_col_pend,
+     offset=-1, size=size.tiny)
+
+barcolor(tf_allowed and i_show_pcp_bars and is_pcp ? i_col_pcp : na,
+     title="PCP Bar Tint")
+
+// ══════════════════════════════════════════════════════════════
+//  HIGHER TIMEFRAMES
+//
+//  request.security returns RAW NUMBERS only — never a UDT and never an
+//  array. Returning an object would make TradingView keep a copy per chart
+//  bar per timeframe and blow the memory limit ("Memory limits exceeded",
+//  which compiles cleanly and simply fails to load).
+//
+//  Every history offset is taken INSIDE the expression, so it is evaluated
+//  in that timeframe's own context and a bar only enters the calculation
+//  once it has closed. Zero repaint.
+//
+//  Index map in the requested timeframe's context:
+//      [1] = last CLOSED bar   confirms the swing of [2], carries the close
+//                              used for the "level taken" test, and is itself
+//                              the bar the grey pending state is read from
+//      [2] = the SWING bar
+//      [3] = the bar before it
+//
+//  The call count is fixed in the source (4 timeframes × 3 assets = 12,
+//  plus 3 for the chart timeframe) and never varies with the chart.
+//
+//  Limitation worth knowing: the state is built by stepping through the chart's
+//  own history, so a timeframe can only be tracked as far back as the chart
+//  reaches. A 1m chart holds days, not weeks, so 1W will rarely fire there.
+//  Watch the weekly and daily from a 15m chart or higher.
+// ══════════════════════════════════════════════════════════════
+
+// What a stepped timeframe needs, and nothing more. d1/d2 are directions
+// already reduced inside the request; swH/swL are the three-bar swing already
+// decided there. hi2/lo2 are the swing bar's extremes, which become the level
+// to defend. tkH/tkL are the bar that just closed, already reduced to the
+// one value each side of the "taken" test needs.
+type AB
+    float d1  = na
+    float d2  = na
+    bool  swH = false
+    bool  swL = false
+    float hi2 = na
+    float lo2 = na
+    float tkH = na
+    float tkL = na
+    float rnH = na    // the bar still FORMING, accumulated from chart bars
+    float rnL = na
+
+// The fast heads-up keeps no state. It needs the last closed bar's direction
+// (that alone decides a PCP), the swing bar's direction, the swing itself, and
+// whether the swing candle's extreme has been crossed since. The four flags
+// are packed into ONE number — +2 swing high, +1 swing low, +4 that high
+// taken, +8 that low taken — because every element of every request is a
+// full series held over the chart's history.
+type FB
+    float d1 = na
+    float d2 = na
+    float sw = na
+
+//  The clock rides INSIDE the tuple on purpose. Timing it from the built-in
+//  time_close(tf) instead desynchronises it from the data it is timing: the
+//  engine steps once per bar on the clock, so a clock that moves first makes
+//  that one step read stale values, and the state then sits wrong until the
+//  next bar. Here they can only move together.
+//  It is time[2], the SWING candle's own open: it moves exactly when a new bar
+//  opens, like time_close[1] did, and it is also the birth time the break's
+//  Quarterly Theory container is read from — one series doing both jobs.
+f_load(AB b, simple string sym, simple string tf) =>
+    [tc, d1, d2, swH, swL, hi2, lo2, tkH, tkL] = request.security(sym, tf,
+         [time[2],
+          close[1] > open[1] ? 1.0 : close[1] < open[1] ? -1.0 : na(close[1]) ? na : 0.0,
+          close[2] > open[2] ? 1.0 : close[2] < open[2] ? -1.0 : na(close[2]) ? na : 0.0,
+          high[2] > high[3] and high[2] > high[1],
+          low[2]  < low[3]  and low[2]  < low[1],
+          high[2], low[2],
+          i_inv_wick ? high[1] : close[1],
+          i_inv_wick ? low[1]  : close[1]],
+         lookahead = barmerge.lookahead_off,
+         gaps      = barmerge.gaps_off)
+    b.d1  := d1
+    b.d2  := d2
+    b.swH := swH
+    b.swL := swL
+    b.hi2 := hi2
+    b.lo2 := lo2
+    b.tkH := tkH
+    b.tkL := tkL
+    tc
+
+f_fast(FB b, simple string sym, simple string tf) =>
+    [d1, d2, sw] = request.security(sym, tf,
+         [close[1] > open[1] ? 1.0 : close[1] < open[1] ? -1.0 : na(close[1]) ? na : 0.0,
+          close[2] > open[2] ? 1.0 : close[2] < open[2] ? -1.0 : na(close[2]) ? na : 0.0,
+          (high[2] > high[3] and high[2] > high[1] ? 2.0 : 0.0) + (low[2] < low[3] and low[2] < low[1] ? 1.0 : 0.0) + (math.max(i_inv_wick ? high[1] : close[1], i_inv_wick ? high : close) > high[2] ? 4.0 : 0.0) + (math.min(i_inv_wick ? low[1] : close[1], i_inv_wick ? low : close) < low[2] ? 8.0 : 0.0)],
+         lookahead = barmerge.lookahead_off,
+         gaps      = barmerge.gaps_off)
+    b.d1 := d1
+    b.d2 := d2
+    b.sw := sw
+    b.d2
+
+// The high and low of the bar still forming on that timeframe, built up from
+// the chart's own bars. This is the whole reason intrabar invalidation costs
+// nothing: the three assets are already fetched at the chart timeframe, and a
+// higher timeframe's bar in progress is just the chart bars since its clock
+// last rolled. rst is that roll.
+f_run(AB b, float h, float l, bool rst) =>
+    if not na(h) and not na(l)
+        if rst or na(b.rnH)
+            b.rnH := h
+            b.rnL := l
+        else
+            b.rnH := math.max(b.rnH, h)
+            b.rnL := math.min(b.rnL, l)
+    b.rnH
+
+// The chart's own timeframe needs no request.security at all — its series are
+// already here. [1] is the last closed bar, matching the index map above.
+f_fill(AB b, float o, float h, float l, float c) =>
+    b.d1  := c[1] > o[1] ? 1.0 : c[1] < o[1] ? -1.0 : na(c[1]) ? na : 0.0
+    b.d2  := c[2] > o[2] ? 1.0 : c[2] < o[2] ? -1.0 : na(c[2]) ? na : 0.0
+    b.swH := h[2] > h[3] and h[2] > h[1]
+    b.swL := l[2] < l[3] and l[2] < l[1]
+    b.hi2 := h[2]
+    b.lo2 := l[2]
+    b.tkH := i_inv_wick ? h[1] : c[1]
+    b.tkL := i_inv_wick ? l[1] : c[1]
+    b.tkL
+
+// One reusable object per asset per timeframe — allocated once, updated in
+// place, so nothing accumulates across bars.
+var AB n1h = AB.new()
+var AB e1h = AB.new()
+var AB y1h = AB.new()
+var AB n4h = AB.new()
+var AB e4h = AB.new()
+var AB y4h = AB.new()
+var AB n1d = AB.new()
+var AB e1d = AB.new()
+var AB y1d = AB.new()
+var AB n1w = AB.new()
+var AB e1w = AB.new()
+var AB y1w = AB.new()
+var AB nCh = AB.new()
+var AB eCh = AB.new()
+var AB yCh = AB.new()
+var FB n15 = FB.new()
+var FB e15 = FB.new()
+var FB y15 = FB.new()
+var FB n5m = FB.new()
+var FB e5m = FB.new()
+var FB y5m = FB.new()
+
+tn1h = f_load(n1h, tk_nq, "60")
+te1h = f_load(e1h, tk_es, "60")
+ty1h = f_load(y1h, tk_ym, "60")
+
+tn4h = f_load(n4h, tk_nq, "240")
+te4h = f_load(e4h, tk_es, "240")
+ty4h = f_load(y4h, tk_ym, "240")
+
+tn1d = f_load(n1d, tk_nq, "D")
+te1d = f_load(e1d, tk_es, "D")
+ty1d = f_load(y1d, tk_ym, "D")
+
+tn1w = f_load(n1w, tk_nq, "W")
+te1w = f_load(e1w, tk_es, "W")
+ty1w = f_load(y1w, tk_ym, "W")
+
+// The two fast timeframes. Read on the last bar only, never stepped through
+// history, so a chart above them is not a problem.
+f_fast(n15, tk_nq, "15")
+f_fast(e15, tk_es, "15")
+f_fast(y15, tk_ym, "15")
+
+f_fast(n5m, tk_nq, "5")
+f_fast(e5m, tk_es, "5")
+f_fast(y5m, tk_ym, "5")
+
+f_fill(nCh, a_nq_o, a_nq_h, a_nq_l, a_nq_c)
+f_fill(eCh, a_es_o, a_es_h, a_es_l, a_es_c)
+f_fill(yCh, a_ym_o, a_ym_h, a_ym_l, a_ym_c)
+
+// The clock each engine steps on, taken from whichever asset is enabled.
+// It came across in the same tuple as the data, so the two cannot drift.
+t1h = i_use_nq ? tn1h : i_use_es ? te1h : ty1h
+t4h = i_use_nq ? tn4h : i_use_es ? te4h : ty4h
+t1d = i_use_nq ? tn1d : i_use_es ? te1d : ty1d
+t1w = i_use_nq ? tn1w : i_use_es ? te1w : ty1w
+
+// ══════════════════════════════════════════════════════════════
+//  PER-TIMEFRAME STATE
+//  Lives in var on the CHART's timeline, which is where state belongs.
+//  The rule against objects applies to what request.security returns.
+// ══════════════════════════════════════════════════════════════
+
+type MtfSt
+    int    lastT  = 0     // time of the bar already stepped — blocks a double step
+    bool   live   = false // a break is standing right now
+    int    dir    = 0     // -1 bearish · 1 bullish — kept after an invalidation
+    string who    = ""    // assets that took part in the divergence, or "ALL"
+    bool   isNew  = false // set on the chart bar the break was recorded
+    bool   isGone = false // set on the chart bar it was invalidated
+    bool   weak   = false // the break came from the YM weakness rule
+    bool   pndOn  = false // the bar that just closed is a PCP, verdict not in
+    string pndWho = ""
+
+// Has the level been taken? tkH and tkL are already the right side to compare
+// — the request picked close or wick according to i_inv_wick.
+f_taken(float lvl, int dir, float tkH, float tkL) =>
+    na(lvl) ? false : dir == -1 ? tkH > lvl : tkL < lvl
+
+// Who took part in the divergence. ES and NQ are both in whenever they split;
+// YM is in when one of its two rules fired, and it drags in whichever of the
+// other two it moved against — the ones that were DOWN under strength, the
+// ones that were UP under weakness. Which of the two it was is carried by the
+// colour, not by the text, so the text stays as short as it always was.
+f_who(bool divP, bool divY, bool divW, bool okN, bool okE, int dn, int de) =>
+    pN = divP or (divY and okN and dn < 0) or (divW and okN and dn > 0)
+    pE = divP or (divY and okE and de < 0) or (divW and okE and de > 0)
+    ym = divY or divW
+    w  = pN and pE and ym ? "ALL" : ""
+    if w == ""
+        if pN
+            w := "NQ"
+        if pE
+            w := w + (w == "" ? "" : " ") + "ES"
+        if ym
+            w := w + (w == "" ? "" : " ") + "YM"
+    w
+
+// One stored break: the direction, how many of the two deciders were tracked,
+// and the level each asset has to defend — which is the SWING CANDLE's own
+// extreme on that asset's chart, whether or not it made the swing there. The
+// swing picks the candle and the direction; after that everyone defends it.
+type Brk
+    int    dir  = 0
+    int    core = 0   // how many of NQ/ES were tracked — they are the deciders
+    bool   weak = false
+    float  nq   = na
+    float  es   = na
+    float  ym   = na
+    int    cont = na  // the Quarterly Theory container it was born in
+    int    born = na  // the swing candle's open, for the debug row
+
+// ══════════════════════════════════════════════════════════════
+//  QUARTERLY THEORY
+//
+//  Each timeframe compares the four quarters of a larger cycle, its
+//  container. f_cyc reads a timestamp and returns which container it falls in
+//  — an id that only has to be equal for two times in the same container — and
+//  whether a PSP born there means anything at all.
+//
+//      kind  chart  quarters          container        muted
+//      1     1m     22.5 min          90-min micro     never
+//      2     5m     90-min micro      6-hour session   never
+//      3     15m    6-hour session    trading day      never
+//      4     1H     day               week             never
+//      5     4H     week (by Tue)     month            never
+//      6     1D     quarter/4         QT quarter       first quarter/4
+//      7     1W     QT quarter        QT year (Apr)    April–June
+//
+//  Muted = the first quarter of a container with no seed: with nothing before
+//  it in the same container and nothing carried across, there is nothing to
+//  break. Only the daily and weekly ladders have that; on every other one a
+//  PSP is ordinary until it is taken or its container ends.
+//
+//  The trading day opens at 18:00 New York. Shifting every time by six hours
+//  turns that into midnight, so the calendar functions read the trading day
+//  directly. DST changes on a Sunday morning, outside the trading week, so
+//  stepping in whole days between Monday and Friday is exact.
+// ══════════════════════════════════════════════════════════════
+
+NY     = "America/New_York"
+DAY_MS = 86400000
+
+f_cyc(int t, int k) =>
+    int  cont = na
+    bool mute = false
+    if not na(t) and k > 0
+        td  = t + 21600000
+        y   = year(td, NY)
+        m   = month(td, NY)
+        w   = dayofweek(td, NY)
+        hh  = hour(td, NY)
+        mod = hh * 60 + minute(td, NY)
+        d0  = timestamp(NY, y, m, dayofmonth(td, NY), 0, 0)
+        mon = d0 - (w - 2) * DAY_MS
+        tue = mon + DAY_MS
+        if k == 1
+            cont := d0 + math.floor(mod / 90)
+        else if k == 2
+            cont := d0 + math.floor(hh / 6)
+        else if k == 3
+            cont := d0
+        else if k == 4
+            cont := mon
+        else if k == 5
+            // a week belongs to the month of its Tuesday
+            cont := year(tue, NY) * 12 + month(tue, NY)
+        else if k == 6
+            // the real quarter cut into four equal parts, so the last boundary
+            // lands exactly on the quarter's last day
+            qm = math.floor((m - 1) / 3)
+            qs = timestamp(NY, y, qm * 3 + 1, 1, 0, 0)
+            qe = qm == 3 ? timestamp(NY, y + 1, 1, 1, 0, 0) : timestamp(NY, y, qm * 3 + 4, 1, 0, 0)
+            di = math.round((d0 - qs) / DAY_MS)
+            ql = math.round((qe - qs) / DAY_MS)
+            cont := y * 4 + qm
+            mute := math.floor(di * 4 / ql) == 0
+        else if k == 7
+            // QT year opens in April; Q1 is April–June
+            tm = month(tue, NY)
+            ty = year(tue, NY)
+            cont := tm >= 4 ? ty : ty - 1
+            mute := tm >= 4 and tm <= 6
+    [cont, mute]
+
+// Who is STILL defending this break — read off the levels that have not been
+// erased, not off anything frozen at birth.
+f_holds(Brk b) =>
+    w = ""
+    if not na(b.nq)
+        w := "NQ"
+    if not na(b.es)
+        w := w + (w == "" ? "" : " ") + "ES"
+    if not na(b.ym)
+        w := w + (w == "" ? "" : " ") + "YM"
+    w == "NQ ES YM" ? "ALL" : w
+
+// Does this bar finish the break off? Each asset that made the swing defends
+// its own level; a level that gets taken is ERASED, which is what lets the
+// three be taken on three different bars and still add up — the test only ever
+// sees one bar at a time, so a tally across them could never be true at one
+// moment otherwise. True = drop it from the stack.
+f_kill(Brk b, float nH, float nL, float eH, float eL, float yH, float yL, bool major) =>
+    hit = false
+    if not na(b.nq) and f_taken(b.nq, b.dir, nH, nL)
+        b.nq := na
+        hit := true
+    if not na(b.es) and f_taken(b.es, b.dir, eH, eL)
+        b.es := na
+        hit := true
+    if not na(b.ym) and f_taken(b.ym, b.dir, yH, yL)
+        b.ym := na
+        hit := true
+    // NQ and ES are the deciders: once both have left that candle behind, the
+    // break is over, whatever YM is doing. An asset switched off never held a
+    // level, so it reads as "not defending" and simply does not vote. With
+    // both of them off there is nobody else to ask and YM decides alone.
+    coreGone = na(b.nq) and na(b.es)
+    major ? (b.core > 0 ? coreGone : na(b.ym)) : hit
+
+// One step per closed bar of that timeframe. Invalidation is checked before
+// detection, so a level taken and a fresh swing on the same bar resolve in
+// the right order.
+f_step(MtfSt s, array<Brk> st, int t, AB n, AB e, AB y, bool allowW, int kind, int cNow) =>
+    s.isNew  := false
+    s.isGone := false
+    if not na(t) and t != s.lastT
+        s.lastT := t
+        hadLive = array.size(st) > 0
+
+        // ── 1. let the closing bar take whatever levels it reaches, and drop
+        //       the breaks that have nothing left defending them. An older,
+        //       untouched break then goes back on display by itself.
+        i = 0
+        while i < array.size(st)
+            if f_kill(array.get(st, i), n.tkH, n.tkL, e.tkH, e.tkL, y.tkH, y.tkL, i_kill_all)
+                array.remove(st, i)
+            else
+                i += 1
+
+        // ── 2. the bar that just closed, [1]: a PCP whose swing verdict
+        //       needs the NEXT close. This is the grey "maybe" state, and it
+        //       is replaced wholesale on the next step, so it self-clears.
+        qN  = i_use_nq and not na(n.d1) and (not i_ignore_doji or n.d1 != 0)
+        qE  = i_use_es and not na(e.d1) and (not i_ignore_doji or e.d1 != 0)
+        qY  = i_use_ym and not na(y.d1) and (not i_ignore_doji or y.d1 != 0)
+        qP  = qN and qE and n.d1 != e.d1
+        qYm = qY and y.d1 > 0 and ((qE and e.d1 < 0) or (qN and n.d1 < 0))
+        qYw = allowW and qY and y.d1 < 0 and ((qE and e.d1 > 0) or (qN and n.d1 > 0)) and not qP and not qYm
+        s.pndOn  := qP or qYm or qYw
+        s.pndWho := s.pndOn ? f_who(qP, qYm, qYw, qN, qE, int(n.d1), int(e.d1)) : ""
+
+        // ── 3. a new PSP on the swing bar, [2] ──
+        okN = i_use_nq and not na(n.d2) and (not i_ignore_doji or n.d2 != 0)
+        okE = i_use_es and not na(e.d2) and (not i_ignore_doji or e.d2 != 0)
+        okY = i_use_ym and not na(y.d2) and (not i_ignore_doji or y.d2 != 0)
+
+        divP = okN and okE and n.d2 != e.d2
+        divY = okY and y.d2 > 0 and ((okE and e.d2 < 0) or (okN and n.d2 < 0))
+        divW = allowW and okY and y.d2 < 0 and ((okE and e.d2 > 0) or (okN and n.d2 > 0)) and not divP and not divY
+
+        if divP or divY or divW
+            ymIn = divY or divW
+            hiN = i_use_nq and n.swH
+            hiE = i_use_es and e.swH
+            hiY = ymIn     and y.swH
+            loN = i_use_nq and n.swL
+            loE = i_use_es and e.swL
+            loY = ymIn     and y.swL
+
+            nHi = (hiN ? 1 : 0) + (hiE ? 1 : 0) + (hiY ? 1 : 0)
+            nLo = (loN ? 1 : 0) + (loE ? 1 : 0) + (loY ? 1 : 0)
+
+            // t is the swing candle's own open. A PSP born where this
+            // timeframe cannot carry a break never enters the stack, and one
+            // whose container already ended by the time it was confirmed is
+            // dead on arrival.
+            [bc, bm] = f_cyc(t, kind)
+            live0 = not bm and (na(cNow) or na(bc) or bc == cNow)
+
+            if (nHi > 0 or nLo > 0) and live0
+                bear = nHi >= nLo          // tie goes to the swing high
+
+                // The swing said which candle and which way. Every enabled
+                // asset now defends that candle's extreme on its own chart —
+                // including the ones that made no swing there, which is the
+                // only way they can ever take it back.
+                array.unshift(st, Brk.new(bear ? -1 : 1,
+                     (i_use_nq ? 1 : 0) + (i_use_es ? 1 : 0),
+                     divW,
+                     i_use_nq ? (bear ? n.hi2 : n.lo2) : na,
+                     i_use_es ? (bear ? e.hi2 : e.lo2) : na,
+                     i_use_ym ? (bear ? y.hi2 : y.lo2) : na,
+                     bc, t))
+                while array.size(st) > i_depth
+                    array.pop(st)
+                s.isNew := true
+
+        // ── 4. what is on display: the newest survivor, or nothing. dir, who
+        //       and weak are left alone when the stack empties, so the
+        //       "broken" alert can still name what it was.
+        s.live := array.size(st) > 0
+        if s.live
+            top = array.get(st, 0)
+            s.dir  := top.dir
+            s.who  := f_holds(top)
+            s.weak := top.weak
+        s.isGone := hadLive and not s.live
+    s.live
+
+// Run EVERY chart bar, not once per timeframe bar: this is what notices a
+// level being taken by a candle that has not closed, and a container that
+// rolled under a break that was never touched. It only shortens a break's
+// life, never creates one, so detection is untouched.
+// Running out of time is not being broken: only a taken level raises isGone,
+// so the "broken" alert never fires because a week ended.
+f_cut(MtfSt s, array<Brk> st, AB n, AB e, AB y, int cNow) =>
+    if array.size(st) > 0
+        hit = false
+        i = 0
+        while i < array.size(st)
+            b    = array.get(st, i)
+            expd = not na(cNow) and not na(b.cont) and b.cont != cNow
+            took = i_inv_wick and f_kill(b, n.rnH, n.rnL, e.rnH, e.rnL, y.rnH, y.rnL, i_kill_all)
+            if expd or took
+                hit := hit or took
+                array.remove(st, i)
+            else
+                i += 1
+        if array.size(st) == 0
+            s.live   := false
+            s.isGone := s.isGone or hit
+        else
+            top = array.get(st, 0)
+            s.dir  := top.dir
+            s.who  := f_holds(top)
+            s.weak := top.weak
+    s.live
+
+var MtfSt st1h = MtfSt.new()
+var MtfSt st4h = MtfSt.new()
+var MtfSt st1d = MtfSt.new()
+var MtfSt st1w = MtfSt.new()
+var MtfSt stCh = MtfSt.new()
+
+// One stack per timeframe, newest break first.
+var array<Brk> b1h = array.new<Brk>()
+var array<Brk> b4h = array.new<Brk>()
+var array<Brk> b1d = array.new<Brk>()
+var array<Brk> b1w = array.new<Brk>()
+var array<Brk> bCh = array.new<Brk>()
+
+// The clock rolls exactly when the previous bar of that timeframe closed, so
+// comparing it with the state's lastT — BEFORE f_step consumes it — is what
+// says "a new bar started here, begin the accumulator again". The chart's own
+// timeframe resets every bar, because every chart bar is a new one.
+rs1h = t1h != st1h.lastT
+rs4h = t4h != st4h.lastT
+rs1d = t1d != st1d.lastT
+rs1w = t1w != st1w.lastT
+
+f_run(n1h, a_nq_h, a_nq_l, rs1h)
+f_run(e1h, a_es_h, a_es_l, rs1h)
+f_run(y1h, a_ym_h, a_ym_l, rs1h)
+f_run(n4h, a_nq_h, a_nq_l, rs4h)
+f_run(e4h, a_es_h, a_es_l, rs4h)
+f_run(y4h, a_ym_h, a_ym_l, rs4h)
+f_run(n1d, a_nq_h, a_nq_l, rs1d)
+f_run(e1d, a_es_h, a_es_l, rs1d)
+f_run(y1d, a_ym_h, a_ym_l, rs1d)
+f_run(n1w, a_nq_h, a_nq_l, rs1w)
+f_run(e1w, a_es_h, a_es_l, rs1w)
+f_run(y1w, a_ym_h, a_ym_l, rs1w)
+f_run(nCh, a_nq_h, a_nq_l, true)
+f_run(eCh, a_es_h, a_es_l, true)
+f_run(yCh, a_ym_h, a_ym_l, true)
+
+// The container each engine is in RIGHT NOW, read off the chart bar's own
+// time. A break whose container differs has run out of time.
+qkCh = i_qt_on ? chKind : 0
+qk1h = i_qt_on ? 4 : 0
+qk4h = i_qt_on ? 5 : 0
+qk1d = i_qt_on ? 6 : 0
+qk1w = i_qt_on ? 7 : 0
+
+[cNowCh, mNowCh] = f_cyc(time, qkCh)
+[cNow1h, mNow1h] = f_cyc(time, qk1h)
+[cNow4h, mNow4h] = f_cyc(time, qk4h)
+[cNow1d, mNow1d] = f_cyc(time, qk1d)
+[cNow1w, mNow1w] = f_cyc(time, qk1w)
+
+// 1H and 4H never get the weakness rule; 1D and 1W always do; the chart's own
+// timeframe only when the chart itself is daily or higher. The chart's own
+// clock is time[2] for the same reason the requests carry it: it is the swing
+// candle's open, and it still moves once per chart bar.
+f_step(stCh, bCh, time[2], nCh, eCh, yCh, ymwTfOk, qkCh, cNowCh)
+f_step(st1h, b1h, t1h, n1h, e1h, y1h, false, qk1h, cNow1h)
+f_step(st4h, b4h, t4h, n4h, e4h, y4h, false, qk4h, cNow4h)
+f_step(st1d, b1d, t1d, n1d, e1d, y1d, i_ym_weak, qk1d, cNow1d)
+f_step(st1w, b1w, t1w, n1w, e1w, y1w, i_ym_weak, qk1w, cNow1w)
+
+// …and then let the unfinished bar take whatever it has already reached, and
+// the clock retire whatever has run out of container.
+f_cut(stCh, bCh, nCh, eCh, yCh, cNowCh)
+f_cut(st1h, b1h, n1h, e1h, y1h, cNow1h)
+f_cut(st4h, b4h, n4h, e4h, y4h, cNow4h)
+f_cut(st1d, b1d, n1d, e1d, y1d, cNow1d)
+f_cut(st1w, b1w, n1w, e1w, y1w, cNow1w)
+
+// ══════════════════════════════════════════════════════════════
+//  THE MARKERS ON THE CHART
+//
+//  A marker has to be erasable, so it is a label and not a plotchar: a
+//  historical bar's plotchar value is fixed when that bar is processed, and
+//  "this candle was taken two days later" is future information there.
+//
+//  Each marker carries a Brk — the swing candle's own extreme on NQ, on ES
+//  and on YM — so it is judged by the same rule as the line and cannot drift
+//  away from it: every enabled asset defends that candle on its own chart,
+//  NQ and ES together decide, YM is carried but never decides.
+//
+//  Nothing above this point is touched. The swing detection, the divergence
+//  and the stepped engine produced their answers already; this only draws.
+// ══════════════════════════════════════════════════════════════
+
+type Mk
+    label lb
+    Brk   b
+    float own = na   // that candle's extreme on THIS chart
+    int   cont = na  // its Quarterly Theory container
+
+var array<Mk> mks = array.new<Mk>()
+
+// Every level keeps being erased as it falls, whichever rule is selected —
+// only the verdict differs, so switching the setting cannot leave a marker
+// in a state the other rules never reach.
+f_mdead(Mk m, int cNow) =>
+    f_kill(m.b, nCh.tkH, nCh.tkL, eCh.tkH, eCh.tkL, yCh.tkH, yCh.tkL, false)
+    if i_inv_wick
+        f_kill(m.b, nCh.rnH, nCh.rnL, eCh.rnH, eCh.rnL, yCh.rnH, yCh.rnL, false)
+    // The chart's own candle, straight off the chart's own series. On a
+    // faded marker the swing was on another asset, but the candle under it
+    // is still this chart's, and trading through it is still what you see.
+    if not na(m.own) and (f_taken(m.own, m.b.dir, high[1], low[1]) or
+     (i_inv_wick and f_taken(m.own, m.b.dir, high, low)))
+        m.own := na
+    rOwn = na(m.own)
+    rCor = na(m.b.nq) and na(m.b.es)
+    rAll = rCor and na(m.b.ym)
+    // Every option is matched by name, so a typo in one cannot quietly fall
+    // through into whichever rule happened to be last.
+    expd = not na(cNow) and not na(m.cont) and m.cont != cNow
+    expd or (i_mark_rule == "הנכס של הגרף" ? rOwn :
+     i_mark_rule == "NQ וגם ES" ? rCor :
+     i_mark_rule == "כל שלושת הנכסים" ? rAll : rOwn)
+
+// Prune BEFORE drawing. tkH/tkL on the chart's own timeframe is bar[1], which
+// is the swing bar a marker born on this bar sits on — testing a new marker
+// against its own candle would kill it on birth.
+if i_mark_erase and array.size(mks) > 0
+    mi = 0
+    while mi < array.size(mks)
+        if f_mdead(array.get(mks, mi), cNowCh)
+            label.delete(array.get(mks, mi).lb)
+            array.remove(mks, mi)
+        else
+            mi += 1
+
+// The gap in a unit that means the same everywhere: a fraction of ATR, not a
+// number of points. ta.atr is a plain calculation on the chart's own series —
+// no request.security, so it costs nothing against the memory budget.
+markGap = nz(ta.atr(14)) * i_mark_gap / 100.0
+
+// One-line statements on purpose — see the note above mtfTop.
+markSz = i_mark_sz == "זעיר" ? size.tiny : i_mark_sz == "קטן" ? size.small : i_mark_sz == "גדול" ? size.large : i_mark_sz == "ענק" ? size.huge : size.normal
+
+// One shape for both. Where the swing happened — on the chart's own asset or
+// on another — is carried by the fade alone, which is its own input. The
+// shapes with no direction of their own do not need one: above the bar or
+// below it has already said which way it points.
+f_glyph(bool bear) =>
+    i_mark_gl == "משולש גדול ▲" ? (bear ? "▲" : "▼") :
+     i_mark_gl == "משולש קטן ▴" ? (bear ? "▴" : "▾") :
+     i_mark_gl == "עיגול ●" ? "●" :
+     i_mark_gl == "נקודה •" ? "•" :
+     i_mark_gl == "ריבוע ■" ? "■" :
+     i_mark_gl == "יהלום ◆" ? "◆" :
+     i_mark_gl == "חץ ⬇" ? (bear ? "⬇" : "⬆") :
+     i_mark_gl == "כוכב ★" ? "★" :
+     i_mark_gl == "איקס ✕" ? "✕" :
+     i_mark_gl == "טקסט משלי" ? (bear ? i_mark_tx_bear : i_mark_tx_bull) :
+     (bear ? "▲" : "▼")
+
+// The swing candle is bar[1]; its open is the birth time the container is read
+// from. Muted — a time this timeframe cannot carry a break — draws a plain dot
+// in the pending colour instead of a marker, and is erased by exactly the same
+// rules: taken, or out of container. It never turns into a PSP.
+[mkCont, mkMute] = f_cyc(time[1], qkCh)
+
+// bear decides which extreme is defended and which way the shape points.
+f_mark(bool bear, color c) =>
+    lb = label.new(bar_index - 1, bear ? high[1] + markGap : low[1] - markGap,
+     text      = mkMute ? "•" : f_glyph(bear),
+     style     = label.style_none,
+     yloc      = yloc.price,
+     textcolor = mkMute ? i_col_pend : c,
+     size      = markSz)
+    array.unshift(mks, Mk.new(lb, Brk.new(bear ? -1 : 1,
+     (i_use_nq ? 1 : 0) + (i_use_es ? 1 : 0),
+     wk1,
+     i_use_nq ? (bear ? a_nq_h[1] : a_nq_l[1]) : na,
+     i_use_es ? (bear ? a_es_h[1] : a_es_l[1]) : na,
+     i_use_ym ? (bear ? a_ym_h[1] : a_ym_l[1]) : na),
+     bear ? high[1] : low[1], mkCont))
+    // The window, and the reason for it: Pine holds 500 label objects at most,
+    // and running into that ceiling would erase markers for no reason at all.
+    while array.size(mks) > i_mark_keep
+        old = array.pop(mks)
+        label.delete(old.lb)
+    array.size(mks)
+
+// A swing whose container already ended by the time it was confirmed is not
+// drawn at all — it would only be erased on the next bar.
+mkOk = bar_index > 2 and (na(cNowCh) or na(mkCont) or mkCont == cNowCh)
+
+if mkOk
+    if psp_bear_own
+        f_mark(true,  c_bear_own)
+    if psp_bear_ext
+        f_mark(true,  c_bear_ext)
+    if psp_bull_own
+        f_mark(false, c_bull_own)
+    if psp_bull_ext
+        f_mark(false, c_bull_ext)
+
+// ══════════════════════════════════════════════════════════════
+//  THE LINE
+//
+//  Order:  1W · 1D · 4H · 1H · [your chart, only if it is 1H or higher]
+//
+//  Each cell renders one of three states: a standing break in its
+//  direction's colour, otherwise the grey bar that closed with a divergence
+//  and is still waiting on its swing verdict, otherwise nothing. Cells pack
+//  left, so gaps close up.
+//
+//  A timeframe BELOW the chart's is left out: stepping it through history
+//  would sample it once per chart bar, skipping whole bars of it, and the
+//  carried "level taken" state would come out wrong. A timeframe EQUAL to the
+//  chart's has no such problem — one sample per chart bar is exactly one of
+//  its bars — which is why these are >= and not >.
+//
+//  That distinction is the whole point. With >, 1H on a 1H chart fell through
+//  to the chart's own engine under the same "1H" label: a second engine, on a
+//  different series over a different history, answering the same question.
+//  The line then said one thing on a 5m chart and another on a 1H chart.
+//  One engine owns each timeframe now.
+// ══════════════════════════════════════════════════════════════
+
+sh1h = timeframe.in_seconds("60")  >= chartSec
+sh4h = timeframe.in_seconds("240") >= chartSec
+sh1d = timeframe.in_seconds("D")   >= chartSec
+sh1w = timeframe.in_seconds("W")   >= chartSec
+
+// The chart's own timeframe belongs in this line only when the line's own
+// rule — 1H and above — is true of it, AND it is not already one of the four
+// above it. On 1m/5m/15m it was the "5m ▼ ALL" that made the fast signal look
+// like a list entry you could only see by standing on its timeframe; those
+// belong to the box below. On 1H/4H/1D/1W it would now be a duplicate of a
+// row the stepped engine already owns. What is left is the in-between — 2H,
+// 6H, 8H, 3D — which nothing else covers.
+chDup   = is_1h or is_4h or is_1d or is_1w
+chIsBig = chartSec >= timeframe.in_seconds("60") and not chDup
+
+chName = is_1m ? "1m" : is_5m ? "5m" : is_15m ? "15m" : is_1h ? "1H" : is_4h ? "4H" : is_1d ? "1D" : is_1w ? "1W" : tf_str
+
+f_arrow(MtfSt s) =>
+    s.dir < 0 ? "▼" : "▲"
+
+// The ◦ is a bar that CLOSED with a divergence and is waiting on the next
+// close to say whether it was a swing — the candle that may become a PSP.
+// With nothing standing on that timeframe it IS the record, and the cell takes
+// the pending colour. With a break standing, the two have nothing to do with
+// each other, so the ◦ goes out to a cell of its own rather than inheriting
+// the break's colour — see f_dot.
+f_rec(MtfSt s, string nm) =>
+    s.live ? nm + " " + f_arrow(s) + " " + s.who : i_show_pending and s.pndOn ? nm + " ◦ " + s.pndWho : ""
+
+// A ◦ that needs its own cell: there is a break on display AND a new candle
+// waiting on its verdict behind it. The cell names its timeframe — "◦4H" —
+// because sitting between two entries says nothing about which one it is for.
+f_dot(MtfSt s) =>
+    i_show_pending and s.live and s.pndOn
+
+f_col(MtfSt s) =>
+    s.live ? (s.weak ? i_col_weak : s.dir < 0 ? i_col_bear : i_col_bull) : i_col_pend
+
+r1w = sh1w ? f_rec(st1w, "1W") : ""
+r1d = sh1d ? f_rec(st1d, "1D") : ""
+r4h = sh4h ? f_rec(st4h, "4H") : ""
+r1h = sh1h ? f_rec(st1h, "1H") : ""
+rCh = tf_allowed and chIsBig ? f_rec(stCh, chName) : ""
+
+d1w = sh1w and f_dot(st1w)
+d1d = sh1d and f_dot(st1d)
+d4h = sh4h and f_dot(st4h)
+d1h = sh1h and f_dot(st1h)
+dCh = tf_allowed and chIsBig and f_dot(stCh)
+
+// ── the fast heads-up ──
+//  Deliberately NOT the carried-state engine. A PSP is a function of three
+//  bars, so it can be read straight off the last bar, and that is what lets
+//  this work on a timeframe below the chart's: nothing is accumulated across
+//  history, so nothing can be corrupted by sampling it once per chart bar.
+f_swH(float sw) =>
+    not na(sw) and int(sw) % 4 >= 2
+
+f_swL(float sw) =>
+    not na(sw) and int(sw) % 2 == 1
+
+// Still defending the swing candle's extreme on its own chart: nothing since
+// — neither the confirming bar nor the one still forming — has crossed it.
+// No data reads as not defending.
+f_hold(float sw, int dir) =>
+    not na(sw) and (dir < 0 ? int(sw) % 8 < 4 : int(sw) < 8)
+
+f_flash(FB n, FB e, FB y) =>
+    // ── PSP: the swing bar [2], confirmed by the bar that just closed ──
+    okN = i_use_nq and not na(n.d2) and (not i_ignore_doji or n.d2 != 0)
+    okE = i_use_es and not na(e.d2) and (not i_ignore_doji or e.d2 != 0)
+    okY = i_use_ym and not na(y.d2) and (not i_ignore_doji or y.d2 != 0)
+
+    divP = okN and okE and n.d2 != e.d2
+    divY = okY and y.d2 > 0 and ((okE and e.d2 < 0) or (okN and n.d2 < 0))
+
+    on  = false
+    dir = 0
+    who = ""
+    if divP or divY
+        hiN = i_use_nq and f_swH(n.sw)
+        hiE = i_use_es and f_swH(e.sw)
+        hiY = divY     and f_swH(y.sw)
+        loN = i_use_nq and f_swL(n.sw)
+        loE = i_use_es and f_swL(e.sw)
+        loY = divY     and f_swL(y.sw)
+
+        nHi = (hiN ? 1 : 0) + (hiE ? 1 : 0) + (hiY ? 1 : 0)
+        nLo = (loN ? 1 : 0) + (loE ? 1 : 0) + (loY ? 1 : 0)
+
+        if nHi > 0 or nLo > 0
+            dir := nHi >= nLo ? -1 : 1
+            // The line's rule, applied to a candle five minutes old: every
+            // enabled asset defends it, NQ and ES decide, YM never does.
+            hN = i_use_nq and f_hold(n.sw, dir)
+            hE = i_use_es and f_hold(e.sw, dir)
+            hY = i_use_ym and f_hold(y.sw, dir)
+            core = (i_use_nq ? 1 : 0) + (i_use_es ? 1 : 0)
+            on  := i_kill_all ? (core > 0 ? (hN or hE) : hY) : ((not i_use_nq or hN) and (not i_use_es or hE) and (not i_use_ym or hY))
+            who := hN and hE and hY ? "ALL" : (hN ? "NQ" : "") + (hE ? (hN ? " ES" : "ES") : "") + (hY ? (hN or hE ? " YM" : "YM") : "")
+
+    // ── PCP: the bar that just closed, [1]. A PCP is only a disagreement of
+    //    direction, so it needs no swing and no confirming bar — it is known
+    //    one bar earlier than the PSP that may or may not follow it.
+    qN = i_use_nq and not na(n.d1) and (not i_ignore_doji or n.d1 != 0)
+    qE = i_use_es and not na(e.d1) and (not i_ignore_doji or e.d1 != 0)
+    qY = i_use_ym and not na(y.d1) and (not i_ignore_doji or y.d1 != 0)
+
+    qP  = qN and qE and n.d1 != e.d1
+    qYm = qY and y.d1 > 0 and ((qE and e.d1 < 0) or (qN and n.d1 < 0))
+
+    pOn  = qP or qYm
+    pWho = pOn ? f_who(qP, qYm, false, qN, qE, int(n.d1), int(e.d1)) : ""
+    [on, dir, who, pOn, pWho]
+
+[on15, dir15, who15, pcp15, pwho15] = f_flash(n15, e15, y15)
+[on5m, dir5m, who5m, pcp5m, pwho5m] = f_flash(n5m, e5m, y5m)
+
+// Kept as one-line statements on purpose: Pine treats a continuation line
+// indented by any multiple of four spaces as the start of a block, so a
+// column-aligned wrapped ternary is a syntax error waiting to happen.
+mtfTop = i_mtf_h == "שמאל" ? position.top_left : i_mtf_h == "מרכז" ? position.top_center : position.top_right
+mtfMid = i_mtf_h == "שמאל" ? position.middle_left : i_mtf_h == "מרכז" ? position.middle_center : position.middle_right
+mtfBot = i_mtf_h == "שמאל" ? position.bottom_left : i_mtf_h == "מרכז" ? position.bottom_center : position.bottom_right
+mtfPos = i_mtf_v == "למעלה" ? mtfTop : i_mtf_v == "באמצע" ? mtfMid : mtfBot
+
+// Padding: the table is anchored to an edge, so empty spacer rows on the edge
+// side push the content away from it. Anchored at the top the spacers go
+// above the content, otherwise below it.
+mtfUp  = i_mtf_v == "למעלה"
+mtfRow = mtfUp ? i_mtf_pad : 0
+
+// One cell per timeframe, not one joined string: a cell carries a single
+// text colour, and each timeframe has to be painted in its own state's.
+var table mtfTbl = table.new(mtfPos, 12, 1 + i_mtf_pad, border_width = 0)
+
+c_clear = color.new(color.black, 100)
+
+if barstate.islast and i_mtf_on
+    if i_mtf_pad > 0
+        for k = 0 to i_mtf_pad - 1
+            table.cell(mtfTbl, 0, mtfUp ? k : 1 + k, " ",
+                 text_size = size.small, bgcolor = c_clear)
+
+    anything = r1w != "" or r1d != "" or r4h != "" or r1h != "" or rCh != ""
+    table.cell(mtfTbl, 0, mtfRow, anything ? "ADI" : "", text_color = i_col_neut,
+         text_size = size.small, bgcolor = c_clear)
+
+    col = 1
+    if r1w != ""
+        table.cell(mtfTbl, col, mtfRow, r1w, text_color = f_col(st1w),
+             text_size = size.small, bgcolor = c_clear)
+        col := col + 1
+        if d1w
+            table.cell(mtfTbl, col, mtfRow, "◦1W", text_color = i_col_pend,
+                 text_size = size.small, bgcolor = c_clear)
+            col := col + 1
+    if r1d != ""
+        table.cell(mtfTbl, col, mtfRow, r1d, text_color = f_col(st1d),
+             text_size = size.small, bgcolor = c_clear)
+        col := col + 1
+        if d1d
+            table.cell(mtfTbl, col, mtfRow, "◦1D", text_color = i_col_pend,
+                 text_size = size.small, bgcolor = c_clear)
+            col := col + 1
+    if r4h != ""
+        table.cell(mtfTbl, col, mtfRow, r4h, text_color = f_col(st4h),
+             text_size = size.small, bgcolor = c_clear)
+        col := col + 1
+        if d4h
+            table.cell(mtfTbl, col, mtfRow, "◦4H", text_color = i_col_pend,
+                 text_size = size.small, bgcolor = c_clear)
+            col := col + 1
+    if r1h != ""
+        table.cell(mtfTbl, col, mtfRow, r1h, text_color = f_col(st1h),
+             text_size = size.small, bgcolor = c_clear)
+        col := col + 1
+        if d1h
+            table.cell(mtfTbl, col, mtfRow, "◦1H", text_color = i_col_pend,
+                 text_size = size.small, bgcolor = c_clear)
+            col := col + 1
+    if rCh != ""
+        table.cell(mtfTbl, col, mtfRow, rCh, text_color = f_col(stCh),
+             text_size = size.small, bgcolor = c_clear)
+        col := col + 1
+        if dCh
+            table.cell(mtfTbl, col, mtfRow, "◦" + chName, text_color = i_col_pend,
+                 text_size = size.small, bgcolor = c_clear)
+            col := col + 1
+    if col <= 11
+        for k = col to 11
+            table.cell(mtfTbl, k, mtfRow, "", bgcolor = c_clear)
+
+// ══════════════════════════════════════════════════════════════
+//  THE FAST NOTICE  —  5m / 15m, in a box of its own
+//
+//  Deliberately NOT the carried-state engine, and deliberately not part of the
+//  breaks line. A PSP is a function of three bars and a PCP of one, so both
+//  can be read straight off the last bar with nothing accumulated across
+//  history — which is what lets this report a timeframe BELOW the chart's,
+//  where sampling once per chart bar would corrupt any carried state.
+//
+//  No timer is needed, and none is possible to get wrong: the request always
+//  reports the state as of the last CLOSED bar of that timeframe, so the
+//  notice is replaced wholesale at the next close of ITS OWN timeframe —
+//  which is exactly "stands for about five minutes, then goes".
+//
+//  Neither timeframe is skipped on its own chart any more. Skipping them made
+//  the answer change shape depending on where you were standing — a box on one
+//  chart, a line entry on another — which is exactly what was confusing.
+// ══════════════════════════════════════════════════════════════
+
+psp15 = i_fast_on and on15
+psp5m = i_fast_on and on5m
+pnd15 = i_fast_on and i_fast_pcp and pcp15 and not on15
+pnd5m = i_fast_on and i_fast_pcp and pcp5m and not on5m
+
+f15 = psp15 ? "⚡ PSP 15m " + (dir15 < 0 ? "▼" : "▲") + " " + who15 : pnd15 ? "◦ PCP 15m " + pwho15 : i_fast_idle ? "15m —" : ""
+f5m = psp5m ? "⚡ PSP 5m " + (dir5m < 0 ? "▼" : "▲") + " " + who5m : pnd5m ? "◦ PCP 5m " + pwho5m : i_fast_idle ? "5m —" : ""
+
+fc15 = psp15 ? (dir15 < 0 ? i_col_bear : i_col_bull) : i_col_pend
+fc5m = psp5m ? (dir5m < 0 ? i_col_bear : i_col_bull) : i_col_pend
+
+// The tint is what makes it read as a notice instead of a label. Only a PSP
+// gets one; a PCP stays flat grey so the two can never be confused.
+fb15 = i_fast_bg and psp15 ? color.new(dir15 < 0 ? i_col_bear : i_col_bull, 82) : c_clear
+fb5m = i_fast_bg and psp5m ? color.new(dir5m < 0 ? i_col_bear : i_col_bull, 82) : c_clear
+
+// One-line statements on purpose — see the note above mtfTop.
+fastTop = i_fast_h == "שמאל" ? position.top_left : i_fast_h == "מרכז" ? position.top_center : position.top_right
+fastMid = i_fast_h == "שמאל" ? position.middle_left : i_fast_h == "מרכז" ? position.middle_center : position.middle_right
+fastBot = i_fast_h == "שמאל" ? position.bottom_left : i_fast_h == "מרכז" ? position.bottom_center : position.bottom_right
+fastPos = i_fast_v == "למעלה" ? fastTop : i_fast_v == "באמצע" ? fastMid : fastBot
+fastSz  = i_fast_sz == "קטן" ? size.small : i_fast_sz == "רגיל" ? size.normal : i_fast_sz == "ענק" ? size.huge : size.large
+
+fastUp = i_fast_v == "למעלה"
+fastR0 = fastUp ? i_fast_pad : 0
+
+var table fastTbl = table.new(fastPos, 1, 2 + i_fast_pad, border_width = 0)
+
+if barstate.islast and i_fast_on
+    if i_fast_pad > 0
+        for k = 0 to i_fast_pad - 1
+            table.cell(fastTbl, 0, fastUp ? k : 2 + k, " ",
+                 text_size = size.small, bgcolor = c_clear)
+
+    table.cell(fastTbl, 0, fastR0, f15, text_color = fc15,
+         text_size = fastSz, bgcolor = fb15)
+    table.cell(fastTbl, 0, fastR0 + 1, f5m, text_color = fc5m,
+         text_size = fastSz, bgcolor = fb5m)
+
+// ══════════════════════════════════════════════════════════════
+//  PANEL  (optional, off by default)
+//  The full picture: every timeframe's live break, or its grey pending bar.
+//  The line shows only the most recent, so the two complement each other.
+//  "▶" marks a timeframe at or below the chart's — drawn on the bars instead.
+// ══════════════════════════════════════════════════════════════
+
+pnlTop = i_pnl_h == "שמאל" ? position.top_left : i_pnl_h == "מרכז" ? position.top_center : position.top_right
+pnlMid = i_pnl_h == "שמאל" ? position.middle_left : i_pnl_h == "מרכז" ? position.middle_center : position.middle_right
+pnlBot = i_pnl_h == "שמאל" ? position.bottom_left : i_pnl_h == "מרכז" ? position.bottom_center : position.bottom_right
+pnlPos = i_pnl_v == "למעלה" ? pnlTop : i_pnl_v == "באמצע" ? pnlMid : pnlBot
+
+pnlUp  = i_pnl_v == "למעלה"
+pnlR0  = pnlUp ? i_pnl_pad : 0
+
+dbgRows = i_debug ? 6 : 0   // NQ, ES, YM, d1, stk, born
+
+var table pnlTbl = table.new(pnlPos, 2, 6 + dbgRows + i_pnl_pad, border_width = 0)
+
+// The raw values the chart-timeframe engine is working from. d1 is the bar
+// that just closed, d2 the one before it — the swing candidate.
+f_d(float d) =>
+    na(d) ? "na" : d > 0 ? "+1" : d < 0 ? "-1" : "0"
+
+f_row3(float n, float e, float y) =>
+    "N" + f_d(n) + " E" + f_d(e) + " Y" + f_d(y)
+
+f_flag(bool b) =>
+    b ? "1" : "0"
+
+// Every break a timeframe is still holding, newest first. An arrow per break,
+// so "▼▲▲" means the newest is bearish and two older bullish ones are still
+// untaken beneath it; "—" means the stack is empty.
+f_stk(array<Brk> st) =>
+    r = ""
+    if array.size(st) == 0
+        r := "—"
+    else
+        for k = 0 to array.size(st) - 1
+            r := r + (array.get(st, k).dir < 0 ? "▼" : "▲")
+    r
+
+// When the break on display was born — its swing candle's open, New York
+// time. This is what turns "I can't see that one" into a date to scroll to.
+f_born(array<Brk> st) =>
+    array.size(st) == 0 ? "—" : str.format_time(array.get(st, 0).born, "dd/MM HH:mm", NY)
+
+// The open and close actually read for the last closed bar, to be compared
+// against the same candle on the chart.
+f_oc(float o, float c) =>
+    "o" + str.tostring(o, "#.##") + " c" + str.tostring(c, "#.##")
+
+f_stat(MtfSt s, bool shown) =>
+    not shown ? "▶" : s.live ? f_arrow(s) + " " + s.who : s.pndOn ? "◦ " + s.pndWho : "—"
+
+f_statCol(MtfSt s, bool shown) =>
+    not shown or not s.live ? i_col_neut : s.weak ? i_col_weak : s.dir < 0 ? i_col_bear : i_col_bull
+
+if barstate.islast and i_pnl_on
+    if i_pnl_pad > 0
+        for k = 0 to i_pnl_pad - 1
+            table.cell(pnlTbl, 0, pnlUp ? k : 6 + dbgRows + k, " ",
+                 text_size = size.small, bgcolor = c_clear)
+
+    table.cell(pnlTbl, 0, pnlR0, "ADI", text_color = i_col_neut, text_size = size.small, bgcolor = c_clear)
+    table.cell(pnlTbl, 1, pnlR0, "",    text_color = i_col_neut, text_size = size.small, bgcolor = c_clear)
+    table.cell(pnlTbl, 0, pnlR0 + 1, "1W", text_color = f_statCol(st1w, sh1w), text_size = size.small, bgcolor = c_clear)
+    table.cell(pnlTbl, 1, pnlR0 + 1, f_stat(st1w, sh1w), text_color = f_statCol(st1w, sh1w), text_size = size.small, bgcolor = c_clear)
+    table.cell(pnlTbl, 0, pnlR0 + 2, "1D", text_color = f_statCol(st1d, sh1d), text_size = size.small, bgcolor = c_clear)
+    table.cell(pnlTbl, 1, pnlR0 + 2, f_stat(st1d, sh1d), text_color = f_statCol(st1d, sh1d), text_size = size.small, bgcolor = c_clear)
+    table.cell(pnlTbl, 0, pnlR0 + 3, "4H", text_color = f_statCol(st4h, sh4h), text_size = size.small, bgcolor = c_clear)
+    table.cell(pnlTbl, 1, pnlR0 + 3, f_stat(st4h, sh4h), text_color = f_statCol(st4h, sh4h), text_size = size.small, bgcolor = c_clear)
+    table.cell(pnlTbl, 0, pnlR0 + 4, "1H", text_color = f_statCol(st1h, sh1h), text_size = size.small, bgcolor = c_clear)
+    table.cell(pnlTbl, 1, pnlR0 + 4, f_stat(st1h, sh1h), text_color = f_statCol(st1h, sh1h), text_size = size.small, bgcolor = c_clear)
+    table.cell(pnlTbl, 0, pnlR0 + 5, chName, text_color = f_statCol(stCh, tf_allowed), text_size = size.small, bgcolor = c_clear)
+    table.cell(pnlTbl, 1, pnlR0 + 5, f_stat(stCh, tf_allowed), text_color = f_statCol(stCh, tf_allowed), text_size = size.small, bgcolor = c_clear)
+
+    if i_debug
+        table.cell(pnlTbl, 0, pnlR0 + 6, "NQ", text_color = i_col_neut, text_size = size.small, bgcolor = c_clear)
+        table.cell(pnlTbl, 1, pnlR0 + 6, f_oc(a_nq_o[1], a_nq_c[1]), text_color = i_col_neut, text_size = size.small, bgcolor = c_clear)
+        table.cell(pnlTbl, 0, pnlR0 + 7, "ES", text_color = i_col_neut, text_size = size.small, bgcolor = c_clear)
+        table.cell(pnlTbl, 1, pnlR0 + 7, f_oc(a_es_o[1], a_es_c[1]), text_color = i_col_neut, text_size = size.small, bgcolor = c_clear)
+        table.cell(pnlTbl, 0, pnlR0 + 8, "YM", text_color = i_col_neut, text_size = size.small, bgcolor = c_clear)
+        table.cell(pnlTbl, 1, pnlR0 + 8, f_oc(a_ym_o[1], a_ym_c[1]), text_color = i_col_neut, text_size = size.small, bgcolor = c_clear)
+        table.cell(pnlTbl, 0, pnlR0 + 9, "d1", text_color = i_col_neut, text_size = size.small, bgcolor = c_clear)
+        table.cell(pnlTbl, 1, pnlR0 + 9, f_row3(nCh.d1, eCh.d1, yCh.d1) + "  pnd" + f_flag(stCh.pndOn), text_color = i_col_neut, text_size = size.small, bgcolor = c_clear)
+        table.cell(pnlTbl, 0, pnlR0 + 10, "stk", text_color = i_col_neut, text_size = size.small, bgcolor = c_clear)
+        table.cell(pnlTbl, 1, pnlR0 + 10, "W" + f_stk(b1w) + " D" + f_stk(b1d) + " 4H" + f_stk(b4h) + " 1H" + f_stk(b1h) + " ch" + f_stk(bCh), text_color = i_col_neut, text_size = size.small, bgcolor = c_clear)
+        table.cell(pnlTbl, 0, pnlR0 + 11, "born", text_color = i_col_neut, text_size = size.small, bgcolor = c_clear)
+        table.cell(pnlTbl, 1, pnlR0 + 11, "W " + f_born(b1w) + " · D " + f_born(b1d) + " · 4H " + f_born(b4h) + " · 1H " + f_born(b1h), text_color = i_col_neut, text_size = size.small, bgcolor = c_clear)
+
+// ══════════════════════════════════════════════════════════════
+//  ALERTS
+//  Two events, two messages, so a phone notification says which happened.
+//  The grey pending state deliberately raises nothing — it is a heads-up on
+//  the chart, not something worth waking you for.
+//  Alerts run on TradingView's servers, so one alert on one chart keeps
+//  working with the chart closed.
+// ══════════════════════════════════════════════════════════════
+
+// dir and who outlive an invalidation, so a broken break can still name
+// itself here.
+f_alertTx(MtfSt s, string nm) =>
+    nm + " " + f_arrow(s) + " " + s.who
+
+newTx  = sh1w and st1w.isNew ? f_alertTx(st1w, "1W") : sh1d and st1d.isNew ? f_alertTx(st1d, "1D") : sh4h and st4h.isNew ? f_alertTx(st4h, "4H") : sh1h and st1h.isNew ? f_alertTx(st1h, "1H") : tf_allowed and chIsBig and stCh.isNew ? f_alertTx(stCh, chName) : ""
+goneTx = sh1w and st1w.isGone ? f_alertTx(st1w, "1W") : sh1d and st1d.isGone ? f_alertTx(st1d, "1D") : sh4h and st4h.isGone ? f_alertTx(st4h, "4H") : sh1h and st1h.isGone ? f_alertTx(st1h, "1H") : tf_allowed and chIsBig and stCh.isGone ? f_alertTx(stCh, chName) : ""
+
+if i_mtf_alert and i_mtf_on and goneTx != ""
+    alert("ADI: נשבר — " + goneTx, alert.freq_once_per_bar)
+
+if i_mtf_alert and i_mtf_on and newTx != ""
+    alert("ADI: " + newTx, alert.freq_once_per_bar)
+
+// The fast notice, as a real alert TradingView can push. Once per CHART bar at
+// most — on an hourly chart that is once an hour, so a second fast PSP inside
+// the same hour shows in the box but does not ring twice.
+// Seeded from a series expression, not from "", so the variable is series
+// string from the start and the append below has something it can assign to.
+fastTx = psp5m ? "5m " + (dir5m < 0 ? "▼" : "▲") + " " + who5m : ""
+if psp15
+    fastTx := fastTx + (fastTx == "" ? "" : "  ·  ") + "15m " + (dir15 < 0 ? "▼" : "▲") + " " + who15
+
+if i_fast_on and i_fast_alert and fastTx != ""
+    alert("ADI מהיר — PSP " + fastTx, alert.freq_once_per_bar)
+
+// ══════════════════════════════════════════════════════════════
+//  END OF SCRIPT
+// ══════════════════════════════════════════════════════════════
