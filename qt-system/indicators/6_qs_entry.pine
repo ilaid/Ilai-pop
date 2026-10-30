@@ -36,7 +36,7 @@ useK0   = input.bool(true, "חודש · שבוע · יום (יום שלם)", gro
 useK1   = input.bool(true, "שבוע · יום · סשן (6 שעות)", group = grpQS)
 useK2   = input.bool(true, "יום · סשן · 90 דק'", group = grpQS)
 useK3   = input.bool(true, "סשן · 90 · 22.5 דק'", group = grpQS)
-useK4   = input.bool(true, "90 · 22.5 · 5.6 דק'", group = grpQS)
+useK4   = input.bool(false, "90 · 22.5 · 5.6 דק' גם לבד", group = grpQS, tooltip = "כבוי (ברירת מחדל): חלון של 5.6 דקות לא נחשב QS בפני עצמו — רק כשהוא חלק מ-QS גדול יותר שכבר פעיל. דלוק = גם לבד.")
 
 grpBrk  = "שבירות"
 useSsmt = input.bool(true, "SSMT / HSSMT", group = grpBrk)
