@@ -1,5 +1,5 @@
 //@version=5
-indicator("QS Entry | Quarterly Theory", shorttitle = "QS Entry", overlay = true, max_labels_count = 20)
+indicator("QS Entry | Quarterly Theory", shorttitle = "QS Entry", overlay = true, max_labels_count = 100)
 
 // ═══════════════════════════════════════════════════════════════════
 // QS Entry — אינדיקטור אחד למודל אחד
@@ -49,6 +49,7 @@ colBull = input.color(#26a69a, "לונג", group = grpVis)
 colBear = input.color(#ef5350, "שורט", group = grpVis)
 colQS   = input.color(#4b56ba, "QS", group = grpVis)
 showTbl = input.bool(true, "הצג טבלה", group = grpVis)
+showBg  = input.bool(true, "צבע את הרקע בזמן חלון QS", group = grpVis, tooltip = "כך רואים בדיוק איפה החלון מתחיל ונגמר.")
 posIn   = input.string("ימין למעלה", "מיקום הטבלה", options = ["ימין למעלה", "ימין באמצע", "ימין למטה", "מרכז למעלה", "מרכז באמצע", "מרכז למטה", "שמאל למעלה", "שמאל באמצע", "שמאל למטה"], group = grpVis)
 szIn    = input.string("קטן", "גודל הטבלה", options = ["זעיר", "קטן", "רגיל", "גדול", "ענק"], group = grpVis)
 alertOn = input.bool(true, "התראה על אישור כניסה", group = grpVis)
@@ -716,7 +717,8 @@ lgB15 = f_one(sB15, pB15)
 lgU15 = f_one(sU15, pU15)
 
 // ═══════════════════════════════════════════════════════════════════
-// חלון QS על הנר הנוכחי — מהרמה הנמוכה לגבוהה, כך שמוצג החלון הקצר ביותר
+// חלון QS על הנר הנוכחי — מהרמה הגבוהה לנמוכה, מבין החלונות הדלוקים. כש-333
+// פעיל על כל ה-22.5 דקות, זה חלון ה-22.5 — גם אם בתוכו יש גם 5.6 חם.
 // ═══════════════════════════════════════════════════════════════════
 
 durMs = chSec * 1000
@@ -725,8 +727,7 @@ dB = f_qsDigits(time + durMs - 1)
 string qsPat = ""
 int    qsK   = -1
 string qsKey = ""
-for kk = 0 to 4
-    int k = 4 - kk
+for k = 0 to 4
     if qsPat == "" and f_kOn(k)
         string s1 = str.substring(dA, k, k + 3)
         string s2 = str.substring(dB, k, k + 3)
@@ -776,7 +777,8 @@ f_entry(int d, int g15, int g5, int g1, int s15, bool p15, int s5, bool p5, int 
 entS = qsOn ? f_entry(-1, lgB15, lgB5, lgB1, sB15, pB15, sB5, pB5, sB1, pB1) : ""
 entL = qsOn ? f_entry(1, lgU15, lgU5, lgU1, sU15, pU15, sU5, pU5, sU1, pU1) : ""
 
-// פעם אחת לכל חלון ולכל כיוון. התגית נשארת עד שהחלון נגמר.
+// פעם אחת לכל חלון ולכל כיוון. כשהחלון נגמר התגית נשארת כהיסטוריה, דהויה,
+// כך שרואים שהיא כבר לא רלוונטית — והאישור בטבלה נמחק.
 var string doneS = ""
 var string doneL = ""
 var label  lbS   = na
@@ -784,6 +786,20 @@ var label  lbL   = na
 var string txS   = ""
 var string txL   = ""
 string alTxt = ""
+// החלון נגמר (או התחלף) — האישור נגמר, התגית נשארת דהויה
+if doneS != "" and doneS != qsId
+    label.set_color(lbS, color.new(colBear, 75))
+    label.set_textcolor(lbS, color.new(color.white, 40))
+    lbS   := na
+    doneS := ""
+    txS   := ""
+if doneL != "" and doneL != qsId
+    label.set_color(lbL, color.new(colBull, 75))
+    label.set_textcolor(lbL, color.new(color.white, 40))
+    lbL   := na
+    doneL := ""
+    txL   := ""
+
 if entS != "" and doneS != qsId
     doneS := qsId
     txS   := entS
@@ -794,17 +810,7 @@ if entL != "" and doneL != qsId
     txL   := entL
     lbL   := label.new(bar_index, low, "▲ QS " + qsPat + " · " + f_kLen(qsK), yloc = yloc.belowbar, style = label.style_label_up, color = colBull, textcolor = color.white, size = size.small, tooltip = "LONG · QS " + qsPat + " (" + f_kName(qsK) + ")\n" + entL)
     alTxt := alTxt + (alTxt == "" ? "" : "\n") + "▲ LONG · QS " + qsPat + " " + f_kLen(qsK) + " · " + str.replace_all(entL, "\n", " · ")
-// החלון נגמר (או התחלף) — האישור נגמר והתגית נמחקת
-if doneS != "" and doneS != qsId
-    label.delete(lbS)
-    lbS   := na
-    doneS := ""
-    txS   := ""
-if doneL != "" and doneL != qsId
-    label.delete(lbL)
-    lbL   := na
-    doneL := ""
-    txL   := ""
+bgcolor(showBg and qsOn ? color.new(colQS, 90) : na, title = "QS window")
 
 if alertOn and alTxt != ""
     alert("QS Entry · " + syminfo.ticker + "\n" + alTxt, alert.freq_once_per_bar)
