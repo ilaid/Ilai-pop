@@ -485,14 +485,6 @@ colBear = input.color(#ef5350, "דובי", group = grpVis)
 colNeut = input.color(color.gray, "נייטרלי", group = grpVis)
 colHead = input.color(#4b56ba, "כותרת", group = grpVis)
 
-// ── סימונים על הגרף, לבדיקה אחורה ──
-// הטבלה מראה רק את הרגע הנוכחי (הנר האחרון). כדי לבדוק את המערכת על
-// היסטוריה, כל סטאפ מסומן גם על הנר שבו הוא נוצר, ונשאר שם.
-grpMk    = "סימונים על הגרף (בדיקה אחורה)"
-mkOn     = input.bool(true, "סמן סטאפים על הגרף", group = grpMk, tooltip = "תגית אחת לכל סטאפ, על הנר שבו נפתח: מתחת לנר ללונג, מעליו לשורט. כל עוד הסטאפ חי לא מתווספות תגיות נוספות. מעבר עם העכבר מראה את שתי הרגליים.")
-mkMin    = input.string("רק A עם 2/2 פתיחות", "אילו סטאפים לסמן", options = ["רק A עם 2/2 פתיחות", "רק A", "A + B"], group = grpMk)
-mkChart  = input.bool(true, "רק סטאפים שכוללים את מסגרת הגרף", group = grpMk, tooltip = "דלוק = על גרף 5m מסומנים רק סטאפים שאחת הרגליים שלהם ב-5m. כך כל גרף מראה את הסטאפים שלו. הטבלה עדיין סורקת הכול.")
-mkModels = input.bool(true, "סמן גם SFP ו-PSP→HSSMT", group = grpMk)
 
 // ═══════════════════════════════════════════════════════════════════
 // פענוח המספרים שהאינדיקטורים מייצאים
@@ -798,7 +790,7 @@ f_best(int dir) =>
     string all = ""
     for p = 0 to 6
         int c = p * 2 + (dir == 1 ? 1 : 0)
-        if array.get(cKey, c) != -1
+        if array.get(cKey, c) != -1 and array.get(cTo, c) >= 1
             int  la = array.get(cLgA, c)
             int  lb = array.get(cLgB, c)
             bool gA = f_sK(la) < 2 and f_sK(lb) < 2
@@ -812,46 +804,6 @@ f_best(int dir) =>
 [bestL, allL] = f_best(1)
 [bestS, allS] = f_best(-1)
 
-// ── סימון על הגרף: תגית אחת לכל "אפיזודה" ──
-// מבין הסטאפים החיים בכיוון, הטוב ביותר שעובר את הסינון. תגית נוצרת רק
-// כשכיוון עובר ממצב "אין סטאפ" ל"יש סטאפ", ולא שוב כל עוד הוא נשאר חי —
-// גם אם הרגליים מתחלפות בדרך. כך הגרף מראה כמה פעמים באמת נפתחה הזדמנות.
-f_mkPick(int dir) =>
-    int bc  = -1
-    int bSc = -1
-    for p = 0 to 6
-        int c = p * 2 + (dir == 1 ? 1 : 0)
-        if array.get(cKey, c) != -1
-            int  la  = array.get(cLgA, c)
-            int  lb  = array.get(cLgB, c)
-            bool gA  = f_sK(la) < 2 and f_sK(lb) < 2
-            int  met = array.get(cTo, c)
-            bool okG = mkMin == "A + B" or (mkMin == "רק A" and gA) or (gA and met == 2)
-            bool okT = not mkChart or f_sI(la) == chIdx or f_sI(lb) == chIdx
-            if okG and okT
-                int sc = (gA ? 2 : 1) * 1000000 + met * 100000 + (f_rank(f_sK(la), array.get(sCode, la)) + f_rank(f_sK(lb), array.get(sCode, lb))) * 1000
-                if sc > bSc
-                    bSc := sc
-                    bc  := c
-    bc
-
-f_mkDraw(int c, int dir) =>
-    int  la = array.get(cLgA, c)
-    int  lb = array.get(cLgB, c)
-    bool gA = f_sK(la) < 2 and f_sK(lb) < 2
-    string tip = (dir == 1 ? "LONG " : "SHORT ") + (gA ? "A" : "B") + "\n" + f_slotTxt(la) + " + " + f_slotTxt(lb) + "\nTO " + str.tostring(array.get(cTo, c)) + "/2"
-    label.new(bar_index, dir == 1 ? low : high, (dir == 1 ? "▲" : "▼") + (gA ? "A" : "B"), yloc = dir == 1 ? yloc.belowbar : yloc.abovebar, style = dir == 1 ? label.style_label_up : label.style_label_down, color = color.new(dir == 1 ? colBull : colBear, gA ? 0 : 50), textcolor = color.white, size = size.small, tooltip = tip)
-
-var bool mkWasL = false
-var bool mkWasS = false
-mkL = f_mkPick(1)
-mkS = f_mkPick(-1)
-if mkOn and mkL >= 0 and not mkWasL
-    f_mkDraw(mkL, 1)
-if mkOn and mkS >= 0 and not mkWasS
-    f_mkDraw(mkS, -1)
-mkWasL := mkL >= 0
-mkWasS := mkS >= 0
 
 f_setupTxt(int c, int dir) =>
     string t = "—"
@@ -859,7 +811,7 @@ f_setupTxt(int c, int dir) =>
         int  la = array.get(cLgA, c)
         int  lb = array.get(cLgB, c)
         bool gA = f_sK(la) < 2 and f_sK(lb) < 2
-        t := f_slotTxt(la) + " + " + f_slotTxt(lb) + "  " + (gA ? "A" : "B") + " " + str.tostring(array.get(cTo, c)) + "/2"
+        t := f_slotTxt(la) + " + " + f_slotTxt(lb) + " · TO " + str.tostring(array.get(cTo, c)) + "/2"
     t
 
 // ═══════════════════════════════════════════════════════════════════
@@ -906,10 +858,6 @@ phNew  = phDir != 0 and phDir != prevPh
 prevSfp := sfpDir
 prevPh  := phDir
 
-if mkOn and mkModels and sfpNew
-    label.new(bar_index, sfpDir == 1 ? low : high, "SFP", yloc = sfpDir == 1 ? yloc.belowbar : yloc.abovebar, style = sfpDir == 1 ? label.style_label_up : label.style_label_down, color = color.new(colHead, 10), textcolor = color.white, size = size.tiny, tooltip = sfpTxt)
-if mkOn and mkModels and phNew
-    label.new(bar_index, phDir == 1 ? low : high, "P→H", yloc = phDir == 1 ? yloc.belowbar : yloc.abovebar, style = phDir == 1 ? label.style_label_up : label.style_label_down, color = color.new(colHead, 10), textcolor = color.white, size = size.tiny, tooltip = phTxt)
 
 // ═══════════════════════════════════════════════════════════════════
 // תצוגה
