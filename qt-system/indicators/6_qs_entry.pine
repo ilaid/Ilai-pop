@@ -683,8 +683,9 @@ f_pspSeq(Eng e, int d) =>
                 sq := array.get(e.pSeq, i)
     sq
 
-// השבירות של המסגרת בכיוון d: [סוג ה-SSMT (0 / 1 = SSMT / 2 = HSSMT), האם יש PSP]
-f_leg(Eng e, int d) =>
+// השבירות של המסגרת בכיוון d: [סוג ה-SSMT (0 / 1 = SSMT / 2 = HSSMT), האם יש PSP,
+// ומזהה לכל אחת — "5mS12" / "5mP7" — כדי לדעת אם זו אותה שבירה או חדשה]
+f_leg(Eng e, int d, string nm) =>
     [rN, lN] = f_cyc(e.cls, time)
     bool fresh = e.started and e.lifeId == lN
     int  sB  = fresh and e.bTy != 0 ? e.bSeq : -1
@@ -692,23 +693,43 @@ f_leg(Eng e, int d) =>
     int  pB  = fresh ? f_pspSeq(e, -1) : -1
     int  pU  = fresh ? f_pspSeq(e, 1) : -1
     int  dom = sB >= 0 or sU >= 0 ? (sB > sU ? -1 : 1) : (pB >= 0 or pU >= 0 ? (pB > pU ? -1 : 1) : 0)
-    int  ssT = 0
-    bool psp = false
+    int    ssT = 0
+    bool   psp = false
+    string kS  = ""
+    string kP  = ""
     if dom == d
-        ssT := (d == -1 ? sB : sU) >= 0 ? (d == -1 ? e.bTy : e.uTy) : 0
-        psp := (d == -1 ? pB : pU) >= 0
-    [ssT, psp]
+        int ss = d == -1 ? sB : sU
+        int pq = d == -1 ? pB : pU
+        ssT := ss >= 0 ? (d == -1 ? e.bTy : e.uTy) : 0
+        psp := pq >= 0
+        kS  := ss >= 0 ? nm + "S" + str.tostring(ss) : ""
+        kP  := pq >= 0 ? nm + "P" + str.tostring(pq) : ""
+    [ssT, psp, kS, kP]
 
 // רגל אחת של המסגרת (לזוג בין מסגרות): SSMT קודם, אחרת PSP
 f_one(int ss, bool ps) => ss > 0 ? ss : ps ? 3 : 0
 f_legName(int g) => g == 2 ? "HSSMT" : g == 1 ? "SSMT" : g == 3 ? "PSP" : "—"
 
-[sB1, pB1]   = f_leg(e1, -1)
-[sU1, pU1]   = f_leg(e1, 1)
-[sB5, pB5]   = f_leg(e5, -1)
-[sU5, pU5]   = f_leg(e5, 1)
-[sB15, pB15] = f_leg(e15, -1)
-[sU15, pU15] = f_leg(e15, 1)
+[sB1, pB1, kSB1, kPB1]     = f_leg(e1, -1, "1m")
+[sU1, pU1, kSU1, kPU1]     = f_leg(e1, 1, "1m")
+[sB5, pB5, kSB5, kPB5]     = f_leg(e5, -1, "5m")
+[sU5, pU5, kSU5, kPU5]     = f_leg(e5, 1, "5m")
+[sB15, pB15, kSB15, kPB15] = f_leg(e15, -1, "15m")
+[sU15, pU15, kSU15, kPU15] = f_leg(e15, 1, "15m")
+
+// מזהה הרגל לזוג בין מסגרות (SSMT קודם), ומזהה לזוג באותה מסגרת
+f_k1(string kS, string kP) => kS != "" ? kS : kP
+f_k2(string kS, string kP) => kS + "+" + kP
+// כל השבירות שחיות עכשיו בכיוון — כדי לבדוק אם אישור עדיין תקף
+f_live(string a, string b, string c, string d, string e, string f) => "|" + a + "|" + b + "|" + c + "|" + d + "|" + e + "|" + f + "|"
+liveS = f_live(kSB15, kPB15, kSB5, kPB5, kSB1, kPB1)
+liveL = f_live(kSU15, kPU15, kSU5, kPU5, kSU1, kPU1)
+f_alive(string key, string live) =>
+    bool ok = key != ""
+    for part in str.split(key, "+")
+        if not str.contains(live, "|" + part + "|")
+            ok := false
+    ok
 lgB1  = f_one(sB1, pB1)
 lgU1  = f_one(sU1, pU1)
 lgB5  = f_one(sB5, pB5)
@@ -758,24 +779,41 @@ f_beyond(int d, float a, float b) => not na(a) and not na(b) and (d == -1 ? high
 
 // הזוג הראשון שמתקיים: בין מסגרות (15m+5m, 5m+1m, 15m+1m), ואחר כך SSMT
 // ו-PSP באותה מסגרת (15m, 5m, 1m)
-f_entry(int d, int g15, int g5, int g1, int s15, bool p15, int s5, bool p5, int s1, bool p1) =>
+// מחזיר גם מפתח של שתי השבירות: אותו זוג שכבר נתן אישור לא נותן עוד אחד
+f_new(string used, string k) => not str.contains(used, "#" + k + "#")
+f_entry(int d, int g15, int g5, int g1, int s15, bool p15, int s5, bool p5, int s1, bool p1, string a15, string b15, string a5, string b5, string a1, string b1, string used) =>
     string txt = ""
-    if g15 > 0 and g5 > 0 and f_beyond(d, toD, to90)
+    string key = ""
+    string k15 = f_k1(a15, b15)
+    string k5  = f_k1(a5, b5)
+    string k1  = f_k1(a1, b1)
+    if g15 > 0 and g5 > 0 and f_beyond(d, toD, to90) and f_new(used, k15 + "+" + k5)
         txt := "15m " + f_legName(g15) + " + 5m " + f_legName(g5) + "\nTDO + T90O"
-    else if g5 > 0 and g1 > 0 and f_beyond(d, to90, toMc)
+        key := k15 + "+" + k5
+    else if g5 > 0 and g1 > 0 and f_beyond(d, to90, toMc) and f_new(used, k5 + "+" + k1)
         txt := "5m " + f_legName(g5) + " + 1m " + f_legName(g1) + "\nT90O + TMcO"
-    else if g15 > 0 and g1 > 0 and f_beyond(d, toD, toMc)
+        key := k5 + "+" + k1
+    else if g15 > 0 and g1 > 0 and f_beyond(d, toD, toMc) and f_new(used, k15 + "+" + k1)
         txt := "15m " + f_legName(g15) + " + 1m " + f_legName(g1) + "\nTDO + TMcO"
-    else if s15 > 0 and p15 and f_beyond(d, toD, toW)
+        key := k15 + "+" + k1
+    else if s15 > 0 and p15 and f_beyond(d, toD, toW) and f_new(used, f_k2(a15, b15))
         txt := "15m " + f_legName(s15) + " + 15m PSP\nTDO + TWO"
-    else if s5 > 0 and p5 and f_beyond(d, to90, toD)
+        key := f_k2(a15, b15)
+    else if s5 > 0 and p5 and f_beyond(d, to90, toD) and f_new(used, f_k2(a5, b5))
         txt := "5m " + f_legName(s5) + " + 5m PSP\nT90O + TDO"
-    else if s1 > 0 and p1 and f_beyond(d, toMc, to90)
+        key := f_k2(a5, b5)
+    else if s1 > 0 and p1 and f_beyond(d, toMc, to90) and f_new(used, f_k2(a1, b1))
         txt := "1m " + f_legName(s1) + " + 1m PSP\nTMcO + T90O"
-    txt
+        key := f_k2(a1, b1)
+    [txt, key]
 
-entS = qsOn ? f_entry(-1, lgB15, lgB5, lgB1, sB15, pB15, sB5, pB5, sB1, pB1) : ""
-entL = qsOn ? f_entry(1, lgU15, lgU5, lgU1, sU15, pU15, sU5, pU5, sU1, pU1) : ""
+// זוגות שכבר נתנו אישור, לכל כיוון — אישור חדש רק עם שבירה חדשה
+var string usedS = "#"
+var string usedL = "#"
+[entS, keyNS] = f_entry(-1, lgB15, lgB5, lgB1, sB15, pB15, sB5, pB5, sB1, pB1, kSB15, kPB15, kSB5, kPB5, kSB1, kPB1, usedS)
+[entL, keyNL] = f_entry(1, lgU15, lgU5, lgU1, sU15, pU15, sU5, pU5, sU1, pU1, kSU15, kPU15, kSU5, kPU5, kSU1, kPU1, usedL)
+entS := qsOn ? entS : ""
+entL := qsOn ? entL : ""
 
 // פעם אחת לכל חלון ולכל כיוון. כשהחלון נגמר התגית נשארת כהיסטוריה, דהויה,
 // כך שרואים שהיא כבר לא רלוונטית — והאישור בטבלה נמחק.
@@ -785,29 +823,48 @@ var label  lbS   = na
 var label  lbL   = na
 var string txS   = ""
 var string txL   = ""
+var string keyS  = ""
+var string keyL  = ""
 string alTxt = ""
-// החלון נגמר (או התחלף) — האישור נגמר, התגית נשארת דהויה
+// אחת השבירות של האישור מתה (נלקחה או שהמיכל שלה נגמר) — האישור נכשל:
+// התגית מקבלת ✕ ונשארת דהויה, ובאותו חלון לא יוצא אישור נוסף בכיוון הזה
+if keyS != "" and not f_alive(keyS, liveS)
+    label.set_text(lbS, label.get_text(lbS) + " ✕")
+    label.set_color(lbS, color.new(colBear, 80))
+    label.set_textcolor(lbS, color.new(color.white, 40))
+    keyS := ""
+    txS  := ""
+if keyL != "" and not f_alive(keyL, liveL)
+    label.set_text(lbL, label.get_text(lbL) + " ✕")
+    label.set_color(lbL, color.new(colBull, 80))
+    label.set_textcolor(lbL, color.new(color.white, 40))
+    keyL := ""
+    txL  := ""
+// החלון נגמר (או התחלף) — האישור נגמר, התגית נשארת דהויה. השבירות שלה
+// ממשיכות להיבדק: אם אחת מהן מתה אחר כך, התגית עדיין מקבלת ✕.
 if doneS != "" and doneS != qsId
     label.set_color(lbS, color.new(colBear, 75))
     label.set_textcolor(lbS, color.new(color.white, 40))
-    lbS   := na
     doneS := ""
     txS   := ""
 if doneL != "" and doneL != qsId
     label.set_color(lbL, color.new(colBull, 75))
     label.set_textcolor(lbL, color.new(color.white, 40))
-    lbL   := na
     doneL := ""
     txL   := ""
 
 if entS != "" and doneS != qsId
     doneS := qsId
     txS   := entS
+    keyS  := keyNS
+    usedS := str.length(usedS) > 3000 ? "#" + keyNS + "#" : usedS + keyNS + "#"
     lbS   := label.new(bar_index, high, "▼ QS " + qsPat + " · " + f_kLen(qsK), yloc = yloc.abovebar, style = label.style_label_down, color = colBear, textcolor = color.white, size = size.small, tooltip = "SHORT · QS " + qsPat + " (" + f_kName(qsK) + ")\n" + entS)
     alTxt := "▼ SHORT · QS " + qsPat + " " + f_kLen(qsK) + " · " + str.replace_all(entS, "\n", " · ")
 if entL != "" and doneL != qsId
     doneL := qsId
     txL   := entL
+    keyL  := keyNL
+    usedL := str.length(usedL) > 3000 ? "#" + keyNL + "#" : usedL + keyNL + "#"
     lbL   := label.new(bar_index, low, "▲ QS " + qsPat + " · " + f_kLen(qsK), yloc = yloc.belowbar, style = label.style_label_up, color = colBull, textcolor = color.white, size = size.small, tooltip = "LONG · QS " + qsPat + " (" + f_kName(qsK) + ")\n" + entL)
     alTxt := alTxt + (alTxt == "" ? "" : "\n") + "▲ LONG · QS " + qsPat + " " + f_kLen(qsK) + " · " + str.replace_all(entL, "\n", " · ")
 bgcolor(showBg and qsOn ? color.new(colQS, 90) : na, title = "QS window")
