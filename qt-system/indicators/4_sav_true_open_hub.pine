@@ -468,6 +468,7 @@ srcAB = input.source(close, "ADI · B",  group = grpSrc, tooltip = "בחר מה�
 grpLog  = "לוגיקה"
 usePsp  = input.bool(true, "PSP יכול להיות רגל ב-Two-Stage (סטאפ B)", group = grpLog)
 friSkip = input.bool(true, "1H לא רלוונטי ביום שישי", group = grpLog, tooltip = "ספר החוקים §1: שבירה שעתית לא רלוונטית בימי שישי.")
+noWeak  = input.bool(true, "SSMT(c) לא נחשב רגל", group = grpLog, tooltip = "SSMT שהנכסים החזקים כבר סגרו מעבר לו (core / all closed) הוא החלש ביותר. כבוי = גם הוא יכול להיות רגל.")
 
 grpAl    = "התראות"
 alTwo    = input.string("A + B", "Two-Stage חדש", options = ["A + B", "רק A", "רק A עם 2/2 פתיחות", "כבוי"], group = grpAl)
@@ -478,7 +479,7 @@ alRev    = input.bool(true, "שבירה רדומה חזרה לחיים", group =
 grpVis  = "תצוגה"
 posIn   = input.string("ימין למעלה", "מיקום", options = ["ימין למעלה", "ימין באמצע", "ימין למטה", "שמאל למעלה", "שמאל באמצע", "שמאל למטה"], group = grpVis)
 szIn    = input.string("small", "גודל טקסט", options = ["tiny", "small", "normal"], group = grpVis)
-showTf  = input.bool(true, "הצג שורה לכל מסגרת", group = grpVis)
+showTf  = input.bool(false, "הצג שורה לכל מסגרת", group = grpVis, tooltip = "כבוי = טבלה קומפקטית: רק הסטאפ הכי טוב ללונג ולשורט.")
 colBull = input.color(#26a69a, "שורי", group = grpVis)
 colBear = input.color(#ef5350, "דובי", group = grpVis)
 colNeut = input.color(color.gray, "נייטרלי", group = grpVis)
@@ -488,8 +489,9 @@ colHead = input.color(#4b56ba, "כותרת", group = grpVis)
 // הטבלה מראה רק את הרגע הנוכחי (הנר האחרון). כדי לבדוק את המערכת על
 // היסטוריה, כל סטאפ מסומן גם על הנר שבו הוא נוצר, ונשאר שם.
 grpMk    = "סימונים על הגרף (בדיקה אחורה)"
-mkOn     = input.bool(true, "סמן כל Two-Stage על הנר שבו נוצר", group = grpMk, tooltip = "תגית קטנה מתחת לנר (לונג) או מעליו (שורט): A/B ומספר הפתיחות. מעבר עם העכבר מראה את שתי הרגליים.")
-mkMin    = input.string("A + B", "אילו סטאפים לסמן", options = ["A + B", "רק A", "רק A עם 2/2 פתיחות"], group = grpMk)
+mkOn     = input.bool(true, "סמן סטאפים על הגרף", group = grpMk, tooltip = "תגית אחת לכל סטאפ, על הנר שבו נפתח: מתחת לנר ללונג, מעליו לשורט. כל עוד הסטאפ חי לא מתווספות תגיות נוספות. מעבר עם העכבר מראה את שתי הרגליים.")
+mkMin    = input.string("רק A עם 2/2 פתיחות", "אילו סטאפים לסמן", options = ["רק A עם 2/2 פתיחות", "רק A", "A + B"], group = grpMk)
+mkChart  = input.bool(true, "רק סטאפים שכוללים את מסגרת הגרף", group = grpMk, tooltip = "דלוק = על גרף 5m מסומנים רק סטאפים שאחת הרגליים שלהם ב-5m. כך כל גרף מראה את הסטאפים שלו. הטבלה עדיין סורקת הכול.")
 mkModels = input.bool(true, "סמן גם SFP ו-PSP→HSSMT", group = grpMk)
 
 // ═══════════════════════════════════════════════════════════════════
@@ -706,14 +708,16 @@ for s = 0 to 29
     array.set(sDorm, s, dNow)
 
 // הרגל הכי חזקה במסגרת i בכיוון dir, מבין החיות שאינן רדומות
-f_leg(int i, int dir, bool allowPsp) =>
+f_leg(int i, int dir, bool allowPsp, bool allowWeak) =>
     int best = -1
     int bR   = -1
     int bS   = -1
     for k = 0 to 2
         if k < 2 or allowPsp
             int s = k * 10 + i * 2 + (dir == 1 ? 1 : 0)
-            if f_live(s) and not f_dorm(s)
+            int cc = array.get(sCode, s)
+            bool weak = k == 0 and (cc == 1 or cc == 4)
+            if f_live(s) and not f_dorm(s) and (allowWeak or not weak)
                 int r = f_rank(k, array.get(sCode, s))
                 if r > bR or (r == bR and array.get(sSeq, s) > bS)
                     bR   := r
@@ -762,8 +766,8 @@ for p = 0 to 6
     for d = 0 to 1
         int dir = d == 0 ? -1 : 1
         int c   = p * 2 + d
-        int la  = f_leg(i, dir, usePsp)
-        int lb  = f_leg(j, dir, usePsp)
+        int la  = f_leg(i, dir, usePsp, not noWeak)
+        int lb  = f_leg(j, dir, usePsp, not noWeak)
         bool on = la >= 0 and lb >= 0 and not (f_sK(la) == 2 and f_sK(lb) == 2)
         if not on
             array.set(cKey, c, -1)
@@ -781,10 +785,6 @@ for p = 0 to 6
                 bool fire = alTwo == "A + B" or (alTwo == "רק A" and gA) or (alTwo == "רק A עם 2/2 פתיחות" and gA and met == 2)
                 if fire
                     newTwo := newTwo + (newTwo == "" ? "" : " · ") + (dir == 1 ? "▲ " : "▼ ") + f_slotTxt(la) + " + " + f_slotTxt(lb) + " " + (gA ? "A" : "B") + " TO " + str.tostring(met) + "/2"
-                bool mk = mkOn and (mkMin == "A + B" or (mkMin == "רק A" and gA) or (mkMin == "רק A עם 2/2 פתיחות" and gA and met == 2))
-                if mk
-                    string mTip = (dir == 1 ? "LONG  " : "SHORT  ") + (gA ? "A" : "B") + "\n" + f_slotTxt(la) + " + " + f_slotTxt(lb) + "\nTO " + str.tostring(met) + "/2" + (unk > 0 ? "  (" + str.tostring(unk) + " ?)" : "")
-                    label.new(bar_index, dir == 1 ? low : high, (gA ? "A " : "B ") + str.tostring(met) + "/2", yloc = dir == 1 ? yloc.belowbar : yloc.abovebar, style = dir == 1 ? label.style_label_up : label.style_label_down, color = color.new(dir == 1 ? colBull : colBear, gA ? 10 : 55), textcolor = color.white, size = size.tiny, tooltip = mTip)
             // רגל שהתחזקה או הוחלפה — אותו סטאפ, תמונת הפתיחות לא משתנה
             array.set(cKey, c, key)
             array.set(cLgA, c, la)
@@ -812,13 +812,54 @@ f_best(int dir) =>
 [bestL, allL] = f_best(1)
 [bestS, allS] = f_best(-1)
 
+// ── סימון על הגרף: תגית אחת לכל "אפיזודה" ──
+// מבין הסטאפים החיים בכיוון, הטוב ביותר שעובר את הסינון. תגית נוצרת רק
+// כשכיוון עובר ממצב "אין סטאפ" ל"יש סטאפ", ולא שוב כל עוד הוא נשאר חי —
+// גם אם הרגליים מתחלפות בדרך. כך הגרף מראה כמה פעמים באמת נפתחה הזדמנות.
+f_mkPick(int dir) =>
+    int bc  = -1
+    int bSc = -1
+    for p = 0 to 6
+        int c = p * 2 + (dir == 1 ? 1 : 0)
+        if array.get(cKey, c) != -1
+            int  la  = array.get(cLgA, c)
+            int  lb  = array.get(cLgB, c)
+            bool gA  = f_sK(la) < 2 and f_sK(lb) < 2
+            int  met = array.get(cTo, c)
+            bool okG = mkMin == "A + B" or (mkMin == "רק A" and gA) or (gA and met == 2)
+            bool okT = not mkChart or f_sI(la) == chIdx or f_sI(lb) == chIdx
+            if okG and okT
+                int sc = (gA ? 2 : 1) * 1000000 + met * 100000 + (f_rank(f_sK(la), array.get(sCode, la)) + f_rank(f_sK(lb), array.get(sCode, lb))) * 1000
+                if sc > bSc
+                    bSc := sc
+                    bc  := c
+    bc
+
+f_mkDraw(int c, int dir) =>
+    int  la = array.get(cLgA, c)
+    int  lb = array.get(cLgB, c)
+    bool gA = f_sK(la) < 2 and f_sK(lb) < 2
+    string tip = (dir == 1 ? "LONG " : "SHORT ") + (gA ? "A" : "B") + "\n" + f_slotTxt(la) + " + " + f_slotTxt(lb) + "\nTO " + str.tostring(array.get(cTo, c)) + "/2"
+    label.new(bar_index, dir == 1 ? low : high, (dir == 1 ? "▲" : "▼") + (gA ? "A" : "B"), yloc = dir == 1 ? yloc.belowbar : yloc.abovebar, style = dir == 1 ? label.style_label_up : label.style_label_down, color = color.new(dir == 1 ? colBull : colBear, gA ? 0 : 50), textcolor = color.white, size = size.small, tooltip = tip)
+
+var bool mkWasL = false
+var bool mkWasS = false
+mkL = f_mkPick(1)
+mkS = f_mkPick(-1)
+if mkOn and mkL >= 0 and not mkWasL
+    f_mkDraw(mkL, 1)
+if mkOn and mkS >= 0 and not mkWasS
+    f_mkDraw(mkS, -1)
+mkWasL := mkL >= 0
+mkWasS := mkS >= 0
+
 f_setupTxt(int c, int dir) =>
     string t = "—"
     if c >= 0
         int  la = array.get(cLgA, c)
         int  lb = array.get(cLgB, c)
         bool gA = f_sK(la) < 2 and f_sK(lb) < 2
-        t := (dir == 1 ? "▲ " : "▼ ") + f_slotTxt(la) + " + " + f_slotTxt(lb) + " · " + (gA ? "A" : "B") + " · TO " + str.tostring(array.get(cTo, c)) + "/2"
+        t := f_slotTxt(la) + " + " + f_slotTxt(lb) + "  " + (gA ? "A" : "B") + " " + str.tostring(array.get(cTo, c)) + "/2"
     t
 
 // ═══════════════════════════════════════════════════════════════════
@@ -885,7 +926,7 @@ f_dirCol(int dir, int tr) => color.new(dir == 1 ? colBull : dir == -1 ? colBear 
 // מפרט את כולן — חיה, רדומה (zz), ומאיזה אינדיקטור.
 f_tfRow(int i) =>
     int    dom  = array.get(domDir, i)
-    int    lg   = f_leg(i, dom, true)
+    int    lg   = f_leg(i, dom, true, true)
     int    more = 0
     string tip  = ""
     bool   allNa = array.get(tfNa, i) and array.get(tfNa, 5 + i) and array.get(tfNa, 10 + i)
@@ -911,10 +952,10 @@ if barstate.islast
             table.cell(hub, 0, row, (i == chIdx ? "▶ " : "") + f_tfName(i), bgcolor = color.new(colNeut, 80), text_color = color.white, text_size = szT)
             table.cell(hub, 1, row, tt, bgcolor = f_dirCol(td, 80), text_color = color.white, text_size = szT, tooltip = tp)
             row += 1
-    table.cell(hub, 0, row, "LONG", bgcolor = color.new(colBull, 60), text_color = color.white, text_size = szT)
+    table.cell(hub, 0, row, "▲ LONG", bgcolor = color.new(colBull, 60), text_color = color.white, text_size = szT)
     table.cell(hub, 1, row, f_setupTxt(bestL, 1), bgcolor = bestL >= 0 ? color.new(colBull, 45) : color.new(colNeut, 85), text_color = color.white, text_size = szT, tooltip = allL == "" ? "אין Two-Stage לעליות" : allL)
     row += 1
-    table.cell(hub, 0, row, "SHORT", bgcolor = color.new(colBear, 60), text_color = color.white, text_size = szT)
+    table.cell(hub, 0, row, "▼ SHORT", bgcolor = color.new(colBear, 60), text_color = color.white, text_size = szT)
     table.cell(hub, 1, row, f_setupTxt(bestS, -1), bgcolor = bestS >= 0 ? color.new(colBear, 45) : color.new(colNeut, 85), text_color = color.white, text_size = szT, tooltip = allS == "" ? "אין Two-Stage לירידות" : allS)
     row += 1
     if sfpTxt != ""
