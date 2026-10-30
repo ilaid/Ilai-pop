@@ -1,0 +1,428 @@
+//@version=5
+indicator("Sav FX - Dynamic P&D + Devil Marks", overlay = true, max_boxes_count = 50, max_labels_count = 500, max_lines_count = 500)
+
+// ══════════════════════════════════════════════════════════════════════════
+//  PART A — True Opens  (Quarterly Theory ladder) + Bias + zone box
+//  Every time here is New York. The whole model runs on an 18:00-to-18:00
+//  trading day, and every level is the open of the SECOND sub-cycle inside
+//  its container — except TYO, which marks the QT year's own start (April).
+//  T4YO is the second year of the calendar 4 year cycle (2024, 2028).
+//  A level lives only as long as its container: when the container closes
+//  the line disappears until the next container prints its own open.
+// ══════════════════════════════════════════════════════════════════════════
+
+gGlobal = "Global Settings"
+customLineColor = input.color(color.rgb(75, 86, 186, 65), "True Open", group = gGlobal)
+lineStyleInput  = input.string("Dashed", "Line Style", options = ["Solid", "Dotted", "Dashed"], group = gGlobal)
+lineWidthInput  = input.int(1, "Line Width", minval = 1, maxval = 5, group = gGlobal)
+expireLevels    = input.bool(true, "Drop a level when its period ends", group = gGlobal, tooltip = "ON  = the line vanishes the moment its container closes, and returns only once the new container prints its own open. Between 18:00 and 00:00 there is no TDO at all.\nOFF = the last known level stays on the chart.")
+showZoneBox     = input.bool(true, "Zone box", group = gGlobal, tooltip = "The small premium / discount box. Hidden above the 4 hour chart.")
+zonePosition    = input.string("bottom_right", "Zone box position", options = ["top_right", "top_left", "bottom_right", "bottom_left", "middle_right", "middle_left"], group = gGlobal)
+
+trueOpenStyle = lineStyleInput == "Solid" ? line.style_solid : lineStyleInput == "Dotted" ? line.style_dotted : line.style_dashed
+
+gLv = "True Opens"
+useTNcP = input.bool(true, "TNcP   - 2nd sub-quarter in the quarter",  group = gLv, tooltip = "The first candle at or after quarter + 5:37.5. Shown up to the 1 minute chart.")
+useTMcO = input.bool(true, "TMcO  - 2nd quarter in the micro",         group = gLv, tooltip = "The first candle at or after micro + 22:30, so on a 1 minute chart the 09:00 micro opens it at 09:23 and the 10:30 micro at 10:53. Shown below the 5 minute chart.")
+useT90O = input.bool(true, "T90O  - 2nd micro in the session",         group = gLv, tooltip = "19:30 / 01:30 / 07:30 / 13:30. Shown below the 1 hour chart.")
+useTDO  = input.bool(true, "TDO    - 2nd session in the day",          group = gLv, tooltip = "00:00. Shown from the 1 minute to the daily chart.")
+useTWO  = input.bool(true, "TWO   - 2nd day in the week",              group = gLv, tooltip = "Monday 18:00. Shown from the 5 minute to the daily chart.")
+useTMO  = input.bool(true, "TMO   - 2nd week in the month",            group = gLv, tooltip = "The Sunday 18:00 that opens the week whose Tuesday falls on the 8th-14th. Shown from the 15 minute chart up.")
+useTYO  = input.bool(true, "TYO    - QT year open (1 April)",          group = gLv, tooltip = "Daily chart and above.")
+useT4YO = input.bool(true, "T4YO  - 2nd year in the 4 year cycle (2024, 2028)", group = gLv, tooltip = "The cycle is calendar years 2023–2026, 2027–2030. Its True Open is the first candle of the second year. During the first year there is no T4YO. Daily chart and above.")
+
+IsSession(sess, timezone) =>
+    not na(time(timeframe.period, sess, timezone))
+
+is6_00Session  = IsSession("0600-0730", "America/New_York")
+is7_30Session  = IsSession("0730-0900", "America/New_York")
+is9_00Session  = IsSession("0900-1030", "America/New_York")
+is10_30Session = IsSession("1030-1200", "America/New_York")
+
+TZ = "America/New_York"
+
+tfSec = timeframe.in_seconds(timeframe.period)
+tfMs  = tfSec * 1000
+tfMin = tfSec / 60.0
+
+// Which levels get a line on this chart, band by band.
+band1 = tfMin < 1
+band2 = tfMin >= 1    and tfMin < 5
+band3 = tfMin >= 5    and tfMin < 15
+band4 = tfMin >= 15   and tfMin < 60
+band5 = tfMin >= 60   and tfMin < 1440
+band6 = tfMin >= 1440
+
+showTNcP = useTNcP and (band1 or band2)
+showTMcO = useTMcO and (band1 or band2)
+showT90O = useT90O and (band1 or band2 or band3 or band4)
+showTDO  = useTDO  and (band2 or band3 or band4 or band5)
+showTWO  = useTWO  and (band3 or band4 or band5)
+showTMO  = useTMO  and (band4 or band5 or band6)
+showTYO  = useTYO  and band6
+showT4YO = useT4YO and band6
+
+// ---------- The trading day this bar belongs to ----------
+// From 18:00 onward the bar already belongs to tomorrow's trading day.
+nyHour = hour(time, TZ)
+int tdCarrier = time + (nyHour >= 18 ? 86400000 : 0)
+int tdY = year(tdCarrier, TZ)
+int tdM = month(tdCarrier, TZ)
+int tdD = dayofmonth(tdCarrier, TZ)
+int tdMid = timestamp(TZ, tdY, tdM, tdD, 0, 0, 0)
+
+// 18:00 of the previous calendar day, found through its noon so a DST switch
+// can never move the date by a day.
+int prevNoon = tdMid - 43200000
+int dayStart = timestamp(TZ, year(prevNoon, TZ), month(prevNoon, TZ), dayofmonth(prevNoon, TZ), 18, 0, 0)
+
+// ---------- Containers and their second sub-cycle ----------
+float elapsed  = time - dayStart
+int sessStart  = dayStart + int(math.floor(elapsed / 21600000.0)) * 21600000   // 6h session
+int microStart = dayStart + int(math.floor(elapsed / 5400000.0))  * 5400000    // 90m micro
+int qtrStart   = dayStart + int(math.floor(elapsed / 1350000.0))  * 1350000    // 22.5m quarter
+
+int tgtTDO  = tdMid                   // 2nd session  = 00:00
+int tgtT90O = sessStart  + 5400000    // 2nd micro    = session + 90m
+int tgtTMcO = microStart + 1350000    // 2nd quarter  = micro + 22.5m
+int tgtTNcP = qtrStart   + 337500     // 2nd sub-qtr  = quarter + 5.625m
+
+// ---------- Week ----------
+int dowTd = dayofweek(tdCarrier, TZ)
+int daysSinceMon = dowTd == dayofweek.sunday ? 6 : dowTd - 2
+int monNoon = tdMid + 43200000 - daysSinceMon * 86400000
+int tgtTWO = timestamp(TZ, year(monNoon, TZ), month(monNoon, TZ), dayofmonth(monNoon, TZ), 18, 0, 0)
+
+// ---------- Month: the week belongs to the month of its Tuesday ----------
+int tueNoon = monNoon + 86400000
+int wkY = year(tueNoon, TZ)
+int wkM = month(tueNoon, TZ)
+int firstNoon = timestamp(TZ, wkY, wkM, 1, 12, 0, 0)
+int dow1 = dayofweek(firstNoon, TZ)
+int firstTueDom = ((3 - dow1 + 7) % 7) + 1            // first Tuesday, always the 1st-7th
+int wk2TueNoon = timestamp(TZ, wkY, wkM, firstTueDom + 7, 12, 0, 0)
+int wk2SunNoon = wk2TueNoon - 2 * 86400000            // the week opens on the Sunday before
+int tgtTMO = timestamp(TZ, year(wk2SunNoon, TZ), month(wk2SunNoon, TZ), dayofmonth(wk2SunNoon, TZ), 18, 0, 0)
+
+// ---------- QT year and the 4 year cycle ----------
+int qtYear = tdM >= 4 ? tdY : tdY - 1
+int tgtTYO = timestamp(TZ, qtYear, 3, 31, 18, 0, 0)   // 1 April opens at 31 March 18:00
+// The 4 year cycle is calendar years from 2023 (2023–2026, 2027–2030), and
+// like every other level its True Open is the SECOND sub-cycle: the opening
+// of the cycle's second year. 1 January opens at 31 December 18:00.
+int cycStart = tdY - (((tdY - 2023) % 4) + 4) % 4
+int tgtT4YO = timestamp(TZ, cycStart, 12, 31, 18, 0, 0)
+
+// ---------- Hit test ----------
+// THE candle that OPENS the level: the first one starting at or after the
+// instant, never the one that merely contains it. A quarter boundary at
+// 09:22:30 therefore prints on the 09:23 candle, not on 09:22. This also
+// carries the level across a weekend or a holiday gap.
+fired(t) =>
+    time >= t and time[1] < t
+
+// ---------- Lines ----------
+var lookahead_bars = 20
+
+var line  lnTNcP = line.new(na, na, na, na, color = customLineColor, width = lineWidthInput, style = trueOpenStyle)
+var label lbTNcP = label.new(na, na, text = "TNcP", color = #00000000, textcolor = customLineColor, size = size.small, style = label.style_label_left)
+var line  lnTMcO = line.new(na, na, na, na, color = customLineColor, width = lineWidthInput, style = trueOpenStyle)
+var label lbTMcO = label.new(na, na, text = "TMcO", color = #00000000, textcolor = customLineColor, size = size.small, style = label.style_label_left)
+var line  lnT90O = line.new(na, na, na, na, color = customLineColor, width = lineWidthInput, style = trueOpenStyle)
+var label lbT90O = label.new(na, na, text = "T90O", color = #00000000, textcolor = customLineColor, size = size.small, style = label.style_label_left)
+var line  lnTDO = line.new(na, na, na, na, color = customLineColor, width = lineWidthInput, style = trueOpenStyle)
+var label lbTDO = label.new(na, na, text = "TDO", color = #00000000, textcolor = customLineColor, size = size.small, style = label.style_label_left)
+var line  lnTWO = line.new(na, na, na, na, color = customLineColor, width = lineWidthInput, style = trueOpenStyle)
+var label lbTWO = label.new(na, na, text = "TWO", color = #00000000, textcolor = customLineColor, size = size.small, style = label.style_label_left)
+var line  lnTMO = line.new(na, na, na, na, color = customLineColor, width = lineWidthInput, style = trueOpenStyle)
+var label lbTMO = label.new(na, na, text = "TMO", color = #00000000, textcolor = customLineColor, size = size.small, style = label.style_label_left)
+var line  lnTYO = line.new(na, na, na, na, color = customLineColor, width = lineWidthInput, style = trueOpenStyle)
+var label lbTYO = label.new(na, na, text = "TYO", color = #00000000, textcolor = customLineColor, size = size.small, style = label.style_label_left)
+var line  lnT4YO = line.new(na, na, na, na, color = customLineColor, width = lineWidthInput, style = trueOpenStyle)
+var label lbT4YO = label.new(na, na, text = "T4YO", color = #00000000, textcolor = customLineColor, size = size.small, style = label.style_label_left)
+
+// Prices are captured on every timeframe, because the zone box needs levels
+// that are not necessarily drawn. Only the drawing is gated by the band.
+// Each level also remembers which container it belongs to: the moment the live
+// container stops matching, the price is dropped and the line comes off.
+var float pTNcP = na
+var int   idTNcP = na
+var float pTMcO = na
+var int   idTMcO = na
+var float pT90O = na
+var int   idT90O = na
+var float pTDO = na
+var int   idTDO = na
+var float pTWO = na
+var int   idTWO = na
+var float pTMO = na
+var int   idTMO = na
+var float pTYO = na
+var int   idTYO = na
+var float pT4YO = na
+var int   idT4YO = na
+
+if expireLevels and not na(idTNcP) and idTNcP != qtrStart
+    pTNcP := na
+if fired(tgtTNcP)
+    pTNcP := open
+    idTNcP := qtrStart
+    if showTNcP
+        line.set_xy1(lnTNcP, bar_index, open)
+        line.set_xy2(lnTNcP, bar_index, open)
+        label.set_xy(lbTNcP, bar_index, open)
+
+if expireLevels and not na(idTMcO) and idTMcO != microStart
+    pTMcO := na
+if fired(tgtTMcO)
+    pTMcO := open
+    idTMcO := microStart
+    if showTMcO
+        line.set_xy1(lnTMcO, bar_index, open)
+        line.set_xy2(lnTMcO, bar_index, open)
+        label.set_xy(lbTMcO, bar_index, open)
+
+if expireLevels and not na(idT90O) and idT90O != sessStart
+    pT90O := na
+if fired(tgtT90O)
+    pT90O := open
+    idT90O := sessStart
+    if showT90O
+        line.set_xy1(lnT90O, bar_index, open)
+        line.set_xy2(lnT90O, bar_index, open)
+        label.set_xy(lbT90O, bar_index, open)
+
+if expireLevels and not na(idTDO) and idTDO != dayStart
+    pTDO := na
+if fired(tgtTDO)
+    pTDO := open
+    idTDO := dayStart
+    if showTDO
+        line.set_xy1(lnTDO, bar_index, open)
+        line.set_xy2(lnTDO, bar_index, open)
+        label.set_xy(lbTDO, bar_index, open)
+
+if expireLevels and not na(idTWO) and idTWO != tgtTWO
+    pTWO := na
+if fired(tgtTWO)
+    pTWO := open
+    idTWO := tgtTWO
+    if showTWO
+        line.set_xy1(lnTWO, bar_index, open)
+        line.set_xy2(lnTWO, bar_index, open)
+        label.set_xy(lbTWO, bar_index, open)
+
+if expireLevels and not na(idTMO) and idTMO != tgtTMO
+    pTMO := na
+if fired(tgtTMO)
+    pTMO := open
+    idTMO := tgtTMO
+    if showTMO
+        line.set_xy1(lnTMO, bar_index, open)
+        line.set_xy2(lnTMO, bar_index, open)
+        label.set_xy(lbTMO, bar_index, open)
+
+if expireLevels and not na(idTYO) and idTYO != qtYear
+    pTYO := na
+if fired(tgtTYO)
+    pTYO := open
+    idTYO := qtYear
+    if showTYO
+        line.set_xy1(lnTYO, bar_index, open)
+        line.set_xy2(lnTYO, bar_index, open)
+        label.set_xy(lbTYO, bar_index, open)
+
+if expireLevels and not na(idT4YO) and idT4YO != cycStart
+    pT4YO := na
+if fired(tgtT4YO)
+    pT4YO := open
+    idT4YO := cycStart
+    if showT4YO
+        line.set_xy1(lnT4YO, bar_index, open)
+        line.set_xy2(lnT4YO, bar_index, open)
+        label.set_xy(lbT4YO, bar_index, open)
+
+// A live level gets extended to the right. A dead one gets na coordinates,
+// which takes it off the chart until its container prints a new open.
+finish(ln, lb, live) =>
+    if live
+        line.set_x2(ln, bar_index + lookahead_bars)
+        label.set_x(lb, bar_index + lookahead_bars)
+    else
+        line.set_xy1(ln, na, na)
+        line.set_xy2(ln, na, na)
+        label.set_xy(lb, na, na)
+
+if barstate.islast
+    finish(lnTNcP, lbTNcP, showTNcP and not na(pTNcP))
+    finish(lnTMcO, lbTMcO, showTMcO and not na(pTMcO))
+    finish(lnT90O, lbT90O, showT90O and not na(pT90O))
+    finish(lnTDO,  lbTDO,  showTDO  and not na(pTDO))
+    finish(lnTWO,  lbTWO,  showTWO  and not na(pTWO))
+    finish(lnTMO,  lbTMO,  showTMO  and not na(pTMO))
+    finish(lnTYO,  lbTYO,  showTYO  and not na(pTYO))
+    finish(lnT4YO, lbT4YO, showT4YO and not na(pT4YO))
+
+// ---------- Directional Bias ----------
+directionalBias = "N/A"
+if is6_00Session or is7_30Session or is9_00Session or is10_30Session
+    directionalBias := open > pT90O ? "Bullish" : "Bearish"
+
+var directionalBiasLabel = label.new(na, na, text = "Directional Bias: N/A", color = na, textcolor = customLineColor, size = size.normal, style = label.style_label_left)
+if barstate.islast
+    label.set_x(directionalBiasLabel, bar_index + lookahead_bars)
+    label.set_text(directionalBiasLabel, "Directional Bias: " + directionalBias)
+
+// ══════════════════════════════════════════════════════════════════════════
+//  Zone box — premium / discount for the cycle this chart measures
+//  own open + the open above it decide Premium / Discount / Dead Zone,
+//  and the third open above turns it into Super Premium / Super Discount.
+//  Nothing is shown above the 4 hour chart.
+// ══════════════════════════════════════════════════════════════════════════
+
+float zOwn = na
+float zUp1 = na
+float zUp2 = na
+bool  zOn  = true
+
+if band1
+    zOwn := pTNcP
+    zUp1 := pTMcO
+    zUp2 := pT90O
+else if band2
+    zOwn := pTMcO
+    zUp1 := pT90O
+    zUp2 := pTDO
+else if band3
+    zOwn := pT90O
+    zUp1 := pTDO
+    zUp2 := pTWO
+else if band4
+    zOwn := pTDO
+    zUp1 := pTWO
+    zUp2 := pTMO
+else if tfMin < 240
+    zOwn := pTWO
+    zUp1 := pTMO
+    zUp2 := pTYO
+else if tfMin == 240
+    zOwn := pTMO
+    zUp1 := pTYO
+    zUp2 := pT4YO
+else
+    zOn := false
+
+string zoneTxt = ""
+color  zoneCol = na
+
+if zOn and not na(zOwn) and not na(zUp1)
+    if close > zOwn and close > zUp1
+        if not na(zUp2) and close > zUp2
+            zoneTxt := "Super Premium"
+            zoneCol := color.new(#4b56ba, 10)
+        else
+            zoneTxt := "Premium"
+            zoneCol := color.new(#4b56ba, 55)
+    else if close < zOwn and close < zUp1
+        if not na(zUp2) and close < zUp2
+            zoneTxt := "Super Discount"
+            zoneCol := color.new(#ba4b4b, 10)
+        else
+            zoneTxt := "Discount"
+            zoneCol := color.new(#ba4b4b, 55)
+    else
+        zoneTxt := "Dead Zone"
+        zoneCol := color.new(#7e7e7e, 55)
+
+zonePos = zonePosition == "top_right" ? position.top_right : zonePosition == "top_left" ? position.top_left : zonePosition == "bottom_left" ? position.bottom_left : zonePosition == "middle_right" ? position.middle_right : zonePosition == "middle_left" ? position.middle_left : position.bottom_right
+
+var table zoneTable = table.new(zonePos, 1, 1, border_width = 0, frame_width = 0)
+
+if barstate.islast
+    if showZoneBox and zoneTxt != ""
+        table.cell(zoneTable, 0, 0, zoneTxt, bgcolor = zoneCol, text_color = color.white, text_size = size.tiny)
+    else
+        table.clear(zoneTable, 0, 0)
+
+
+// ══════════════════════════════════════════════════════════════════════════
+//  PART B — Devil Marks
+//  Any candle whose body runs to one end with no wick there — or a wick small
+//  enough to ignore — leaves a short line at that edge. Direction does not
+//  matter: an up candle and a down candle both qualify. A mark is only born
+//  once the candle has CLOSED, because a live candle can still grow the wick
+//  that would disqualify it. The mark then stays only while that area is
+//  untouched; once price trades through it the wick has been filled in and the
+//  mark is gone, and that part is checked live, not on close.
+// ══════════════════════════════════════════════════════════════════════════
+
+gDev = "Devil Marks"
+devOn      = input.bool(true, "Enable", group = gDev)
+devWickTol = input.float(2.0, "Count as no wick up to this size", minval = 0, step = 0.25, group = gDev, tooltip = "Measured in price, not ticks. A wick this size or smaller still counts as missing, so a one point tail on MNQ is still a Devil at the default of 2. Set it to 0 to demand a perfectly flat edge.")
+devLen     = input.int(10, "Line length (bars)", minval = 1, maxval = 200, group = gDev, tooltip = "How far right of its own candle the line runs. It is a fixed stub and does not follow the chart's right edge.")
+devClear   = input.bool(true, "Remove once price trades through the level", group = gDev, tooltip = "ON  = the mark is deleted the moment price trades past it, because the missing wick has now been filled in. This is checked on every tick, not only on close.\nOFF = every mark stays until the Max marks limit pushes it out.")
+devMax     = input.int(10, "Max marks kept", minval = 1, maxval = 200, group = gDev, tooltip = "Once this many marks are live the oldest one is dropped. Raise it to keep more history, lower it if the chart feels crowded.")
+devStyleIn = input.string("Solid", "Line style", options = ["Solid", "Dotted", "Dashed"], inline = "ds", group = gDev)
+devWidth   = input.int(1, "Width", minval = 1, maxval = 5, inline = "ds", group = gDev)
+devLabelOn = input.bool(true, "Show label text", group = gDev)
+
+devLower    = input.bool(true, "Missing LOWER wick", inline = "dl", group = gDev)
+devColLow   = input.color(#26a69a, "Color", inline = "dl", group = gDev)
+devTextLow  = input.string("Devil 👹", "Lower label text", group = gDev)
+
+devUpper    = input.bool(true, "Missing UPPER wick", inline = "du", group = gDev)
+devColHigh  = input.color(#ef5350, "Color", inline = "du", group = gDev)
+devTextHigh = input.string("Devil 👹", "Upper label text", group = gDev)
+
+devStyle = devStyleIn == "Solid" ? line.style_solid : devStyleIn == "Dotted" ? line.style_dotted : line.style_dashed
+
+var line[]  devLn  = array.new<line>()
+var label[] devLb  = array.new<label>()
+var float[] devPx  = array.new<float>()
+var bool[]  devLow = array.new<bool>()
+
+// Half a tick of slack on top of the chosen size, so float representation can
+// never hide an edge that is flat to the tick.
+devEps = syminfo.mintick * 0.5
+bodyLow  = math.min(open, close)
+bodyHigh = math.max(open, close)
+noLowerWick = (bodyLow - low)   <= devWickTol + devEps
+noUpperWick = (high - bodyHigh) <= devWickTol + devEps
+
+addDevil(px, isLow, col, txt) =>
+    ln = line.new(bar_index, px, bar_index + devLen, px, color = col, style = devStyle, width = devWidth)
+    lb = label.new(bar_index + devLen, px, devLabelOn ? txt : "", color = #00000000, textcolor = col, size = size.small, style = label.style_label_left)
+    array.push(devLn, ln)
+    array.push(devLb, lb)
+    array.push(devPx, px)
+    array.push(devLow, isLow)
+
+dropDevil(i) =>
+    line.delete(array.get(devLn, i))
+    label.delete(array.get(devLb, i))
+    array.remove(devLn, i)
+    array.remove(devLb, i)
+    array.remove(devPx, i)
+    array.remove(devLow, i)
+
+if devOn
+    // Born on close only. A live candle has not finished deciding its wicks.
+    if barstate.isconfirmed
+        if devLower and noLowerWick
+            addDevil(low, true, devColLow, devTextLow)
+        if devUpper and noUpperWick
+            addDevil(high, false, devColHigh, devTextHigh)
+
+        // Oldest marks fall off the back once the cap is reached.
+        while array.size(devLn) > devMax
+            dropDevil(0)
+
+    // Walk backwards so removing an entry cannot skip the next one.
+    if devClear and array.size(devLn) > 0
+        for i = array.size(devLn) - 1 to 0
+            px = array.get(devPx, i)
+            if array.get(devLow, i) ? low < px - devEps : high > px + devEps
+                dropDevil(i)
+
+alertcondition(devOn and devLower and noLowerWick and barstate.isconfirmed, title = "Devil - no lower wick", message = "Sav FX: candle closed with no lower wick")
+alertcondition(devOn and devUpper and noUpperWick and barstate.isconfirmed, title = "Devil - no upper wick", message = "Sav FX: candle closed with no upper wick")
