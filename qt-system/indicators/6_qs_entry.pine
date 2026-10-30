@@ -32,8 +32,10 @@ settleIn = input.string("כבוי — כמו הגרף", "Settlement כסגירה
 
 grpQS   = "חלונות QS"
 hotList = input.string("111,114,141,144,411,414,441,444,222,333", "רצפים חמים", group = grpQS)
-useK0   = input.bool(true, "חודש · שבוע · יום (יום שלם)", group = grpQS)
-useK1   = input.bool(true, "שבוע · יום · סשן (6 שעות)", group = grpQS)
+// שבירות של 15m / 5m / 1m מחפשות QS קטן, באותו מחזור קטן. חלון של יום
+// שלם או של סשן שלם לא רלוונטי להן, ולכן שני הגדולים כבויים כברירת מחדל.
+useK0   = input.bool(false, "חודש · שבוע · יום (יום שלם)", group = grpQS, tooltip = "כבוי כברירת מחדל: חלון של יום שלם לא רלוונטי לשבירות של 15m / 5m / 1m.")
+useK1   = input.bool(false, "שבוע · יום · סשן (6 שעות)", group = grpQS, tooltip = "כבוי כברירת מחדל: חלון של סשן שלם לא רלוונטי לשבירות של 15m / 5m / 1m.")
 useK2   = input.bool(true, "יום · סשן · 90 דק'", group = grpQS)
 useK3   = input.bool(true, "סשן · 90 · 22.5 דק'", group = grpQS)
 useK4   = input.bool(true, "90 · 22.5 · 5.6 דק'", group = grpQS)
