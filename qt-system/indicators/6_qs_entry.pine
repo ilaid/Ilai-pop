@@ -47,7 +47,8 @@ colBull = input.color(#26a69a, "לונג", group = grpVis)
 colBear = input.color(#ef5350, "שורט", group = grpVis)
 colQS   = input.color(#4b56ba, "QS", group = grpVis)
 showTbl = input.bool(true, "הצג טבלה", group = grpVis)
-posIn   = input.string("ימין למעלה", "מיקום הטבלה", options = ["ימין למעלה", "ימין למטה", "שמאל למעלה", "שמאל למטה"], group = grpVis)
+posIn   = input.string("ימין למעלה", "מיקום הטבלה", options = ["ימין למעלה", "ימין באמצע", "ימין למטה", "מרכז למעלה", "מרכז באמצע", "מרכז למטה", "שמאל למעלה", "שמאל באמצע", "שמאל למטה"], group = grpVis)
+szIn    = input.string("קטן", "גודל הטבלה", options = ["זעיר", "קטן", "רגיל", "גדול", "ענק"], group = grpVis)
 alertOn = input.bool(true, "התראה על אישור כניסה", group = grpVis)
 
 TZ = "America/New_York"
@@ -808,7 +809,8 @@ if alertOn and alTxt != ""
 // טבלה
 // ═══════════════════════════════════════════════════════════════════
 
-posT = posIn == "ימין למעלה" ? position.top_right : posIn == "ימין למטה" ? position.bottom_right : posIn == "שמאל למעלה" ? position.top_left : position.bottom_left
+posT = posIn == "ימין למעלה" ? position.top_right : posIn == "ימין באמצע" ? position.middle_right : posIn == "ימין למטה" ? position.bottom_right : posIn == "מרכז למעלה" ? position.top_center : posIn == "מרכז באמצע" ? position.middle_center : posIn == "מרכז למטה" ? position.bottom_center : posIn == "שמאל למעלה" ? position.top_left : posIn == "שמאל באמצע" ? position.middle_left : position.bottom_left
+szT  = szIn == "זעיר" ? size.tiny : szIn == "רגיל" ? size.normal : szIn == "גדול" ? size.large : szIn == "ענק" ? size.huge : size.small
 var table tb = table.new(posT, 2, 6, border_width = 1)
 
 f_tfTxt(int gB, int gU, int sB, bool pB, int sU, bool pU) => gB > 0 ? "▼ " + f_legName(gB) + (sB > 0 and pB ? " + PSP" : "") : gU > 0 ? "▲ " + f_legName(gU) + (sU > 0 and pU ? " + PSP" : "") : "—"
@@ -817,17 +819,17 @@ f_toTxt(string nm, float v) => nm + (na(v) ? " —" : close > v ? " ↑" : " ↓
 
 if showTbl and barstate.islast
     color hd = color.new(color.gray, 70)
-    table.cell(tb, 0, 0, "QS", bgcolor = qsOn ? color.new(colQS, 30) : hd, text_color = color.white, text_size = size.small)
-    table.cell(tb, 1, 0, qsOn ? qsPat + "  " + f_kName(qsK) : "—", bgcolor = qsOn ? color.new(colQS, 30) : hd, text_color = color.white, text_size = size.small)
-    table.cell(tb, 0, 1, "15m", bgcolor = hd, text_color = color.white, text_size = size.small)
-    table.cell(tb, 1, 1, f_tfTxt(lgB15, lgU15, sB15, pB15, sU15, pU15), bgcolor = f_tfCol(lgB15, lgU15), text_color = color.white, text_size = size.small)
-    table.cell(tb, 0, 2, "5m", bgcolor = hd, text_color = color.white, text_size = size.small)
-    table.cell(tb, 1, 2, f_tfTxt(lgB5, lgU5, sB5, pB5, sU5, pU5), bgcolor = f_tfCol(lgB5, lgU5), text_color = color.white, text_size = size.small)
-    table.cell(tb, 0, 3, "1m", bgcolor = hd, text_color = color.white, text_size = size.small)
-    table.cell(tb, 1, 3, f_tfTxt(lgB1, lgU1, sB1, pB1, sU1, pU1), bgcolor = f_tfCol(lgB1, lgU1), text_color = color.white, text_size = size.small)
-    table.cell(tb, 0, 4, "TO", bgcolor = hd, text_color = color.white, text_size = size.small)
-    table.cell(tb, 1, 4, f_toTxt("TWO", toW) + "  " + f_toTxt("TDO", toD) + "  " + f_toTxt("T90O", to90) + "  " + f_toTxt("TMcO", toMc), bgcolor = color.new(color.gray, 85), text_color = color.white, text_size = size.small)
+    table.cell(tb, 0, 0, "QS", bgcolor = qsOn ? color.new(colQS, 30) : hd, text_color = color.white, text_size = szT)
+    table.cell(tb, 1, 0, qsOn ? qsPat + "  " + f_kName(qsK) : "—", bgcolor = qsOn ? color.new(colQS, 30) : hd, text_color = color.white, text_size = szT)
+    table.cell(tb, 0, 1, "15m", bgcolor = hd, text_color = color.white, text_size = szT)
+    table.cell(tb, 1, 1, f_tfTxt(lgB15, lgU15, sB15, pB15, sU15, pU15), bgcolor = f_tfCol(lgB15, lgU15), text_color = color.white, text_size = szT)
+    table.cell(tb, 0, 2, "5m", bgcolor = hd, text_color = color.white, text_size = szT)
+    table.cell(tb, 1, 2, f_tfTxt(lgB5, lgU5, sB5, pB5, sU5, pU5), bgcolor = f_tfCol(lgB5, lgU5), text_color = color.white, text_size = szT)
+    table.cell(tb, 0, 3, "1m", bgcolor = hd, text_color = color.white, text_size = szT)
+    table.cell(tb, 1, 3, f_tfTxt(lgB1, lgU1, sB1, pB1, sU1, pU1), bgcolor = f_tfCol(lgB1, lgU1), text_color = color.white, text_size = szT)
+    table.cell(tb, 0, 4, "TO", bgcolor = hd, text_color = color.white, text_size = szT)
+    table.cell(tb, 1, 4, f_toTxt("TWO", toW) + "  " + f_toTxt("TDO", toD) + "  " + f_toTxt("T90O", to90) + "  " + f_toTxt("TMcO", toMc), bgcolor = color.new(color.gray, 85), text_color = color.white, text_size = szT)
     string eT = txS != "" ? "▼ SHORT  " + str.replace_all(txS, "\n", " · ") : txL != "" ? "▲ LONG  " + str.replace_all(txL, "\n", " · ") : "—"
     color  eC = txS != "" ? color.new(colBear, 20) : txL != "" ? color.new(colBull, 20) : color.new(color.gray, 85)
-    table.cell(tb, 0, 5, "ENTRY", bgcolor = hd, text_color = color.white, text_size = size.small)
-    table.cell(tb, 1, 5, eT, bgcolor = eC, text_color = color.white, text_size = size.small)
+    table.cell(tb, 0, 5, "ENTRY", bgcolor = hd, text_color = color.white, text_size = szT)
+    table.cell(tb, 1, 5, eT, bgcolor = eC, text_color = color.white, text_size = szT)
