@@ -484,6 +484,14 @@ colBear = input.color(#ef5350, "דובי", group = grpVis)
 colNeut = input.color(color.gray, "נייטרלי", group = grpVis)
 colHead = input.color(#4b56ba, "כותרת", group = grpVis)
 
+// ── סימונים על הגרף, לבדיקה אחורה ──
+// הטבלה מראה רק את הרגע הנוכחי (הנר האחרון). כדי לבדוק את המערכת על
+// היסטוריה, כל סטאפ מסומן גם על הנר שבו הוא נוצר, ונשאר שם.
+grpMk    = "סימונים על הגרף (בדיקה אחורה)"
+mkOn     = input.bool(true, "סמן כל Two-Stage על הנר שבו נוצר", group = grpMk, tooltip = "תגית קטנה מתחת לנר (לונג) או מעליו (שורט): A/B ומספר הפתיחות. מעבר עם העכבר מראה את שתי הרגליים.")
+mkMin    = input.string("A + B", "אילו סטאפים לסמן", options = ["A + B", "רק A", "רק A עם 2/2 פתיחות"], group = grpMk)
+mkModels = input.bool(true, "סמן גם SFP ו-PSP→HSSMT", group = grpMk)
+
 // ═══════════════════════════════════════════════════════════════════
 // פענוח המספרים שהאינדיקטורים מייצאים
 //
@@ -773,6 +781,10 @@ for p = 0 to 6
                 bool fire = alTwo == "A + B" or (alTwo == "רק A" and gA) or (alTwo == "רק A עם 2/2 פתיחות" and gA and met == 2)
                 if fire
                     newTwo := newTwo + (newTwo == "" ? "" : " · ") + (dir == 1 ? "▲ " : "▼ ") + f_slotTxt(la) + " + " + f_slotTxt(lb) + " " + (gA ? "A" : "B") + " TO " + str.tostring(met) + "/2"
+                bool mk = mkOn and (mkMin == "A + B" or (mkMin == "רק A" and gA) or (mkMin == "רק A עם 2/2 פתיחות" and gA and met == 2))
+                if mk
+                    string mTip = (dir == 1 ? "LONG  " : "SHORT  ") + (gA ? "A" : "B") + "\n" + f_slotTxt(la) + " + " + f_slotTxt(lb) + "\nTO " + str.tostring(met) + "/2" + (unk > 0 ? "  (" + str.tostring(unk) + " ?)" : "")
+                    label.new(bar_index, dir == 1 ? low : high, (gA ? "A " : "B ") + str.tostring(met) + "/2", yloc = dir == 1 ? yloc.belowbar : yloc.abovebar, style = dir == 1 ? label.style_label_up : label.style_label_down, color = color.new(dir == 1 ? colBull : colBear, gA ? 10 : 55), textcolor = color.white, size = size.tiny, tooltip = mTip)
             // רגל שהתחזקה או הוחלפה — אותו סטאפ, תמונת הפתיחות לא משתנה
             array.set(cKey, c, key)
             array.set(cLgA, c, la)
@@ -852,6 +864,11 @@ sfpNew = sfpDir != 0 and sfpDir != prevSfp
 phNew  = phDir != 0 and phDir != prevPh
 prevSfp := sfpDir
 prevPh  := phDir
+
+if mkOn and mkModels and sfpNew
+    label.new(bar_index, sfpDir == 1 ? low : high, "SFP", yloc = sfpDir == 1 ? yloc.belowbar : yloc.abovebar, style = sfpDir == 1 ? label.style_label_up : label.style_label_down, color = color.new(colHead, 10), textcolor = color.white, size = size.tiny, tooltip = sfpTxt)
+if mkOn and mkModels and phNew
+    label.new(bar_index, phDir == 1 ? low : high, "P→H", yloc = phDir == 1 ? yloc.belowbar : yloc.abovebar, style = phDir == 1 ? label.style_label_up : label.style_label_down, color = color.new(colHead, 10), textcolor = color.white, size = size.tiny, tooltip = phTxt)
 
 // ═══════════════════════════════════════════════════════════════════
 // תצוגה
