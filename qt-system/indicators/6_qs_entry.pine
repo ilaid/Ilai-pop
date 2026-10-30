@@ -6,12 +6,13 @@ indicator("QS Entry | Quarterly Theory", shorttitle = "QS Entry", overlay = true
 //
 // אישור כניסה = שלושה תנאים באותו רגע:
 //   1. חלון QS פעיל — שלוש רמות צמודות בכתובת הזמן יוצרות רצף חם.
-//   2. שתי שבירות קורלציה חיות באותו כיוון, בשתי מסגרות שונות מתוך
-//      15m · 5m · 1m (כולן עד שתי מדרגות זו מזו). לא משנה מתי נוצרו —
-//      לפני ה-QS או בתוכו — רק שהן חיות עכשיו.
-//   3. המחיר מעבר ל-True Open של המיכל של כל אחת משתי השבירות:
-//      15m → TDO (יום) · 5m → T90O (סשן) · 1m → TMcO (90 דק').
-//      שורט = נגיעה מעל שתיהן · לונג = נגיעה מתחת לשתיהן. מספיק פתיל.
+//   2. שתי שבירות קורלציה חיות באותו כיוון, מתוך 15m · 5m · 1m (כולן עד
+//      שתי מדרגות זו מזו) — בשתי מסגרות שונות, או SSMT ו-PSP באותה מסגרת.
+//      לא משנה מתי נוצרו — לפני ה-QS או בתוכו — רק שהן חיות עכשיו.
+//   3. המחיר מעבר לשתי פתיחות: ה-True Open של המיכל של כל שבירה
+//      (15m → TDO · 5m → T90O · 1m → TMcO). שתי שבירות באותה מסגרת —
+//      הפתיחה שלה והפתיחה שמעליה (1m: TMcO + T90O · 5m: T90O + TDO ·
+//      15m: TDO + TWO). שורט = נגיעה מעל שתיהן · לונג = מתחת. מספיק פתיל.
 //
 // סוגי השבירות בגרסה הזו: SSMT / HSSMT ו-PSP. אותה לוגיקה בדיוק של
 // האינדיקטורים SSMT + HSSMT ו-ADI — הפונקציות הועתקו מהם כמו שהן.
@@ -498,6 +499,8 @@ type TOs
     int   i90O  = na
     float pDO   = na
     int   iDO   = na
+    float pWO   = na
+    int   iWO   = na
 
 f_toStep(TOs o, int t, float op) =>
     if not na(t) and not na(op) and t != o.lastT
@@ -511,7 +514,16 @@ f_toStep(TOs o, int t, float op) =>
         int   tDO    = tdMid
         int   t90O   = sStart + 5400000
         int   tMcO   = mStart + 1350000
+        int   dw     = dayofweek(tdC, TZ)
+        int   dsm    = dw == dayofweek.sunday ? 6 : dw - 2
+        int   mNoon  = tdMid + 43200000 - dsm * 86400000
+        int   tWO    = timestamp(TZ, year(mNoon, TZ), month(mNoon, TZ), dayofmonth(mNoon, TZ), 18, 0, 0)
         int   pt     = o.lastT
+        if not na(o.iWO) and o.iWO != tWO
+            o.pWO := na
+        if t >= tWO and pt != 0 and pt < tWO
+            o.pWO := op
+            o.iWO := tWO
         if not na(o.iMcO) and o.iMcO != mStart
             o.pMcO := na
         if t >= tMcO and pt != 0 and pt < tMcO
@@ -665,7 +677,7 @@ f_pspSeq(Eng e, int d) =>
                 sq := array.get(e.pSeq, i)
     sq
 
-// הרגל של המסגרת בכיוון d: 0 = אין · 1 = SSMT · 2 = HSSMT · 3 = PSP
+// השבירות של המסגרת בכיוון d: [סוג ה-SSMT (0 / 1 = SSMT / 2 = HSSMT), האם יש PSP]
 f_leg(Eng e, int d) =>
     [rN, lN] = f_cyc(e.cls, time)
     bool fresh = e.started and e.lifeId == lN
@@ -674,22 +686,29 @@ f_leg(Eng e, int d) =>
     int  pB  = fresh ? f_pspSeq(e, -1) : -1
     int  pU  = fresh ? f_pspSeq(e, 1) : -1
     int  dom = sB >= 0 or sU >= 0 ? (sB > sU ? -1 : 1) : (pB >= 0 or pU >= 0 ? (pB > pU ? -1 : 1) : 0)
-    int  leg = 0
+    int  ssT = 0
+    bool psp = false
     if dom == d
-        int ty = d == -1 ? e.bTy : e.uTy
-        int ss = d == -1 ? sB : sU
-        int ps = d == -1 ? pB : pU
-        leg := ss >= 0 ? ty : ps >= 0 ? 3 : 0
-    leg
+        ssT := (d == -1 ? sB : sU) >= 0 ? (d == -1 ? e.bTy : e.uTy) : 0
+        psp := (d == -1 ? pB : pU) >= 0
+    [ssT, psp]
 
+// רגל אחת של המסגרת (לזוג בין מסגרות): SSMT קודם, אחרת PSP
+f_one(int ss, bool ps) => ss > 0 ? ss : ps ? 3 : 0
 f_legName(int g) => g == 2 ? "HSSMT" : g == 1 ? "SSMT" : g == 3 ? "PSP" : "—"
 
-lgB1  = f_leg(e1, -1)
-lgU1  = f_leg(e1, 1)
-lgB5  = f_leg(e5, -1)
-lgU5  = f_leg(e5, 1)
-lgB15 = f_leg(e15, -1)
-lgU15 = f_leg(e15, 1)
+[sB1, pB1]   = f_leg(e1, -1)
+[sU1, pU1]   = f_leg(e1, 1)
+[sB5, pB5]   = f_leg(e5, -1)
+[sU5, pU5]   = f_leg(e5, 1)
+[sB15, pB15] = f_leg(e15, -1)
+[sU15, pU15] = f_leg(e15, 1)
+lgB1  = f_one(sB1, pB1)
+lgU1  = f_one(sU1, pU1)
+lgB5  = f_one(sB5, pB5)
+lgU5  = f_one(sU5, pU5)
+lgB15 = f_one(sB15, pB15)
+lgU15 = f_one(sU15, pU15)
 
 // ═══════════════════════════════════════════════════════════════════
 // חלון QS על הנר הנוכחי — מהרמה הנמוכה לגבוהה, כך שמוצג החלון הקצר ביותר
@@ -726,12 +745,14 @@ qsId = qsOn ? str.tostring(qL) + ":" + str.tostring(qsK) + ":" + qsKey : ""
 toD  = tos.pDO
 to90 = tos.p90O
 toMc = tos.pMcO
+toW  = tos.pWO
 
 // מחיר מעבר לשתי הפתיחות של הזוג, בכיוון d (מספיק פתיל)
 f_beyond(int d, float a, float b) => not na(a) and not na(b) and (d == -1 ? high > a and high > b : low < a and low < b)
 
-// הזוג הראשון שמתקיים: 15m+5m, אחר כך 5m+1m, אחר כך 15m+1m
-f_entry(int d, int g15, int g5, int g1) =>
+// הזוג הראשון שמתקיים: בין מסגרות (15m+5m, 5m+1m, 15m+1m), ואחר כך SSMT
+// ו-PSP באותה מסגרת (15m, 5m, 1m)
+f_entry(int d, int g15, int g5, int g1, int s15, bool p15, int s5, bool p5, int s1, bool p1) =>
     string txt = ""
     if g15 > 0 and g5 > 0 and f_beyond(d, toD, to90)
         txt := "15m " + f_legName(g15) + " + 5m " + f_legName(g5) + "\nTDO + T90O"
@@ -739,10 +760,16 @@ f_entry(int d, int g15, int g5, int g1) =>
         txt := "5m " + f_legName(g5) + " + 1m " + f_legName(g1) + "\nT90O + TMcO"
     else if g15 > 0 and g1 > 0 and f_beyond(d, toD, toMc)
         txt := "15m " + f_legName(g15) + " + 1m " + f_legName(g1) + "\nTDO + TMcO"
+    else if s15 > 0 and p15 and f_beyond(d, toD, toW)
+        txt := "15m " + f_legName(s15) + " + 15m PSP\nTDO + TWO"
+    else if s5 > 0 and p5 and f_beyond(d, to90, toD)
+        txt := "5m " + f_legName(s5) + " + 5m PSP\nT90O + TDO"
+    else if s1 > 0 and p1 and f_beyond(d, toMc, to90)
+        txt := "1m " + f_legName(s1) + " + 1m PSP\nTMcO + T90O"
     txt
 
-entS = qsOn ? f_entry(-1, lgB15, lgB5, lgB1) : ""
-entL = qsOn ? f_entry(1, lgU15, lgU5, lgU1) : ""
+entS = qsOn ? f_entry(-1, lgB15, lgB5, lgB1, sB15, pB15, sB5, pB5, sB1, pB1) : ""
+entL = qsOn ? f_entry(1, lgU15, lgU5, lgU1, sU15, pU15, sU5, pU5, sU1, pU1) : ""
 
 // פעם אחת לכל חלון ולכל כיוון. התגית נשארת עד שהחלון נגמר.
 var string doneS = ""
@@ -784,7 +811,7 @@ if alertOn and alTxt != ""
 posT = posIn == "ימין למעלה" ? position.top_right : posIn == "ימין למטה" ? position.bottom_right : posIn == "שמאל למעלה" ? position.top_left : position.bottom_left
 var table tb = table.new(posT, 2, 6, border_width = 1)
 
-f_tfTxt(int gB, int gU) => gB > 0 ? "▼ " + f_legName(gB) : gU > 0 ? "▲ " + f_legName(gU) : "—"
+f_tfTxt(int gB, int gU, int sB, bool pB, int sU, bool pU) => gB > 0 ? "▼ " + f_legName(gB) + (sB > 0 and pB ? " + PSP" : "") : gU > 0 ? "▲ " + f_legName(gU) + (sU > 0 and pU ? " + PSP" : "") : "—"
 f_tfCol(int gB, int gU) => gB > 0 ? color.new(colBear, 75) : gU > 0 ? color.new(colBull, 75) : color.new(color.gray, 85)
 f_toTxt(string nm, float v) => nm + (na(v) ? " —" : close > v ? " ↑" : " ↓")
 
@@ -793,13 +820,13 @@ if showTbl and barstate.islast
     table.cell(tb, 0, 0, "QS", bgcolor = qsOn ? color.new(colQS, 30) : hd, text_color = color.white, text_size = size.small)
     table.cell(tb, 1, 0, qsOn ? qsPat + "  " + f_kName(qsK) : "—", bgcolor = qsOn ? color.new(colQS, 30) : hd, text_color = color.white, text_size = size.small)
     table.cell(tb, 0, 1, "15m", bgcolor = hd, text_color = color.white, text_size = size.small)
-    table.cell(tb, 1, 1, f_tfTxt(lgB15, lgU15), bgcolor = f_tfCol(lgB15, lgU15), text_color = color.white, text_size = size.small)
+    table.cell(tb, 1, 1, f_tfTxt(lgB15, lgU15, sB15, pB15, sU15, pU15), bgcolor = f_tfCol(lgB15, lgU15), text_color = color.white, text_size = size.small)
     table.cell(tb, 0, 2, "5m", bgcolor = hd, text_color = color.white, text_size = size.small)
-    table.cell(tb, 1, 2, f_tfTxt(lgB5, lgU5), bgcolor = f_tfCol(lgB5, lgU5), text_color = color.white, text_size = size.small)
+    table.cell(tb, 1, 2, f_tfTxt(lgB5, lgU5, sB5, pB5, sU5, pU5), bgcolor = f_tfCol(lgB5, lgU5), text_color = color.white, text_size = size.small)
     table.cell(tb, 0, 3, "1m", bgcolor = hd, text_color = color.white, text_size = size.small)
-    table.cell(tb, 1, 3, f_tfTxt(lgB1, lgU1), bgcolor = f_tfCol(lgB1, lgU1), text_color = color.white, text_size = size.small)
+    table.cell(tb, 1, 3, f_tfTxt(lgB1, lgU1, sB1, pB1, sU1, pU1), bgcolor = f_tfCol(lgB1, lgU1), text_color = color.white, text_size = size.small)
     table.cell(tb, 0, 4, "TO", bgcolor = hd, text_color = color.white, text_size = size.small)
-    table.cell(tb, 1, 4, f_toTxt("TDO", toD) + "  " + f_toTxt("T90O", to90) + "  " + f_toTxt("TMcO", toMc), bgcolor = color.new(color.gray, 85), text_color = color.white, text_size = size.small)
+    table.cell(tb, 1, 4, f_toTxt("TWO", toW) + "  " + f_toTxt("TDO", toD) + "  " + f_toTxt("T90O", to90) + "  " + f_toTxt("TMcO", toMc), bgcolor = color.new(color.gray, 85), text_color = color.white, text_size = size.small)
     string eT = txS != "" ? "▼ SHORT  " + str.replace_all(txS, "\n", " · ") : txL != "" ? "▲ LONG  " + str.replace_all(txL, "\n", " · ") : "—"
     color  eC = txS != "" ? color.new(colBear, 20) : txL != "" ? color.new(colBull, 20) : color.new(color.gray, 85)
     table.cell(tb, 0, 5, "ENTRY", bgcolor = hd, text_color = color.white, text_size = size.small)
