@@ -50,6 +50,7 @@ colBear = input.color(#ef5350, "שורט", group = grpVis)
 colQS   = input.color(#4b56ba, "QS", group = grpVis)
 showTbl = input.bool(true, "הצג טבלה", group = grpVis)
 showBg  = input.bool(true, "צבע את הרקע בזמן חלון QS", group = grpVis, tooltip = "כך רואים בדיוק איפה החלון מתחיל ונגמר.")
+keepN   = input.int(5, "כמה אישורים להשאיר על הגרף", minval = 1, maxval = 50, group = grpVis, tooltip = "רק האחרונים נשארים; הישנים יותר נמחקים. ב-Bar Replay זה מתקדם עם הנרות.")
 posIn   = input.string("ימין למעלה", "מיקום הטבלה", options = ["ימין למעלה", "ימין באמצע", "ימין למטה", "מרכז למעלה", "מרכז באמצע", "מרכז למטה", "שמאל למעלה", "שמאל באמצע", "שמאל למטה"], group = grpVis)
 szIn    = input.string("קטן", "גודל הטבלה", options = ["זעיר", "קטן", "רגיל", "גדול", "ענק"], group = grpVis)
 alertOn = input.bool(true, "התראה על אישור כניסה", group = grpVis)
@@ -825,31 +826,45 @@ var string txS   = ""
 var string txL   = ""
 var string keyS  = ""
 var string keyL  = ""
+var bool   failS = false
+var bool   failL = false
+// כל התגיות, מהישנה לחדשה — נשארות רק keepN האחרונות
+var array<label> hist = array.new<label>()
 string alTxt = ""
 // אחת השבירות של האישור מתה (נלקחה או שהמיכל שלה נגמר) — האישור נכשל:
 // התגית מקבלת ✕ ונשארת דהויה, ובאותו חלון לא יוצא אישור נוסף בכיוון הזה
+// תגית שנכשלה הופכת ל-✕ אפור וקטן; ההסבר נשאר ב-tooltip
 if keyS != "" and not f_alive(keyS, liveS)
-    label.set_text(lbS, label.get_text(lbS) + " ✕")
-    label.set_color(lbS, color.new(colBear, 80))
-    label.set_textcolor(lbS, color.new(color.white, 40))
-    keyS := ""
-    txS  := ""
+    label.set_text(lbS, "✕")
+    label.set_size(lbS, size.tiny)
+    label.set_color(lbS, color.new(color.gray, 45))
+    label.set_textcolor(lbS, color.white)
+    keyS  := ""
+    txS   := ""
+    failS := true
 if keyL != "" and not f_alive(keyL, liveL)
-    label.set_text(lbL, label.get_text(lbL) + " ✕")
-    label.set_color(lbL, color.new(colBull, 80))
-    label.set_textcolor(lbL, color.new(color.white, 40))
-    keyL := ""
-    txL  := ""
+    label.set_text(lbL, "✕")
+    label.set_size(lbL, size.tiny)
+    label.set_color(lbL, color.new(color.gray, 45))
+    label.set_textcolor(lbL, color.white)
+    keyL  := ""
+    txL   := ""
+    failL := true
 // החלון נגמר (או התחלף) — האישור נגמר, התגית נשארת דהויה. השבירות שלה
 // ממשיכות להיבדק: אם אחת מהן מתה אחר כך, התגית עדיין מקבלת ✕.
+// החלון נגמר והאישור עדיין חי — התגית מתכווצת לחץ קטן בצבע שלה
 if doneS != "" and doneS != qsId
-    label.set_color(lbS, color.new(colBear, 75))
-    label.set_textcolor(lbS, color.new(color.white, 40))
+    if not failS
+        label.set_text(lbS, "▼")
+        label.set_size(lbS, size.tiny)
+        label.set_color(lbS, color.new(colBear, 25))
     doneS := ""
     txS   := ""
 if doneL != "" and doneL != qsId
-    label.set_color(lbL, color.new(colBull, 75))
-    label.set_textcolor(lbL, color.new(color.white, 40))
+    if not failL
+        label.set_text(lbL, "▲")
+        label.set_size(lbL, size.tiny)
+        label.set_color(lbL, color.new(colBull, 25))
     doneL := ""
     txL   := ""
 
@@ -857,16 +872,22 @@ if entS != "" and doneS != qsId
     doneS := qsId
     txS   := entS
     keyS  := keyNS
+    failS := false
     usedS := str.length(usedS) > 3000 ? "#" + keyNS + "#" : usedS + keyNS + "#"
     lbS   := label.new(bar_index, high, "▼ QS " + qsPat + " · " + f_kLen(qsK), yloc = yloc.abovebar, style = label.style_label_down, color = colBear, textcolor = color.white, size = size.small, tooltip = "SHORT · QS " + qsPat + " (" + f_kName(qsK) + ")\n" + entS)
+    array.push(hist, lbS)
     alTxt := "▼ SHORT · QS " + qsPat + " " + f_kLen(qsK) + " · " + str.replace_all(entS, "\n", " · ")
 if entL != "" and doneL != qsId
     doneL := qsId
     txL   := entL
     keyL  := keyNL
+    failL := false
     usedL := str.length(usedL) > 3000 ? "#" + keyNL + "#" : usedL + keyNL + "#"
     lbL   := label.new(bar_index, low, "▲ QS " + qsPat + " · " + f_kLen(qsK), yloc = yloc.belowbar, style = label.style_label_up, color = colBull, textcolor = color.white, size = size.small, tooltip = "LONG · QS " + qsPat + " (" + f_kName(qsK) + ")\n" + entL)
+    array.push(hist, lbL)
     alTxt := alTxt + (alTxt == "" ? "" : "\n") + "▲ LONG · QS " + qsPat + " " + f_kLen(qsK) + " · " + str.replace_all(entL, "\n", " · ")
+while array.size(hist) > keepN
+    label.delete(array.shift(hist))
 bgcolor(showBg and qsOn ? color.new(colQS, 90) : na, title = "QS window")
 
 if alertOn and alTxt != ""
