@@ -60,6 +60,10 @@ symYM_std = input.symbol("CBOT_MINI:YM1!",  "YM רגיל", group = grpSym)
 symNQ_mic = input.symbol("CME_MINI:MNQ1!",  "NQ מיקרו", group = grpSym)
 symES_mic = input.symbol("CME_MINI:MES1!",  "ES מיקרו", group = grpSym)
 symYM_mic = input.symbol("CBOT_MINI:MYM1!", "YM מיקרו", group = grpSym)
+// ספר החוקים §6 — אותה מדיניות נתונים בשלושת האינדיקטורים: בלי יישור לגלגול
+// כברירת מחדל (עם אפשרות לבחור), ו-Settlement כמו בגרף.
+adjMode   = input.string("בלי יישור", "נתוני חוזה רציף", options = ["בלי יישור", "מיושר לגלגול", "ברירת המחדל של הסימבול"], group = grpSym, tooltip = "בשבוע גלגול חוזים כדאי לעבור ל'מיושר לגלגול'.")
+settleIn  = input.string("כבוי — כמו הגרף", "Settlement כסגירה יומית", options = ["כבוי — כמו הגרף", "דלוק", "ברירת המחדל של הסימבול"], group = grpSym)
 
 grpGap = "הגדרת גאפ"
 extendBodies = input.bool(true, "הרחב גאפ לגופי הנרות (רווח סגירה/פתיחה)", group = grpGap)
@@ -184,9 +188,12 @@ isYMc        = str.contains(cs, "YM")
 chartIsMicro = str.contains(cs, "MNQ") or str.contains(cs, "MES") or str.contains(cs, "MYM")
 useMicro     = contractSet == "מיקרו" or (contractSet == "אוטומטי" and chartIsMicro)
 
-sNQ = useMicro ? symNQ_mic : symNQ_std
-sES = useMicro ? symES_mic : symES_std
-sYM = useMicro ? symYM_mic : symYM_std
+bAdj = adjMode == "מיושר לגלגול" ? backadjustment.on : adjMode == "בלי יישור" ? backadjustment.off : backadjustment.inherit
+bSet = settleIn == "דלוק" ? settlement_as_close.on : settleIn == "ברירת המחדל של הסימבול" ? settlement_as_close.inherit : settlement_as_close.off
+
+sNQ = ticker.modify(useMicro ? symNQ_mic : symNQ_std, backadjustment = bAdj, settlement_as_close = bSet)
+sES = ticker.modify(useMicro ? symES_mic : symES_std, backadjustment = bAdj, settlement_as_close = bSet)
+sYM = ticker.modify(useMicro ? symYM_mic : symYM_std, backadjustment = bAdj, settlement_as_close = bSet)
 
 // ═══════════════════════════════════════════════════════════════════
 // זיהוי Timeframe
@@ -249,6 +256,9 @@ thuMonth = month(thursdayTime, TZ)
 // החודשים, בלי יומן מאקרו (שאין אליו גישה ב-Pine).
 isDeadWeek = tueMonth != thuMonth
 qtWeekNum  = isDeadWeek ? 0 : math.floor((tueDom - 1) / 7) + 1
+// ספר החוקים §1–2: שבוע 5 לא נכנס למחזור ה-4H, בדיוק כמו שבוע מת
+isWeek5    = qtWeekNum == 5
+isOwnWeek  = isDeadWeek or isWeek5
 
 // ═══════════════════════════════════════════════════════════════════
 // מזהי מחזורים
@@ -265,7 +275,8 @@ weekId     = monYear * 10000 + monMonth * 100 + monDom
 // והמיכל מתאפס כבר בשני שלו ולא רק בשני של החודש הבא. בלי זה שבירה 4H
 // מ-18.9 הייתה שורדת עד 5.10 רק כי העוגן נפל על 29.9.
 // אין התנגשות: monthId אמיתי הוא שש ספרות (202609) ו-weekId שמונה (20260928).
-monthId    = isDeadWeek ? weekId : tueYear * 100 + tueMonth
+// אותו דבר לשבוע 5 (ספר החוקים §2).
+monthId    = isOwnWeek ? weekId : tueYear * 100 + tueMonth
 sessionId  = tradeDayId * 10 + sessionIdx
 microId    = sessionId * 10 + microIdx
 quarterId  = microId * 10 + quarterIdx
@@ -277,11 +288,14 @@ f_dim(int y, int m) =>
 
 // הרמות שמעל החודש — משמשות את היומי, השבועי והחודשי.
 // רבעון = שלושה חודשים קלנדריים: ינו–מרץ · אפר–יוני · יולי–ספט · אוק–דצמ.
-// מחזור 4 שנים = בלוק שמתחיל בשנת בחירות (2024, 2028, ...).
-qOfYear = int(math.ceil(tdMon / 3.0))
-qtrId   = tdYear * 10 + qOfYear
-yearId  = tdYear
-quadId  = int(math.floor(tdYear / 4.0))
+// הגבולות זהים לרבעוני QT, רק המספור שונה.
+// שנת QT מתחילה באפריל — המיכל של הגרף השבועי (ספר החוקים §3).
+// מחזור 4 שנים = שנים קלנדריות, 2023–2026, 2027–2030 (ספר החוקים §4).
+qOfYear  = int(math.ceil(tdMon / 3.0))
+qtrId    = tdYear * 10 + qOfYear
+yearId   = tdYear
+qtYearId = tdMon >= 4 ? tdYear : tdYear - 1
+quadId   = int(math.floor((tdYear - 2023) / 4.0))
 
 // ── רבע-רבעון — תת-המחזור של הגרף היומי ──
 // כל רבעון נמדד בנפרד ומחולק לארבעה חלקים שווים. אין כאן מספר קבוע:
@@ -320,7 +334,7 @@ lifeCycleId = 0
 if tfClass == 8
     lifeCycleId := quadId
 else if tfClass == 7
-    lifeCycleId := yearId
+    lifeCycleId := qtYearId
 // המיכל של היומי הוא **הרבעון**: הרבעון מחולק לארבעה רבע-רבעונים, והם
 // תת-המחזורים שלו. גאפ של Q3 לא נשבר ב-Q4. תוצאת לוואי ידועה: בכל תחילת
 // רבעון הרשימה ריקה עד שהרבע-רבעון הראשון נגמר (~23 יום), כי ביומי אין זרע.
@@ -661,6 +675,7 @@ type Engine
     int          fGapId     // הגאפ שנושא את השבירה המוצגת
     int          fWhen      // ומתי הוא נולד
     bool         justFired
+    int          curWk = 0  // מספר השבוע בחודש של הנר הנוכחי (0 = שבוע מת)
 
 // כל מזהי המחזורים מתוך חותמת זמן של נר, לפי מחלקת מסגרת הזמן.
 // זהה לחישוב שרץ למעלה על נרות הגרף, רק שהוא מקבל את הזמן כפרמטר.
@@ -696,16 +711,18 @@ f_setCycles(Engine e, int t) =>
     int  tuM  = month(tueT, TZ)
     int  tuY  = year(tueT, TZ)
     bool dead = tuM != month(thuT, TZ)
+    int  wkN  = dead ? 0 : int(math.floor((dayofmonth(tueT, TZ) - 1) / 7)) + 1
     int  tdId = yy * 10000 + mm * 100 + dd
     int  wkId = moY * 10000 + moM * 100 + moD
-    // שבוע מת = מיכל נפרד משלו, בדיוק כמו בגרף
-    int  mnId = dead ? wkId : tuY * 100 + tuM
+    // שבוע מת ושבוע 5 = מיכל נפרד משלהם, בדיוק כמו בגרף
+    int  mnId = dead or wkN == 5 ? wkId : tuY * 100 + tuM
     int  ssId = tdId * 10 + sIdx
     int  ucId = ssId * 10 + uIdx
     int  qrId = ucId * 10 + qIdx
     int  qOf  = int(math.ceil(mm / 3.0))
     int  qtId = yy * 10 + qOf
-    int  qdId = int(math.floor(yy / 4.0))
+    int  qtYr = mm >= 4 ? yy : yy - 1
+    int  qdId = int(math.floor((yy - 2023) / 4.0))
     // רבע-רבעון, אותו חישוב בדיוק של הגרף: אורך הרבעון בפועל חלקי ארבע,
     // בימי לוח שלמים מתוך התאריך. תת-המחזור של היומי.
     int  qsM  = (qOf - 1) * 3 + 1
@@ -714,11 +731,12 @@ f_setCycles(Engine e, int t) =>
     int  qqIx = math.min(3, math.max(0, int(math.floor(qDiQ * 4.0 / qLn))))
     int  qqId = qtId * 10 + qqIx
     int  rf   = c == 8 ? yy   : c == 7 ? qtId : c == 6 ? qqId : c == 5 ? wkId : c == 4 ? tdId : c == 3 ? ssId : c == 2 ? ucId : qrId
-    int  lf   = c == 8 ? qdId : c == 7 ? yy   : c == 6 ? qtId : c == 5 ? mnId : c == 4 ? wkId : c == 3 ? tdId : c == 2 ? ssId : ucId
+    int  lf   = c == 8 ? qdId : c == 7 ? qtYr : c == 6 ? qtId : c == 5 ? mnId : c == 4 ? wkId : c == 3 ? tdId : c == 2 ? ssId : ucId
     e.curRef  := rf
     e.curLife := lf
     e.curDead := dead
     e.curDow  := dw
+    e.curWk   := wkN
     rf
 
 // המיכל בלבד, מחושב מזמן כלשהו ובלי לגעת במצב של שום מנוע.
@@ -744,13 +762,15 @@ f_lifeId(int c, int t) =>
     int  thuT = monT + 3 * 86400000
     int  tdId = yy * 10000 + mm * 100 + dd
     int  wkId = year(monT, TZ) * 10000 + month(monT, TZ) * 100 + dayofmonth(monT, TZ)
-    // שבוע מת = מיכל נפרד משלו, בדיוק כמו בגרף וב-f_setCycles
+    // שבוע מת ושבוע 5 = מיכל נפרד משלהם, בדיוק כמו בגרף וב-f_setCycles
     bool dead = month(tueT, TZ) != month(thuT, TZ)
-    int  mnId = dead ? wkId : year(tueT, TZ) * 100 + month(tueT, TZ)
+    bool wk5  = not dead and dayofmonth(tueT, TZ) >= 29
+    int  mnId = dead or wk5 ? wkId : year(tueT, TZ) * 100 + month(tueT, TZ)
     int  ssId = tdId * 10 + sIdx
     int  ucId = ssId * 10 + uIdx
-    int  qdId = int(math.floor(yy / 4.0))
-    c == 8 ? qdId : c == 7 ? yy : c == 6 ? yy * 10 + int(math.ceil(mm / 3.0)) : c == 5 ? mnId : c == 4 ? wkId : c == 3 ? tdId : c == 2 ? ssId : ucId
+    int  qdId = int(math.floor((yy - 2023) / 4.0))
+    int  qtYr = mm >= 4 ? yy : yy - 1
+    c == 8 ? qdId : c == 7 ? qtYr : c == 6 ? yy * 10 + int(math.ceil(mm / 3.0)) : c == 5 ? mnId : c == 4 ? wkId : c == 3 ? tdId : c == 2 ? ssId : ucId
 
 // צעד אחד של המנוע.
 f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
@@ -1010,8 +1030,10 @@ f_step(Engine e, int tOpen, array<float> n, array<float> s, array<float> y) =>
                 f_trim(e.gaps)
 
         // ── רישום שבירות ──
-        bool blockDW  = e.cls == 5 and blockDeadWeek and deadW
-        bool blockFri = (e.cls == 5 or e.cls == 4) and dow == dayofweek.friday
+        // ספר החוקים §1–2: 1H — שישי חסום תמיד. 4H — שישי חסום רק בשבוע 4;
+        // שבוע 5 ושבוע מת חסומים כולם.
+        bool blockDW  = e.cls == 5 and ((blockDeadWeek and deadW) or e.curWk == 5)
+        bool blockFri = dow == dayofweek.friday and (e.cls == 4 or (e.cls == 5 and e.curWk == 4))
         // תיקון באותו ביקור — זהה לגרף: אם המפגר השלים לפני שהמחיר יצא מהגאפ,
         // השבירה של הביקור הזה מתבטלת. רץ גם כשהרישום חסום.
         bool canReg = not blockDW and not blockFri
@@ -1487,8 +1509,10 @@ if ownMode != "כבוי" and barstate.isconfirmed and tfClass != 0 and bar_index
 // חסימות
 // ═══════════════════════════════════════════════════════════════════
 
-cycleOK  = not (tfClass == 5 and blockDeadWeek and isDeadWeek)
-friBlock = (tfClass == 5 or tfClass == 4) and tdDow == dayofweek.friday
+// ספר החוקים §1–2: 1H — שישי לא רלוונטי. 4H — שישי משתתף בשבועות 1–3 ולא
+// בשבוע 4; שבוע 5 ושבוע מת חסומים.
+cycleOK  = not (tfClass == 5 and ((blockDeadWeek and isDeadWeek) or isWeek5))
+friBlock = tdDow == dayofweek.friday and (tfClass == 4 or (tfClass == 5 and qtWeekNum == 4))
 
 // ═══════════════════════════════════════════════════════════════════
 // רישום שבירות — לכל גאפ השבירה שלו
@@ -2308,3 +2332,67 @@ if showDebug and barstate.islast and array.size(allEng) > 0
 
 if alertMsg != ""
     alert(alertMsg, alert.freq_once_per_bar_close)
+
+// ═══════════════════════════════════════════════════════════════════
+// ייצוא למרכז (QT Hub)
+//
+// שני מספרים מוסתרים (רק בחלון הנתונים) שהמרכז קורא דרך input.source.
+// לכל מסגרת בסולם 4H · 1H · 15m · 5m · 1m — ארבע ספרות: שתיים לשבירה הדובית
+// החיה העדכנית ושתיים לשורית. בכל זוג: הדרגה (1–3) וספרת זהות של הגאפ.
+//   9999 = המסגרת הזאת לא נסרקת מהגרף הנוכחי
+// בסוף החצי השני — Fill שנבנה **עכשיו**, בנר החי של הגרף (בשביל SFP):
+//   כיוון (1 = שורי, 2 = דובי) ואז הדרגה, למשל 12 = F2 שורי בתהליך.
+// המבנה המלא מתועד ב-qt-system/docs/HUB.md — חייב להיות זהה במרכז.
+// ═══════════════════════════════════════════════════════════════════
+
+// השבירה החיה העדכנית ביותר בכיוון אחד, מתוך רשימת גאפים
+f_fxDir(array<Gap> a, int d) =>
+    int bestI = -1
+    int bestS = -1
+    if array.size(a) > 0
+        for i = 0 to array.size(a) - 1
+            Gap g = array.get(a, i)
+            if not g.dead and g.fDeg > 0 and g.dir == d and g.fSeq > bestS
+                bestS := g.fSeq
+                bestI := i
+    int v = 0
+    if bestI != -1
+        Gap gb = array.get(a, bestI)
+        v := gb.fDeg * 10 + gb.id % 10
+    v
+
+f_fxGaps(array<Gap> a) => f_fxDir(a, -1) * 100 + f_fxDir(a, 1)
+
+// מנוע שמעל הגרף צועד רק כשנסגר נר שלו — שבירה שהמיכל שלה נגמר נחתכת כאן
+// מיד מול השעון של הגרף, ולא מחכה לנר הבא.
+f_fxTf(int cls) =>
+    int v = 9999
+    if cls == tfClass
+        v := f_fxGaps(gaps)
+    else if mtfOn and array.size(allEng) > 0
+        for k = 0 to array.size(allEng) - 1
+            Engine ee = array.get(allEng, k)
+            if v == 9999 and f_useSlot(k) and ee.cls == cls
+                bool stale = ee.cls > tfClass and ee.started and ee.lifeId != f_lifeId(ee.cls, time)
+                v := stale ? 0 : f_fxGaps(ee.gaps)
+    v
+
+// Fill בתהליך: על הנר החי, גאפ דרוך שהעומקים שלו כבר נותנים דרגה גבוהה מזו
+// שנרשמה. בסגירת הנר הוא נרשם בעצמו, ולכן בהיסטוריה זה תמיד 0.
+int fxPot = 0
+if tfClass != 0 and not friBlock and cycleOK and array.size(gaps) > 0
+    int fpDeg = 0
+    int fpDir = 0
+    for i = 0 to array.size(gaps) - 1
+        Gap g = array.get(gaps, i)
+        if not g.dead and g.armed
+            int dg = g.fracDeg()
+            if dg > g.fDeg and dg > fpDeg
+                fpDeg := dg
+                fpDir := g.dir
+    fxPot := fpDeg == 0 ? 0 : (fpDir == 1 ? 10 : 20) + fpDeg
+
+hubA = 210000000000000.0 + f_fxTf(5) * 100000000.0 + f_fxTf(4) * 10000.0 + f_fxTf(3)
+hubB = 220000000000000.0 + f_fxTf(2) * 100000000.0 + f_fxTf(1) * 10000.0 + fxPot
+plot(hubA, "HUB · Fill · A", color = color.new(color.gray, 100), display = display.data_window, editable = false)
+plot(hubB, "HUB · Fill · B", color = color.new(color.gray, 100), display = display.data_window, editable = false)

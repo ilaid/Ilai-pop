@@ -289,10 +289,16 @@ i_ignore_doji = input.bool(false, title="התעלם מדוג'י (סגירה = פ
      group=grp_mode)
 
 grp_assets = "═══  נכסים  ═══"
-i_sym_nq   = input.symbol("NQ1!", title="סימבול NQ", group=grp_assets,
-     tooltip="למעבר למיקרו — החלף את שלושת השדות ל-MNQ1! / MES1! / MYM1!\nחשוב לשמור על שלושתם מאותה משפחת חוזים; ערבוב גדלי טיק מעוות את ההשוואה.")
-i_sym_es   = input.symbol("ES1!", title="סימבול ES", group=grp_assets)
-i_sym_ym   = input.symbol("YM1!", title="סימבול YM", group=grp_assets)
+// ספר החוקים §6 — אותה מדיניות נתונים בשלושת האינדיקטורים: סט חוזים אוטומטי
+// לפי הגרף, בלי יישור לגלגול כברירת מחדל, ו-Settlement כמו בגרף.
+i_contract = input.string("אוטומטי", title="סט חוזים",
+     options=["אוטומטי", "רגיל", "מיקרו"],
+     tooltip="אוטומטי = לפי הגרף: גרף MNQ/MES/MYM קורא מיקרו, כל גרף אחר קורא רגיל.\nשלושת הנכסים תמיד מאותה משפחת חוזים.",
+     group=grp_assets)
+i_adjust   = input.string("בלי יישור", title="נתוני חוזה רציף",
+     options=["בלי יישור", "מיושר לגלגול", "ברירת המחדל של הסימבול"],
+     tooltip="ברירת המחדל לפי ספר החוקים: בלי יישור. בשבוע גלגול חוזים כדאי לעבור ל'מיושר לגלגול'.",
+     group=grp_assets)
 i_use_nq   = input.bool(true,  title="כלול NQ", group=grp_assets)
 i_use_es   = input.bool(true,  title="כלול ES", group=grp_assets)
 i_use_ym   = input.bool(true,  title="כלול YM",
@@ -314,6 +320,8 @@ i_tf_1h    = input.bool(true,  title="1H",     group=grp_tf)
 i_tf_4h    = input.bool(true,  title="4H",     group=grp_tf)
 i_tf_1d    = input.bool(true,  title="יומי",   group=grp_tf)
 i_tf_1w    = input.bool(true,  title="שבועי",  group=grp_tf)
+i_tf_1mo   = input.bool(true,  title="חודשי",  group=grp_tf,
+     tooltip="PSP בין שנים, בתוך מחזור 4 שנים קלנדרי (2023–2026, 2027–2030).")
 
 grp_col    = "═══  סימונים וצבעים  ═══"
 i_col_bull = input.color(color.new(#00e5ff, 0), title="אות שורי", group=grp_col)
@@ -374,7 +382,7 @@ i_kill_all = input.bool(true, title="ביטול לפי NQ ו-ES (YM לא מכר�
      tooltip="דלוק (ברירת מחדל): הסווינג קובע איזה נר ואיזה כיוון, ואז כל נכס מגן על הקצה של אותו נר אצלו — גם נכס שלא עשה שם סווינג. השבירה מתה כש-NQ וגם ES חצו אותו. YM נמדד ומוצג אבל לא מכריע.\nכבוי: מספיק שנכס אחד חוצה את הרמה שלו כדי לבטל.\nהשמות בשורה מראים מי עדיין מגן.",
      group=grp_mtf)
 i_qt_on    = input.bool(true, title="Quarterly Theory — תפוגה ומשמעות",
-     tooltip="דלוק: שבירה מתה כשהמיכל שלה נגמר, גם אם לא נלקחה — 1m: מיקרו 90 דק׳, 5m: סשן, 15m: יום מסחר, 1H: שבוע, 4H: חודש, יומי: רבעון QT, שבועי: שנת QT.\nב-1H וב-4H כל PSP הוא רגיל — כולל שישי, שבוע 1 ושבוע מת — וחי עד שנלקח או עד שהשבוע / החודש נגמר.\nרק ביומי (רבע-הרבעון הראשון) ובשבועי (אפריל–יוני) PSP לא נכנס לשורה ומסומן בנקודה בלבד.\nשעון ניו יורק, היום מתחיל ב-18:00. מסגרות אחרות (2H, 6H...) לא מושפעות.",
+     tooltip="דלוק: שבירה מתה כשהמיכל שלה נגמר, גם אם לא נלקחה — 1m: מיקרו 90 דק׳, 5m: סשן, 15m: יום מסחר, 1H: שבוע, 4H: חודש, יומי: רבעון QT, שבועי: שנת QT, חודשי: מחזור 4 שנים.\nנקודה אפורה במקום סימון (לא נכנסת לשורה ולא מתריעה):\n• 1H — כל PSP ביום שישי.\n• 4H — שישי של שבוע 4, וכל שבוע 5 ושבוע מת.\n• יומי — רבע-הרבעון הראשון. שבועי — אפריל–יוני.\nשעון ניו יורק, היום מתחיל ב-18:00. מסגרות אחרות (2H, 6H...) לא מושפעות.",
      group=grp_mtf)
 i_inv_wick = input.bool(true, title="בטל שבירה לפי פתיל",
      tooltip="דלוק (ברירת מחדל): מספיק שפתיל חוצה את רמת הסווינג כדי שהשבירה תפסיק להיחשב.\nכבוי: רק נר שנסגר מעבר לרמה מבטל, ופתיל שחורג וחוזר לא סופר.",
@@ -428,10 +436,11 @@ is_1h  = tf_str == "60"
 is_4h  = tf_str == "240"
 is_1d  = tf_str == "D"
 is_1w  = tf_str == "W"
+is_1mo = timeframe.ismonthly and timeframe.multiplier == 1
 
 // Which Quarterly Theory ladder the chart's own bars sit on. 0 = none, and a
 // timeframe with no ladder simply never expires and is never muted.
-chKind = is_1m ? 1 : is_5m ? 2 : is_15m ? 3 : is_1h ? 4 : is_4h ? 5 : is_1d ? 6 : is_1w ? 7 : 0
+chKind = is_1m ? 1 : is_5m ? 2 : is_15m ? 3 : is_1h ? 4 : is_4h ? 5 : is_1d ? 6 : is_1w ? 7 : is_1mo ? 8 : 0
 
 // chartSec lives here rather than down beside the line, because the weakness
 // rule needs it before the detection below.
@@ -449,7 +458,8 @@ tf_allowed = (is_1m  and i_tf_1m)  or
              (is_1h  and i_tf_1h)  or
              (is_4h  and i_tf_4h)  or
              (is_1d  and i_tf_1d)  or
-             (is_1w  and i_tf_1w)
+             (is_1w  and i_tf_1w)  or
+             (is_1mo and i_tf_1mo)
 
 // ══════════════════════════════════════════════════════════════
 //  CANDLE DIRECTION  (+1 Bull / -1 Bear / 0 Doji)
@@ -466,9 +476,19 @@ f_dir(float o, float c) =>
 
 settleMode = i_settle == "דלוק" ? settlement_as_close.on : i_settle == "ברירת המחדל של הסימבול" ? settlement_as_close.inherit : settlement_as_close.off
 
-tk_nq = ticker.modify(i_sym_nq, settlement_as_close = settleMode)
-tk_es = ticker.modify(i_sym_es, settlement_as_close = settleMode)
-tk_ym = ticker.modify(i_sym_ym, settlement_as_close = settleMode)
+adjMode = i_adjust == "מיושר לגלגול" ? backadjustment.on : i_adjust == "בלי יישור" ? backadjustment.off : backadjustment.inherit
+
+// The two contract families are constants, chosen by one simple bool, so only
+// the chosen set is ever requested.
+chMicro  = str.contains(syminfo.tickerid, "MNQ") or str.contains(syminfo.tickerid, "MES") or str.contains(syminfo.tickerid, "MYM")
+useMicro = i_contract == "מיקרו" or (i_contract == "אוטומטי" and chMicro)
+sym_nq   = useMicro ? "CME_MINI:MNQ1!"  : "CME_MINI:NQ1!"
+sym_es   = useMicro ? "CME_MINI:MES1!"  : "CME_MINI:ES1!"
+sym_ym   = useMicro ? "CBOT_MINI:MYM1!" : "CBOT_MINI:YM1!"
+
+tk_nq = ticker.modify(sym_nq, backadjustment = adjMode, settlement_as_close = settleMode)
+tk_es = ticker.modify(sym_es, backadjustment = adjMode, settlement_as_close = settleMode)
+tk_ym = ticker.modify(sym_ym, backadjustment = adjMode, settlement_as_close = settleMode)
 
 f_sec(simple string sym) =>
     [o, h, l, c] = request.security(sym, timeframe.period,
@@ -734,6 +754,11 @@ var FB y15 = FB.new()
 var FB n5m = FB.new()
 var FB e5m = FB.new()
 var FB y5m = FB.new()
+// 1m — only for the hub's SFP on a 15m chart (Fill on 15m + PSP two
+// timeframes below). Not shown in the box. Three more calls, nine series.
+var FB n1m = FB.new()
+var FB e1m = FB.new()
+var FB y1m = FB.new()
 
 tn1h = f_load(n1h, tk_nq, "60")
 te1h = f_load(e1h, tk_es, "60")
@@ -760,6 +785,10 @@ f_fast(y15, tk_ym, "15")
 f_fast(n5m, tk_nq, "5")
 f_fast(e5m, tk_es, "5")
 f_fast(y5m, tk_ym, "5")
+
+f_fast(n1m, tk_nq, "1")
+f_fast(e1m, tk_es, "1")
+f_fast(y1m, tk_ym, "1")
 
 f_fill(nCh, a_nq_o, a_nq_h, a_nq_l, a_nq_c)
 f_fill(eCh, a_es_o, a_es_h, a_es_l, a_es_c)
@@ -839,15 +868,20 @@ type Brk
 //      1     1m     22.5 min          90-min micro     never
 //      2     5m     90-min micro      6-hour session   never
 //      3     15m    6-hour session    trading day      never
-//      4     1H     day               week             never
-//      5     4H     week (by Tue)     month            never
+//      4     1H     day               week             Friday
+//      5     4H     week (by Tue)     month            week-4 Friday, week 5, dead week
 //      6     1D     quarter/4         QT quarter       first quarter/4
 //      7     1W     QT quarter        QT year (Apr)    April–June
+//      8     1Mo    calendar year     4-year cycle     never
 //
-//  Muted = the first quarter of a container with no seed: with nothing before
-//  it in the same container and nothing carried across, there is nothing to
-//  break. Only the daily and weekly ladders have that; on every other one a
-//  PSP is ordinary until it is taken or its container ends.
+//  Muted on 1D/1W = the first quarter of a container with no seed: with
+//  nothing before it in the same container, there is nothing to break.
+//  Muted on 1H/4H = the rulebook (§1–2): an hourly break means nothing on a
+//  Friday; on 4H, Friday means nothing in week 4, and week 5 and a dead week
+//  never sit in the 4H cycle at all. Week 5 and a dead week are each their own
+//  container — they belong to neither the month before nor the month after.
+//  A muted PSP is drawn as a grey dot, never enters the line, never alerts.
+//  The 4-year cycle is calendar years from 2023: 2023–2026, 2027–2030.
 //
 //  The trading day opens at 18:00 New York. Shifting every time by six hours
 //  turns that into midnight, so the calendar functions read the trading day
@@ -871,6 +905,11 @@ f_cyc(int t, int k) =>
         d0  = timestamp(NY, y, m, dayofmonth(td, NY), 0, 0)
         mon = d0 - (w - 2) * DAY_MS
         tue = mon + DAY_MS
+        thu = mon + 3 * DAY_MS
+        fri = w == dayofweek.friday
+        // a week belongs to the month of its Tuesday; numbered by its Tuesday
+        dead = month(tue, NY) != month(thu, NY)
+        wkN  = dead ? 0 : math.floor((dayofmonth(tue, NY) - 1) / 7) + 1
         if k == 1
             cont := d0 + math.floor(mod / 90)
         else if k == 2
@@ -879,9 +918,13 @@ f_cyc(int t, int k) =>
             cont := d0
         else if k == 4
             cont := mon
+            mute := fri
         else if k == 5
-            // a week belongs to the month of its Tuesday
-            cont := year(tue, NY) * 12 + month(tue, NY)
+            // week 5 and a dead week are a container of their own (a Monday
+            // timestamp — it can never collide with year*12+month)
+            own  = dead or wkN == 5
+            cont := own ? mon : year(tue, NY) * 12 + month(tue, NY)
+            mute := own or (wkN == 4 and fri)
         else if k == 6
             // the real quarter cut into four equal parts, so the last boundary
             // lands exactly on the quarter's last day
@@ -898,6 +941,9 @@ f_cyc(int t, int k) =>
             ty = year(tue, NY)
             cont := tm >= 4 ? ty : ty - 1
             mute := tm >= 4 and tm <= 6
+        else if k == 8
+            // calendar 4-year cycle from 2023
+            cont := math.floor((y - 2023) / 4)
     [cont, mute]
 
 // Who is STILL defending this break — read off the levels that have not been
@@ -1288,7 +1334,7 @@ sh1w = timeframe.in_seconds("W")   >= chartSec
 chDup   = is_1h or is_4h or is_1d or is_1w
 chIsBig = chartSec >= timeframe.in_seconds("60") and not chDup
 
-chName = is_1m ? "1m" : is_5m ? "5m" : is_15m ? "15m" : is_1h ? "1H" : is_4h ? "4H" : is_1d ? "1D" : is_1w ? "1W" : tf_str
+chName = is_1m ? "1m" : is_5m ? "5m" : is_15m ? "15m" : is_1h ? "1H" : is_4h ? "4H" : is_1d ? "1D" : is_1w ? "1W" : is_1mo ? "1Mo" : tf_str
 
 f_arrow(MtfSt s) =>
     s.dir < 0 ? "▼" : "▲"
@@ -1390,6 +1436,7 @@ f_flash(FB n, FB e, FB y) =>
 
 [on15, dir15, who15, pcp15, pwho15] = f_flash(n15, e15, y15)
 [on5m, dir5m, who5m, pcp5m, pwho5m] = f_flash(n5m, e5m, y5m)
+[on1m, dir1m, who1m, pcp1m, pwho1m] = f_flash(n1m, e1m, y1m)
 
 // Kept as one-line statements on purpose: Pine treats a continuation line
 // indented by any multiple of four spaces as the start of a block, so a
@@ -1653,3 +1700,43 @@ if i_fast_on and i_fast_alert and fastTx != ""
 // ══════════════════════════════════════════════════════════════
 //  END OF SCRIPT
 // ══════════════════════════════════════════════════════════════
+
+// ══════════════════════════════════════════════════════════════
+//  EXPORT TO THE HUB  (QT Hub)
+//
+//  Two hidden numbers (data window only) the hub reads via input.source.
+//  For each timeframe on the ladder 4H · 1H · 15m · 5m · 1m: four digits,
+//  two for the newest live bearish PSP and two for the bullish one. In each
+//  pair: the kind (1 = PSP, 2 = PSP from YM weakness) and an identity digit.
+//    9999 = this timeframe cannot be read from the current chart
+//  4H and 1H come from the stepped stacks, so they are alive until taken or
+//  their container ends. 15m, 5m and 1m come from the fast reader: a PSP
+//  there is "current" — it stands until the next close of its timeframe.
+//  The full layout is in qt-system/docs/HUB.md and must match the hub.
+// ══════════════════════════════════════════════════════════════
+
+// The newest live break in one direction — the stack is newest first.
+f_hxStk(array<Brk> st, int d, int tfMs) =>
+    int  v = 0
+    bool f = false
+    if array.size(st) > 0
+        for k = 0 to array.size(st) - 1
+            Brk b = array.get(st, k)
+            if not f and b.dir == d
+                f := true
+                v := (b.weak ? 2 : 1) * 10 + int(math.floor(nz(b.born) / tfMs)) % 10
+    v
+
+f_hxFast(bool on, int dir) =>
+    (on and dir < 0 ? 10 : 0) * 100 + (on and dir > 0 ? 10 : 0)
+
+hx4h = sh4h ? f_hxStk(b4h, -1, 14400000) * 100 + f_hxStk(b4h, 1, 14400000) : 9999
+hx1h = sh1h ? f_hxStk(b1h, -1, 3600000) * 100 + f_hxStk(b1h, 1, 3600000) : 9999
+hx15 = f_hxFast(on15, dir15)
+hx5m = f_hxFast(on5m, dir5m)
+hx1m = f_hxFast(on1m, dir1m)
+
+hubA = 310000000000000.0 + hx4h * 100000000.0 + hx1h * 10000.0 + hx15
+hubB = 320000000000000.0 + hx5m * 100000000.0 + hx1m * 10000.0
+plot(hubA, "HUB · ADI · A", color = color.new(color.gray, 100), display = display.data_window, editable = false)
+plot(hubB, "HUB · ADI · B", color = color.new(color.gray, 100), display = display.data_window, editable = false)

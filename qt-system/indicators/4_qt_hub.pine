@@ -1,0 +1,505 @@
+//@version=5
+indicator("QT Hub | Two-Stage", shorttitle = "QT Hub", overlay = true)
+
+// ═══════════════════════════════════════════════════════════════════
+// QT Hub — מרכז ההחלטות
+//
+// לא מחשב שבירות בעצמו. קורא את המצב ששלושת האינדיקטורים מייצאים
+// (SSMT + HSSMT · SSMT Fill · ADI), ומריץ עליו את ספר החוקים:
+//
+//   1. חוקי חיים — שבירה משפיעה רק באותה מסגרת. שבירה חדשה בכיוון ההפוך
+//      מרדימה את הישנה; כשהחדשה מתה — הרדומה חוזרת. אותו כיוון — שתיהן חיות.
+//      PSP לא מרדים SSMT / Fill (הוא פחות רלוונטי), אבל הם כן מרדימים אותו.
+//   2. Two-Stage — שתי שבירות חיות באותו כיוון, עד שתי מדרגות זו מזו בסולם
+//      4H · 1H · 15m · 5m · 1m. סטאפ A = שתי שבירות SSMT / Fill.
+//      סטאפ B = אחת הרגליים PSP. שני PSP — לא סטאפ.
+//   3. True Open — לכל רגל, ה-True Open של המיכל שלה (Q2 של המחזור):
+//      4H → TMO · 1H → TWO · 15m → TDO · 5m → T90O · 1m → TMcO.
+//      לונג = מחיר מתחת לפתיחה · שורט = מעל. נמדד ברגע שהסטאפ נוצר: 2/2, 1/2, 0/2.
+//   4. SFP — Fill שנבנה עכשיו על הגרף (4H / 1H / 15m), ו-PSP באותו כיוון
+//      בדיוק שתי מדרגות מתחת, שנוצר בתוך הנר הנוכחי של הגרף.
+//   5. PSP→HSSMT — PSP שעתי חי, ואחריו HSSMT באותו כיוון ב-15m או ב-1m.
+//
+// חיבור: בהגדרות, לכל אחד משישת השדות בוחרים את הפלט המתאים (למשל
+// "SSMT + HSSMT: HUB · SSMT · A"). המבנה של המספרים — qt-system/docs/HUB.md.
+// ═══════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════
+// הגדרות
+// ═══════════════════════════════════════════════════════════════════
+
+grpSrc = "חיבור לאינדיקטורים"
+srcSA = input.source(close, "SSMT · A", group = grpSrc, tooltip = "בחר מהרשימה: SSMT + HSSMT → HUB · SSMT · A")
+srcSB = input.source(close, "SSMT · B", group = grpSrc, tooltip = "בחר מהרשימה: SSMT + HSSMT → HUB · SSMT · B")
+srcFA = input.source(close, "Fill · A", group = grpSrc, tooltip = "בחר מהרשימה: SSMT Fill → HUB · Fill · A")
+srcFB = input.source(close, "Fill · B", group = grpSrc, tooltip = "בחר מהרשימה: SSMT Fill → HUB · Fill · B")
+srcAA = input.source(close, "ADI · A",  group = grpSrc, tooltip = "בחר מהרשימה: ADI v5 → HUB · ADI · A")
+srcAB = input.source(close, "ADI · B",  group = grpSrc, tooltip = "בחר מהרשימה: ADI v5 → HUB · ADI · B")
+
+grpLog  = "לוגיקה"
+usePsp  = input.bool(true, "PSP יכול להיות רגל ב-Two-Stage (סטאפ B)", group = grpLog)
+friSkip = input.bool(true, "1H לא רלוונטי ביום שישי", group = grpLog, tooltip = "ספר החוקים §1: שבירה שעתית לא רלוונטית בימי שישי.")
+
+grpAl    = "התראות"
+alTwo    = input.string("A + B", "Two-Stage חדש", options = ["A + B", "רק A", "רק A עם 2/2 פתיחות", "כבוי"], group = grpAl)
+alSfp    = input.bool(true, "SFP", group = grpAl)
+alPh     = input.bool(true, "PSP→HSSMT", group = grpAl)
+alRev    = input.bool(true, "שבירה רדומה חזרה לחיים", group = grpAl)
+
+grpVis  = "תצוגה"
+posIn   = input.string("ימין למעלה", "מיקום", options = ["ימין למעלה", "ימין באמצע", "ימין למטה", "שמאל למעלה", "שמאל באמצע", "שמאל למטה"], group = grpVis)
+szIn    = input.string("small", "גודל טקסט", options = ["tiny", "small", "normal"], group = grpVis)
+showTf  = input.bool(true, "הצג שורה לכל מסגרת", group = grpVis)
+colBull = input.color(#26a69a, "שורי", group = grpVis)
+colBear = input.color(#ef5350, "דובי", group = grpVis)
+colNeut = input.color(color.gray, "נייטרלי", group = grpVis)
+colHead = input.color(#4b56ba, "כותרת", group = grpVis)
+
+TZ = "America/New_York"
+
+// סקריפט חייב פלט אחד לפחות; הטבלה היא התצוגה האמיתית
+plot(na, "QT Hub", display = display.none, editable = false)
+
+// ═══════════════════════════════════════════════════════════════════
+// פענוח המספרים שהאינדיקטורים מייצאים
+//
+// כל מספר: קידומת של שתי ספרות (מי ואיזה חצי) × 10^13, ואחריה עד שלוש
+// קבוצות של ארבע ספרות. A = 4H · 1H · 15m. B = 5m · 1m · תוספת.
+// בכל קבוצה: שתי ספרות לדובית ושתיים לשורית — סוג, ואז ספרת זהות.
+// 9999 = המסגרת לא נסרקת מהגרף הזה. הכול מספרים שלמים מתחת ל-2^53, ולכן מדויק.
+// ═══════════════════════════════════════════════════════════════════
+
+f_tag(float s) => na(s) ? -1 : int(math.floor(s / 10000000000000.0))
+f_pay(float s) => na(s) ? 0.0 : s - math.floor(s / 10000000000000.0) * 10000000000000.0
+f_part(float p, int pos) => int(math.floor(p / (pos == 0 ? 100000000.0 : pos == 1 ? 10000.0 : 1.0))) % 10000
+
+okS = f_tag(srcSA) == 11 and f_tag(srcSB) == 12
+okF = f_tag(srcFA) == 21 and f_tag(srcFB) == 22
+okA = f_tag(srcAA) == 31 and f_tag(srcAB) == 32
+
+// הערך של אינדיקטור k (0 SSMT · 1 Fill · 2 ADI) במסגרת i (0 4H … 4 1m)
+f_tfv(int k, int i) =>
+    bool  ok = k == 0 ? okS : k == 1 ? okF : okA
+    float a  = k == 0 ? srcSA : k == 1 ? srcFA : srcAA
+    float b  = k == 0 ? srcSB : k == 1 ? srcFB : srcAB
+    int   v  = 9999
+    if ok
+        v := i <= 2 ? f_part(f_pay(a), i) : f_part(f_pay(b), i - 3)
+    v
+
+// Fill בתהליך על הנר החי של הגרף: 10+דרגה = שורי, 20+דרגה = דובי
+fillPot = okF ? f_part(f_pay(srcFB), 2) : 0
+
+// ═══════════════════════════════════════════════════════════════════
+// שמות, חוזק, מסגרות
+// ═══════════════════════════════════════════════════════════════════
+
+f_tfName(int i) => i == 0 ? "4H" : i == 1 ? "1H" : i == 2 ? "15m" : i == 3 ? "5m" : "1m"
+
+// חוזק: HSSMT > SSMT > F3 > F2 > F1 > SSMT (closed) > PSP, ו-QS (★) מוסיף
+f_rank(int k, int c) =>
+    int r = 0
+    if c > 0
+        if k == 0
+            int bse = c > 3 ? c - 3 : c
+            r := (bse == 3 ? 60 : bse == 2 ? 50 : 15) + (c > 3 ? 5 : 0)
+        else if k == 1
+            r := c == 3 ? 40 : c == 2 ? 30 : 20
+        else
+            r := 10
+    r
+
+f_kName(int k, int c) =>
+    string t = ""
+    if k == 0
+        int bse = c > 3 ? c - 3 : c
+        t := (bse == 3 ? "HSSMT" : bse == 2 ? "SSMT" : "SSMT(c)") + (c > 3 ? "★" : "")
+    else if k == 1
+        t := "F" + str.tostring(c)
+    else
+        t := c == 2 ? "PSPw" : "PSP"
+    t
+
+f_isH(int c) => c == 3 or c == 6
+
+// מסגרת הגרף בסולם (‎-1 = הגרף לא על אחת מחמש המסגרות)
+chSec = timeframe.in_seconds()
+chIdx = chSec == 14400 ? 0 : chSec == 3600 ? 1 : chSec == 900 ? 2 : chSec == 300 ? 3 : chSec == 60 ? 4 : -1
+
+// יום המסחר מתחיל ב-18:00 ניו יורק — הזזה של שש שעות הופכת אותו לחצות
+fri1h = friSkip and dayofweek(time + 21600000, TZ) == dayofweek.friday
+
+// ═══════════════════════════════════════════════════════════════════
+// True Opens — מנרות דקה של נכס הגרף, באותה לוגיקה של Sav FX
+//
+// נר הפתיחה הוא הראשון שמתחיל ברגע הזה או אחריו. רמה חיה רק כל עוד המיכל
+// שלה חי. מחושב בהקשר של 1m, כך שגם על גרף 4H ה-TMcO מדויק.
+// ═══════════════════════════════════════════════════════════════════
+
+f_tos() =>
+    int   tdC     = time + (hour(time, TZ) >= 18 ? 86400000 : 0)
+    int   tdMid   = timestamp(TZ, year(tdC, TZ), month(tdC, TZ), dayofmonth(tdC, TZ), 0, 0, 0)
+    int   pNoon   = tdMid - 43200000
+    int   dStart  = timestamp(TZ, year(pNoon, TZ), month(pNoon, TZ), dayofmonth(pNoon, TZ), 18, 0, 0)
+    float el      = time - dStart
+    int   sStart  = dStart + int(math.floor(el / 21600000.0)) * 21600000
+    int   mStart  = dStart + int(math.floor(el / 5400000.0)) * 5400000
+    int   tTDO    = tdMid
+    int   tT90O   = sStart + 5400000
+    int   tTMcO   = mStart + 1350000
+    int   dw      = dayofweek(tdC, TZ)
+    int   dsm     = dw == dayofweek.sunday ? 6 : dw - 2
+    int   monNoon = tdMid + 43200000 - dsm * 86400000
+    int   tTWO    = timestamp(TZ, year(monNoon, TZ), month(monNoon, TZ), dayofmonth(monNoon, TZ), 18, 0, 0)
+    int   tueNoon = monNoon + 86400000
+    int   wY      = year(tueNoon, TZ)
+    int   wM      = month(tueNoon, TZ)
+    int   d1      = dayofweek(timestamp(TZ, wY, wM, 1, 12, 0, 0), TZ)
+    int   ftDom   = ((3 - d1 + 7) % 7) + 1
+    int   w2Sun   = timestamp(TZ, wY, wM, ftDom + 7, 12, 0, 0) - 2 * 86400000
+    int   tTMO    = timestamp(TZ, year(w2Sun, TZ), month(w2Sun, TZ), dayofmonth(w2Sun, TZ), 18, 0, 0)
+    var float pMcO = na
+    var int   iMcO = na
+    var float p90O = na
+    var int   i90O = na
+    var float pDO  = na
+    var int   iDO  = na
+    var float pWO  = na
+    var int   iWO  = na
+    var float pMO  = na
+    var int   iMO  = na
+    if not na(iMcO) and iMcO != mStart
+        pMcO := na
+    if time >= tTMcO and time[1] < tTMcO
+        pMcO := open
+        iMcO := mStart
+    if not na(i90O) and i90O != sStart
+        p90O := na
+    if time >= tT90O and time[1] < tT90O
+        p90O := open
+        i90O := sStart
+    if not na(iDO) and iDO != dStart
+        pDO := na
+    if time >= tTDO and time[1] < tTDO
+        pDO := open
+        iDO := dStart
+    if not na(iWO) and iWO != tTWO
+        pWO := na
+    if time >= tTWO and time[1] < tTWO
+        pWO := open
+        iWO := tTWO
+    if not na(iMO) and iMO != tTMO
+        pMO := na
+    if time >= tTMO and time[1] < tTMO
+        pMO := open
+        iMO := tTMO
+    [pMO, pWO, pDO, p90O, pMcO]
+
+[toMO, toWO, toDO, to90O, toMcO] = request.security(syminfo.tickerid, "1", f_tos(), lookahead = barmerge.lookahead_off)
+
+// ה-True Open של המיכל של כל מסגרת
+f_to(int i) => i == 0 ? toMO : i == 1 ? toWO : i == 2 ? toDO : i == 3 ? to90O : toMcO
+f_toName(int i) => i == 0 ? "TMO" : i == 1 ? "TWO" : i == 2 ? "TDO" : i == 3 ? "T90O" : "TMcO"
+
+// ═══════════════════════════════════════════════════════════════════
+// מצב השבירות — 30 משבצות: אינדיקטור × מסגרת × כיוון
+//   s = k * 10 + i * 2 + d   (d: 0 = דובי, 1 = שורי)
+// לכל משבצת: הסוג, ספרת הזהות, ומתי המרכז ראה אותה לראשונה. שינוי זהות =
+// שבירה חדשה. שינוי סוג באותה זהות (S→H, F1→F2) = אותה שבירה, שודרגה.
+// ═══════════════════════════════════════════════════════════════════
+
+var array<int>  sCode = array.new_int(30, 0)
+var array<int>  sId   = array.new_int(30, -1)
+var array<int>  sSeq  = array.new_int(30, 0)
+var array<int>  sBar  = array.new_int(30, 0)
+var array<bool> sDorm = array.new_bool(30, false)
+var array<bool> tfNa  = array.new_bool(15, true)
+var int hubSeq = 0
+
+for k = 0 to 2
+    for i = 0 to 4
+        int v = f_tfv(k, i)
+        bool vNa = v == 9999
+        array.set(tfNa, k * 5 + i, vNa)
+        for d = 0 to 1
+            int s  = k * 10 + i * 2 + d
+            int dv = vNa ? 0 : d == 0 ? int(math.floor(v / 100.0)) : v % 100
+            int c  = int(math.floor(dv / 10.0))
+            int id = dv % 10
+            if c == 0
+                array.set(sCode, s, 0)
+                array.set(sId, s, -1)
+            else
+                if array.get(sCode, s) == 0 or array.get(sId, s) != id
+                    hubSeq += 1
+                    array.set(sSeq, s, hubSeq)
+                    array.set(sBar, s, bar_index)
+                array.set(sCode, s, c)
+                array.set(sId, s, id)
+
+f_sK(int s) => int(math.floor(s / 10.0))
+f_sI(int s) => int(math.floor((s % 10) / 2.0))
+f_sDir(int s) => s % 2 == 0 ? -1 : 1
+f_live(int s) => array.get(sCode, s) > 0 and not (fri1h and f_sI(s) == 1)
+
+// ── חוקי חיים: הכיוון השולט בכל מסגרת ──
+// השבירה החדשה ביותר (SSMT / Fill) קובעת. באותו נר — החזקה. אם אין SSMT /
+// Fill חיים במסגרת, PSP קובע באותו כלל.
+var array<int> domDir = array.new_int(5, 0)
+for i = 0 to 4
+    int bestKey = -1
+    int bestDir = 0
+    for pass = 0 to 1
+        if bestKey == -1
+            int kFrom = pass == 0 ? 0 : 2
+            int kTo   = pass == 0 ? 1 : 2
+            for k = kFrom to kTo
+                for d = 0 to 1
+                    int s = k * 10 + i * 2 + d
+                    if f_live(s)
+                        int key = array.get(sBar, s) * 100 + f_rank(k, array.get(sCode, s))
+                        if key > bestKey
+                            bestKey := key
+                            bestDir := f_sDir(s)
+    array.set(domDir, i, bestDir)
+
+f_dorm(int s) => f_live(s) and f_sDir(s) != array.get(domDir, f_sI(s))
+
+// ── רדומה שחזרה לחיים ──
+string revTxt = ""
+for s = 0 to 29
+    bool dNow = f_dorm(s)
+    if array.get(sDorm, s) and f_live(s) and not dNow
+        revTxt := revTxt + (revTxt == "" ? "" : " · ") + f_tfName(f_sI(s)) + " " + (f_sDir(s) == 1 ? "▲" : "▼") + " " + f_kName(f_sK(s), array.get(sCode, s))
+    array.set(sDorm, s, dNow)
+
+// הרגל הכי חזקה במסגרת i בכיוון dir, מבין החיות שאינן רדומות
+f_leg(int i, int dir, bool allowPsp) =>
+    int best = -1
+    int bR   = -1
+    int bS   = -1
+    for k = 0 to 2
+        if k < 2 or allowPsp
+            int s = k * 10 + i * 2 + (dir == 1 ? 1 : 0)
+            if f_live(s) and not f_dorm(s)
+                int r = f_rank(k, array.get(sCode, s))
+                if r > bR or (r == bR and array.get(sSeq, s) > bS)
+                    bR   := r
+                    bS   := array.get(sSeq, s)
+                    best := s
+    best
+
+f_slotTxt(int s) => s < 0 ? "" : f_tfName(f_sI(s)) + " " + f_kName(f_sK(s), array.get(sCode, s))
+
+// ═══════════════════════════════════════════════════════════════════
+// Two-Stage — שבעה זוגות מסגרות (עד שתי מדרגות), בשני הכיוונים
+// ═══════════════════════════════════════════════════════════════════
+
+var array<int> pI = array.from(0, 0, 1, 1, 2, 2, 3)
+var array<int> pJ = array.from(1, 2, 2, 3, 3, 4, 4)
+
+// מצב לכל צירוף (זוג × כיוון): המפתח של הרגליים, מתי נוצר, כמה פתיחות
+// התקיימו ברגע היצירה, וכמה מהן עוד לא היו ידועות.
+var array<int> cKey = array.new_int(14, -1)
+var array<int> cBar = array.new_int(14, 0)
+var array<int> cTo  = array.new_int(14, 0)
+var array<int> cNa  = array.new_int(14, 0)
+var array<int> cLgA = array.new_int(14, -1)
+var array<int> cLgB = array.new_int(14, -1)
+
+// כמה מ-True Opens של שתי הרגליים מתקיימים עכשיו (לונג = מתחת, שורט = מעל)
+f_toCnt(int i, int j, int dir) =>
+    int met = 0
+    int unk = 0
+    float a = f_to(i)
+    float b = f_to(j)
+    if na(a)
+        unk += 1
+    else if dir == 1 ? close < a : close > a
+        met += 1
+    if na(b)
+        unk += 1
+    else if dir == 1 ? close < b : close > b
+        met += 1
+    [met, unk]
+
+string newTwo = ""
+for p = 0 to 6
+    int i = array.get(pI, p)
+    int j = array.get(pJ, p)
+    for d = 0 to 1
+        int dir = d == 0 ? -1 : 1
+        int c   = p * 2 + d
+        int la  = f_leg(i, dir, usePsp)
+        int lb  = f_leg(j, dir, usePsp)
+        bool on = la >= 0 and lb >= 0 and not (f_sK(la) == 2 and f_sK(lb) == 2)
+        if not on
+            array.set(cKey, c, -1)
+            array.set(cLgA, c, -1)
+            array.set(cLgB, c, -1)
+        else
+            int key = (la * 10 + array.get(sId, la)) * 1000 + lb * 10 + array.get(sId, lb)
+            if array.get(cKey, c) == -1
+                // נוצר עכשיו — התמונה של הפתיחות נלקחת ברגע הזה ונשמרת
+                [met, unk] = f_toCnt(i, j, dir)
+                array.set(cBar, c, bar_index)
+                array.set(cTo, c, met)
+                array.set(cNa, c, unk)
+                bool gA = f_sK(la) < 2 and f_sK(lb) < 2
+                bool fire = alTwo == "A + B" or (alTwo == "רק A" and gA) or (alTwo == "רק A עם 2/2 פתיחות" and gA and met == 2)
+                if fire
+                    newTwo := newTwo + (newTwo == "" ? "" : " · ") + (dir == 1 ? "▲ " : "▼ ") + f_slotTxt(la) + " + " + f_slotTxt(lb) + " " + (gA ? "A" : "B") + " TO " + str.tostring(met) + "/2"
+            // רגל שהתחזקה או הוחלפה — אותו סטאפ, תמונת הפתיחות לא משתנה
+            array.set(cKey, c, key)
+            array.set(cLgA, c, la)
+            array.set(cLgB, c, lb)
+
+// הסטאפ הכי טוב בכל כיוון: A לפני B, אחר כך יותר פתיחות, אחר כך רגליים
+// חזקות יותר, ובשוויון — החדש יותר. השאר ב-tooltip.
+f_best(int dir) =>
+    int    bc  = -1
+    int    bSc = -1
+    string all = ""
+    for p = 0 to 6
+        int c = p * 2 + (dir == 1 ? 1 : 0)
+        if array.get(cKey, c) != -1
+            int  la = array.get(cLgA, c)
+            int  lb = array.get(cLgB, c)
+            bool gA = f_sK(la) < 2 and f_sK(lb) < 2
+            int  sc = (gA ? 2 : 1) * 1000000 + array.get(cTo, c) * 100000 + (f_rank(f_sK(la), array.get(sCode, la)) + f_rank(f_sK(lb), array.get(sCode, lb))) * 1000 + array.get(cBar, c) % 1000
+            all := all + (all == "" ? "" : "\n") + f_slotTxt(la) + " + " + f_slotTxt(lb) + "  " + (gA ? "A" : "B") + "  TO " + str.tostring(array.get(cTo, c)) + "/2" + (array.get(cNa, c) > 0 ? " (?" + str.tostring(array.get(cNa, c)) + ")" : "")
+            if sc > bSc
+                bSc := sc
+                bc  := c
+    [bc, all]
+
+[bestL, allL] = f_best(1)
+[bestS, allS] = f_best(-1)
+
+f_setupTxt(int c, int dir) =>
+    string t = "—"
+    if c >= 0
+        int  la = array.get(cLgA, c)
+        int  lb = array.get(cLgB, c)
+        bool gA = f_sK(la) < 2 and f_sK(lb) < 2
+        t := (dir == 1 ? "▲ " : "▼ ") + f_slotTxt(la) + " + " + f_slotTxt(lb) + " · " + (gA ? "A" : "B") + " · TO " + str.tostring(array.get(cTo, c)) + "/2"
+    t
+
+// ═══════════════════════════════════════════════════════════════════
+// SFP — Fill שנבנה עכשיו על הגרף + PSP שתי מדרגות מתחת, בתוך הנר הזה
+// ═══════════════════════════════════════════════════════════════════
+
+int    sfpDir = 0
+string sfpTxt = ""
+if chIdx >= 0 and chIdx <= 2 and okA
+    int potDir = fillPot >= 20 ? -1 : fillPot >= 10 ? 1 : 0
+    int potDeg = fillPot % 10
+    // גם Fill שנרשם בדיוק בנר הזה נחשב — זה הרגע שבו "בתהליך" נסגר
+    for d = 0 to 1
+        int dir  = d == 0 ? -1 : 1
+        int sF   = 10 + chIdx * 2 + d
+        bool fOn = potDir == dir or (f_live(sF) and array.get(sBar, sF) == bar_index)
+        int sP   = 20 + (chIdx + 2) * 2 + d
+        if sfpDir == 0 and fOn and f_live(sP) and array.get(sBar, sP) == bar_index
+            sfpDir := dir
+            int fDeg = potDir == dir ? potDeg : array.get(sCode, sF)
+            sfpTxt := (dir == 1 ? "▲ " : "▼ ") + "SFP " + f_tfName(chIdx) + " F" + str.tostring(fDeg) + " + " + f_tfName(chIdx + 2) + " PSP"
+
+// ═══════════════════════════════════════════════════════════════════
+// PSP→HSSMT — PSP שעתי חי, ואחריו HSSMT באותו כיוון ב-15m או ב-1m
+// ═══════════════════════════════════════════════════════════════════
+
+int    phDir = 0
+string phTxt = ""
+for d = 0 to 1
+    int dir = d == 0 ? -1 : 1
+    int sP  = 20 + 1 * 2 + d
+    if phDir == 0 and f_live(sP)
+        for ii = 0 to 1
+            int i2 = ii == 0 ? 2 : 4
+            int sH = i2 * 2 + d
+            if phDir == 0 and f_live(sH) and f_isH(array.get(sCode, sH)) and array.get(sSeq, sH) > array.get(sSeq, sP)
+                phDir := dir
+                phTxt := (dir == 1 ? "▲ " : "▼ ") + "1H PSP → " + f_tfName(i2) + " " + f_kName(0, array.get(sCode, sH))
+
+var int prevSfp = 0
+var int prevPh  = 0
+sfpNew = sfpDir != 0 and sfpDir != prevSfp
+phNew  = phDir != 0 and phDir != prevPh
+prevSfp := sfpDir
+prevPh  := phDir
+
+// ═══════════════════════════════════════════════════════════════════
+// תצוגה
+// ═══════════════════════════════════════════════════════════════════
+
+posT = posIn == "ימין למעלה" ? position.top_right : posIn == "ימין באמצע" ? position.middle_right : posIn == "ימין למטה" ? position.bottom_right : posIn == "שמאל למעלה" ? position.top_left : posIn == "שמאל באמצע" ? position.middle_left : position.bottom_left
+szT  = szIn == "tiny" ? size.tiny : szIn == "normal" ? size.normal : size.small
+
+var table hub = table.new(posT, 2, 11, border_width = 1)
+
+f_dirCol(int dir, int tr) => color.new(dir == 1 ? colBull : dir == -1 ? colBear : colNeut, tr)
+
+// השורה של מסגרת אחת: הרגל החזקה בכיוון השולט, ו-(+n) לשאר. ה-tooltip
+// מפרט את כולן — חיה, רדומה (zz), ומאיזה אינדיקטור.
+f_tfRow(int i) =>
+    int    dom  = array.get(domDir, i)
+    int    lg   = f_leg(i, dom, true)
+    int    more = 0
+    string tip  = ""
+    bool   allNa = array.get(tfNa, i) and array.get(tfNa, 5 + i) and array.get(tfNa, 10 + i)
+    for k = 0 to 2
+        for d = 0 to 1
+            int s = k * 10 + i * 2 + d
+            if f_live(s)
+                if s != lg
+                    more += 1
+                tip := tip + (tip == "" ? "" : "\n") + (f_sDir(s) == 1 ? "▲ " : "▼ ") + f_kName(k, array.get(sCode, s)) + (f_dorm(s) ? "  zz" : "")
+    string txt = allNa ? "n/a" : (fri1h and i == 1) ? "Fri" : lg < 0 ? "—" : (dom == 1 ? "▲ " : "▼ ") + f_kName(f_sK(lg), array.get(sCode, lg)) + (more > 0 ? " (+" + str.tostring(more) + ")" : "")
+    [txt, tip == "" ? "אין שבירות חיות" : tip, lg < 0 ? 0 : dom]
+
+if barstate.islast
+    table.clear(hub, 0, 0, 1, 10)
+    table.cell(hub, 0, 0, "QT HUB", bgcolor = color.new(colHead, 20), text_color = color.white, text_size = szT)
+    string conn = (okS ? "S" : "·") + (okF ? "F" : "·") + (okA ? "A" : "·")
+    table.cell(hub, 1, 0, conn, bgcolor = color.new(colHead, 20), text_color = color.white, text_size = szT, tooltip = "S = SSMT · F = Fill · A = ADI\n· = לא מחובר. בהגדרות של המרכז בוחרים לכל שדה את הפלט HUB המתאים.")
+    int row = 1
+    if showTf
+        for i = 0 to 4
+            [tt, tp, td] = f_tfRow(i)
+            table.cell(hub, 0, row, (i == chIdx ? "▶ " : "") + f_tfName(i), bgcolor = color.new(colNeut, 80), text_color = color.white, text_size = szT)
+            table.cell(hub, 1, row, tt, bgcolor = f_dirCol(td, 80), text_color = color.white, text_size = szT, tooltip = tp)
+            row += 1
+    table.cell(hub, 0, row, "LONG", bgcolor = color.new(colBull, 60), text_color = color.white, text_size = szT)
+    table.cell(hub, 1, row, f_setupTxt(bestL, 1), bgcolor = bestL >= 0 ? color.new(colBull, 45) : color.new(colNeut, 85), text_color = color.white, text_size = szT, tooltip = allL == "" ? "אין Two-Stage לעליות" : allL)
+    row += 1
+    table.cell(hub, 0, row, "SHORT", bgcolor = color.new(colBear, 60), text_color = color.white, text_size = szT)
+    table.cell(hub, 1, row, f_setupTxt(bestS, -1), bgcolor = bestS >= 0 ? color.new(colBear, 45) : color.new(colNeut, 85), text_color = color.white, text_size = szT, tooltip = allS == "" ? "אין Two-Stage לירידות" : allS)
+    row += 1
+    if sfpTxt != ""
+        table.cell(hub, 0, row, "SFP", bgcolor = f_dirCol(sfpDir, 40), text_color = color.white, text_size = szT)
+        table.cell(hub, 1, row, sfpTxt, bgcolor = f_dirCol(sfpDir, 40), text_color = color.white, text_size = szT)
+        row += 1
+    if phTxt != ""
+        table.cell(hub, 0, row, "PSP→H", bgcolor = f_dirCol(phDir, 40), text_color = color.white, text_size = szT)
+        table.cell(hub, 1, row, phTxt, bgcolor = f_dirCol(phDir, 40), text_color = color.white, text_size = szT)
+        row += 1
+    if not (okS and okF and okA)
+        table.cell(hub, 0, row, "!", bgcolor = color.new(color.orange, 30), text_color = color.white, text_size = szT)
+        table.cell(hub, 1, row, "connect sources (settings)", bgcolor = color.new(color.orange, 30), text_color = color.white, text_size = szT, tooltip = "פתח את ההגדרות של QT Hub ובחר לכל אחד מששת השדות את הפלט HUB המתאים. שלושת האינדיקטורים צריכים להיות על אותו גרף.")
+
+// ═══════════════════════════════════════════════════════════════════
+// התראה אחת לנר — כל מה שקרה
+// ═══════════════════════════════════════════════════════════════════
+
+string alTxt = ""
+if alTwo != "כבוי" and newTwo != ""
+    alTxt := "Two-Stage: " + newTwo
+if alSfp and sfpNew
+    alTxt := alTxt + (alTxt == "" ? "" : "\n") + sfpTxt
+if alPh and phNew
+    alTxt := alTxt + (alTxt == "" ? "" : "\n") + phTxt
+if alRev and revTxt != ""
+    alTxt := alTxt + (alTxt == "" ? "" : "\n") + "חזרה לחיים: " + revTxt
+if alTxt != ""
+    alert("QT Hub · " + syminfo.ticker + "\n" + alTxt, alert.freq_once_per_bar)

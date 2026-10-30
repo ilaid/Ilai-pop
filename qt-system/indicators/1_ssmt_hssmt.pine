@@ -5,18 +5,17 @@ indicator("SSMT + HSSMT | Quarterly Theory", overlay = true, max_labels_count = 
 // הגדרות משתמש
 // ═══════════════════════════════════════════════════════════════════
 
-// סימבול אחד לכל נכס. אין מתג מיקרו/רגיל: מתג כזה גורם ל-TradingView לטעון
-// את שני הסטים במקביל (שישה סימבולים) ולפוצץ את מגבלת הזיכרון. להחליף ל-NQ1!/
-// ES1!/YM1! פשוט ע"י הקלדה כאן — הסטייה יחסית ולא תלויה בגודל החוזה.
+// ספר החוקים §6 — מדיניות נתונים אחת לשלושת האינדיקטורים: סט חוזים אוטומטי
+// לפי הגרף, בלי יישור לגלגול כברירת מחדל, ו-Settlement כמו בגרף.
+// הסימבולים הם קבועים ולא input.symbol: הבחירה בין שני הסטים נעשית במחרוזת
+// simple אחת, ולכן TradingView טוען רק את הסט שנבחר — לא את שניהם.
 grpSym = "סימבולים"
-symNQ = input.symbol("CME_MINI:MNQ1!",  "NQ", group = grpSym)
-symES = input.symbol("CME_MINI:MES1!",  "ES", group = grpSym)
-symYM = input.symbol("CBOT_MINI:MYM1!", "YM", group = grpSym)
+contractSet = input.string("אוטומטי", "סט חוזים", options = ["אוטומטי", "רגיל", "מיקרו"], group = grpSym, tooltip = "אוטומטי = לפי הגרף: גרף MNQ/MES/MYM קורא מיקרו, כל גרף אחר קורא רגיל.")
 // בשבוע גלגול חוזים (ספטמבר→דצמבר וכו') החוזה הרציף "1!" קופץ במרווח שבין
 // החוזים — כ-1% מהמחיר, כלומר כ-290 נקודות ב-NQ. בלי יישור, ההיסטוריה שלפני
-// הגלגול נמדדת בחוזה הישן והמחירים של היום בחדש, ההשוואה נשברת, והקו מצויר
-// במקום שאין בו נרות. היישור מסיר את הקפיצה ומחזיר רצף אמיתי.
-adjMode = input.string("מיושר לגלגול", "נתוני חוזה רציף", options = ["מיושר לגלגול", "בלי יישור", "ברירת המחדל של הסימבול"], group = grpSym)
+// הגלגול נמדדת בחוזה הישן והמחירים של היום בחדש. היישור מסיר את הקפיצה.
+adjMode = input.string("בלי יישור", "נתוני חוזה רציף", options = ["בלי יישור", "מיושר לגלגול", "ברירת המחדל של הסימבול"], group = grpSym, tooltip = "ברירת המחדל לפי ספר החוקים: בלי יישור. בשבוע גלגול חוזים כדאי לעבור ל'מיושר לגלגול'.")
+settleIn = input.string("כבוי — כמו הגרף", "Settlement כסגירה יומית", options = ["כבוי — כמו הגרף", "דלוק", "ברירת המחדל של הסימבול"], group = grpSym)
 
 grpVis = "תצוגה"
 colBull    = input.color(#26a69a, "צבע שורי", group = grpVis)
@@ -81,10 +80,17 @@ use15s     = input.bool(false, "15 שניות מנתוני שניות אמיתי
 // היישור חל על שלושת הנכסים יחד — זה קריטי, כי מרווח הגלגול שונה בנקודות לכל
 // אחד מהם, ויישור חלקי היה מעוות את ההשוואה ביניהם יותר מאשר בלי יישור בכלל.
 bAdj = adjMode == "מיושר לגלגול" ? backadjustment.on : adjMode == "בלי יישור" ? backadjustment.off : backadjustment.inherit
+bSet = settleIn == "דלוק" ? settlement_as_close.on : settleIn == "ברירת המחדל של הסימבול" ? settlement_as_close.inherit : settlement_as_close.off
 
-sNQ = ticker.modify(symNQ, backadjustment = bAdj)
-sES = ticker.modify(symES, backadjustment = bAdj)
-sYM = ticker.modify(symYM, backadjustment = bAdj)
+chartIsMicro = str.contains(syminfo.tickerid, "MNQ") or str.contains(syminfo.tickerid, "MES") or str.contains(syminfo.tickerid, "MYM")
+useMicro     = contractSet == "מיקרו" or (contractSet == "אוטומטי" and chartIsMicro)
+symNQ = useMicro ? "CME_MINI:MNQ1!"  : "CME_MINI:NQ1!"
+symES = useMicro ? "CME_MINI:MES1!"  : "CME_MINI:ES1!"
+symYM = useMicro ? "CBOT_MINI:MYM1!" : "CBOT_MINI:YM1!"
+
+sNQ = ticker.modify(symNQ, backadjustment = bAdj, settlement_as_close = bSet)
+sES = ticker.modify(symES, backadjustment = bAdj, settlement_as_close = bSet)
+sYM = ticker.modify(symYM, backadjustment = bAdj, settlement_as_close = bSet)
 
 // ═══════════════════════════════════════════════════════════════════
 // זיהוי Timeframe
@@ -166,17 +172,22 @@ thuMonth = month(thursdayTime, TZ)
 // ולכן שלישי 1.9 = שבוע 1 ושלישי 8.9 = שבוע 2 (שבוע ה-CPI).
 isDeadWeek = tueMonth != thuMonth
 qtWeekNum  = isDeadWeek ? 0 : math.floor((tueDom - 1) / 7) + 1
+// ספר החוקים §1–2: שבוע 5 (שלישי ב-29 בחודש של 31 יום) לא נכנס למחזור
+// ה-4H — בדיוק כמו שבוע מת. שניהם מיכל נפרד משלהם, בלי שבירות.
+isWeek5    = qtWeekNum == 5
+isOwnWeek  = isDeadWeek or isWeek5
 
 // ═══════════════════════════════════════════════════════════════════
 // שנת QT — מתחילה באפריל. Q1 = אפר/מאי/יונ, Q2 = יול/אוג/ספט,
 // Q3 = אוק/נוב/דצמ, Q4 = ינו/פבר/מרץ (של שנת הלוח הבאה).
-// מעל השנה: מחזור של 4 שנים, שנה שמתחלקת ב-4 (2024, 2028) היא שנה 1.
+// מעל השנה: מחזור של 4 שנים **קלנדריות** (ספר החוקים §4): 2023–2026,
+// 2027–2030. 2023 היא שנה 1 במחזור.
 // ═══════════════════════════════════════════════════════════════════
 
 qtMonIdx    = tdMon >= 4 ? tdMon - 4 : tdMon + 8   // 0 = אפריל ... 11 = מרץ
 qtYearNum   = tdMon >= 4 ? tdYear : tdYear - 1     // תווית שנת QT (אפריל–מרץ)
 qtQtrNum    = math.floor(qtMonIdx / 3) + 1         // 1..4 בתוך שנת QT
-yearInCyc   = qtYearNum % 4                        // 0..3 — מקום השנה במחזור ה-4
+yearInCyc   = ((tdYear - 2023) % 4 + 4) % 4        // 0..3 — מקום השנה הקלנדרית במחזור ה-4
 
 // ── רבע-רבעון: הרבעון מחולק לארבעה חלקים שווים, כ-23 יום כל אחד. זה
 //    תת-המחזור של הגרף היומי. לא עובדים עם 23 יום קבועים אלא מחלקים את
@@ -202,7 +213,8 @@ tradeDayId = tdYear * 10000 + tdMon * 100 + tdDom
 weekId     = monYear * 10000 + monMonth * 100 + monDom   // מזהה ייחודי לשבוע — לפי יום שני
 // חודש-מחזור ל-4H נקבע לפי חודש יום-**שלישי** של השבוע — כך הגבול נופל תמיד
 // בתחילת שבוע, והשבוע נספר לחודש שבו נמצאים לפחות 4 מ-5 ימי המסחר שלו.
-monthId    = tueYear * 100 + tueMonth
+// שבוע מת ושבוע 5 הם מיכל משלהם (weekId, שמונה ספרות — לא מתנגש בשש).
+monthId    = isOwnWeek ? weekId : tueYear * 100 + tueMonth
 sessionId  = tradeDayId * 10 + sessionIdx
 microId    = sessionId * 10 + microIdx
 quarterId  = microId * 10 + quarterIdx
@@ -212,11 +224,12 @@ subQId     = quarterId * 10 + subQIdx
 qtrId      = qtYearNum * 10 + qtQtrNum
 qSubId     = qtrId * 10 + qSubIdx
 qtYearId   = qtYearNum
-cyc4Id     = math.floor(qtYearNum / 4)
+// החודשי: שנים קלנדריות בתוך מחזור 4 שנים קלנדרי שמתחיל ב-2023
+cyc4Id     = math.floor((tdYear - 2023) / 4)
 
 refCycleId = 0
 if tfClass == 9
-    refCycleId := qtYearId
+    refCycleId := tdYear
 else if tfClass == 8
     refCycleId := qtrId
 else if tfClass == 7
@@ -262,13 +275,13 @@ newLifeCycle = ta.change(lifeCycleId) != 0
 // החוצה-מיכל אפשרית **רק** בין האחרון לראשון, לא הלאה.
 //   15S / 1M / 5M — תמיד. למשל ב-5M: המיקרו האחרון של לונדון מול המיקרו הראשון
 //                   של ניו-יורק AM. חל בכל החלפת מיכל, כולל מעבר יום מסחר וסוף שבוע.
-//   15M           — רק ברצף 1/4: הסשן האחרון (PM) מול אסיה של היום הבא, והשבירה
-//                   קיימת רק אם הרצף של נקודת השבירה (יום-סשן-מיקרו) בנוי רק
-//                   מ-1 ו-4. שבירה כזו שלא עומדת בתנאי לא קיימת בכלל.
+//   15M           — לא (ספר החוקים §5). הלוגיקה של רצף 1/4 נשארה בקוד אבל
+//                   לא רצה, כי בלי זרע אין לה על מה לפעול.
 //   1H            — תמיד: יום שני משווה גם ליום שישי שעבר, בלי תנאי רצף.
+//                   הזרע נמחק בסוף יום שני — מיום שלישי הקשר לשבוע הקודם הוא של 4H.
 //   4H            — לא. המחזור החודשי עומד בפני עצמו, בלי חודש קודם.
 //   1D / 1W / 1Mo — לא.
-keepLast = tfClass >= 1 and tfClass <= 5
+keepLast = tfClass == 1 or tfClass == 2 or tfClass == 3 or tfClass == 5
 
 // ═══════════════════════════════════════════════════════════════════
 // True Open
@@ -563,8 +576,11 @@ else if newRefCycle
 // ═══════════════════════════════════════════════════════════════════
 
 nLevels = array.size(nqHiA)
-cycleOK   = not (tfClass == 6 and blockDeadWeek and isDeadWeek)
-friBlock  = (tfClass == 6 or tfClass == 5) and tdDow == dayofweek.friday
+// ספר החוקים §1–2:
+//   1H — שישי לא רלוונטי בכלל.
+//   4H — שישי משתתף בשבועות 1–3; בשבוע 4 אין לו משמעות. שבוע 5 ושבוע מת חסומים.
+cycleOK   = not (tfClass == 6 and ((blockDeadWeek and isDeadWeek) or isWeek5))
+friBlock  = tdDow == dayofweek.friday and (tfClass == 5 or (tfClass == 6 and qtWeekNum == 4))
 
 bearOK = not requireTrueOpen or (not na(trueOpenPrice) and close > trueOpenPrice)
 bullOK = not requireTrueOpen or (not na(trueOpenPrice) and close < trueOpenPrice)
@@ -768,7 +784,8 @@ f_qsDay(int t) =>
     qLn  = math.round((nsT - qsT) / 86400000)
     dSnc = math.round((tdNT - qsT) / 86400000)
     qq   = qLn > 0 ? math.min(3, math.max(0, math.floor(dSnc * 4 / qLn))) : 0
-    str.tostring(qY % 4 + 1) + str.tostring(qQ) + str.tostring(qq + 1)
+    // שנה במחזור ה-4 — קלנדרית, 2023 = 1 (ספר החוקים §4)
+    str.tostring(((yy - 2023) % 4 + 4) % 4 + 1) + str.tostring(qQ) + str.tostring(qq + 1)
 
 // איזו שלישייה (אינדקס ההתחלה בשבע הספרות) נכתבת בתווית של כל מדרגה (רמה
 // אחת מתחת לייחוס): 0 = חודש-שבוע-יום (4H), 1 = שבוע-יום-סשן (1H),
@@ -1390,18 +1407,21 @@ f_cycT(int cls, int t) =>
     tuM = month(tue, TZ)
     tuY = year(tue, TZ)
     dead = tuM != month(thu, TZ)
+    wkN  = dead ? 0 : math.floor((dayofmonth(tue, TZ) - 1) / 7) + 1
+    ownW = dead or wkN == 5
     qMonIdx = mm >= 4 ? mm - 4 : mm + 8
     qYear   = mm >= 4 ? yy : yy - 1
     qQtr    = math.floor(qMonIdx / 3) + 1
     tdId = yy * 10000 + mm * 100 + dd
     wkId = moY * 10000 + moM * 100 + moD
-    moId = tuY * 100 + tuM
+    // שבוע מת ושבוע 5 — מיכל משלהם, בדיוק כמו בחישוב הראשי
+    moId = ownW ? wkId : tuY * 100 + tuM
     seId = tdId * 10 + sIdx
     miId = seId * 10 + miIdx
     quId = miId * 10 + qIdx
     sqId = quId * 10 + sqIdx
     qrId = qYear * 10 + qQtr
-    c4Id = math.floor(qYear / 4)
+    c4Id = math.floor((yy - 2023) / 4)
     // רבע-הרבעון דרוש רק למחלקה 7. ה-if מונע שלוש קריאות timestamp מיותרות
     // בכל תת-נר — ב-Pine בלוק if באמת לא מורץ כשהתנאי שקרי.
     int qsIdx = 0
@@ -1417,10 +1437,13 @@ f_cycT(int cls, int t) =>
         dSnc = math.round((tdNT - qsT) / 86400000)
         qsIdx := qLn > 0 ? math.min(3, math.max(0, math.floor(dSnc * 4 / qLn))) : 0
     qsId = qrId * 10 + qsIdx
-    rId = cls == 9 ? qYear : cls == 8 ? qrId : cls == 7 ? qsId : cls == 6 ? wkId : cls == 5 ? tdId : cls == 4 ? seId : cls == 3 ? miId : cls == 2 ? quId : sqId
+    rId = cls == 9 ? yy : cls == 8 ? qrId : cls == 7 ? qsId : cls == 6 ? wkId : cls == 5 ? tdId : cls == 4 ? seId : cls == 3 ? miId : cls == 2 ? quId : sqId
     lId = cls == 9 ? c4Id  : cls == 8 ? qYear : cls == 7 ? qrId : cls == 6 ? moId : cls == 5 ? wkId : cls == 4 ? tdId : cls == 3 ? seId : cls == 2 ? miId : quId
-    kL  = cls >= 1 and cls <= 5
-    blk = ((cls == 6 or cls == 5) and dw == dayofweek.friday) or (cls == 6 and blockDeadWeek and dead)
+    // זרע: 15s, 1m, 5m ו-1H בלבד — זהה ל-keepLast של הגרף
+    kL  = cls == 1 or cls == 2 or cls == 3 or cls == 5
+    // שישי: 1H תמיד חסום, 4H רק בשבוע 4. שבוע 5 ושבוע מת חסומים ב-4H.
+    fri = dw == dayofweek.friday
+    blk = (cls == 5 and fri) or (cls == 6 and ((fri and wkN == 4) or wkN == 5 or (blockDeadWeek and dead)))
     [rId, lId, kL, blk]
 
 // מנוע שלם למסגרת זמן אחת — כל המצב שלו מוקצה פעם אחת ומתעדכן במקום
@@ -1476,6 +1499,9 @@ type Eng
     bool   hot      // השבירה המוצגת ב-QS על נכס הגרף
     bool   tru      // השבירה המוצגת ב-QS רק על נכס אחר
     int    barMs    // אורך נר הקלט במילישניות (15 שניות מנרות דקה = 60000)
+    // לייצוא למרכז: האם השבירה בכל כיוון נמצאת ב-QS (★ או ☆)
+    bool   bQs = false
+    bool   uQs = false
 
 f_newEng(int cls, int barMs) =>
     Eng.new(cls, 0, 0, 0, false, false, "", 0, "", 0, 0, 0, "", "", 0, 0, 0, -1, -1, na, na, na, na, na, na, na, na, na, na, na, na, array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_int(), array.new_int(12, 0), false, false, barMs)
@@ -1704,6 +1730,8 @@ f_engStep(Eng e, int t, float nh, float nl, float nc, float eh, float el, float 
             [y1, y2] = f_engQS(e, true, e.uTy, e.uRefI)
             uH := y1
             uX := y2
+        e.bQs := bH or bX
+        e.uQs := uH or uX
         // הראשית: קודם הסוג (HSSMT > SSMT > SSMT closed), אחר כך QS, ואחר כך האחרונה
         rkB = f_rank(e.bTy, e.bStr, bH or bX)
         rkU = f_rank(e.uTy, e.uStr, uH or uX)
@@ -2025,3 +2053,54 @@ if showDebug and barstate.islast
     table.cell(dbg, 1, 16, pChR == "" ? "-" : pChR + "-" + pChT, bgcolor = wc)
     table.cell(dbg, 2, 16, pHot ? "★" + pPat : pX ? "☆" + pXP : "-", bgcolor = wc)
     table.cell(dbg, 3, 16, pOk ? str.format_time(pBrkT, "HH:mm:ss", TZ) : "-", bgcolor = wc)
+
+// ═══════════════════════════════════════════════════════════════════
+// ייצוא למרכז (QT Hub)
+//
+// שני מספרים מוסתרים (רק בחלון הנתונים) שהמרכז קורא דרך input.source.
+// לכל מסגרת בסולם 4H · 1H · 15m · 5m · 1m — ארבע ספרות: שתיים לשבירה הדובית
+// החיה ושתיים לשורית. בכל זוג: ספרת הסוג וספרת זהות (משתנה כששבירה חדשה
+// מחליפה את הקודמת באותו כיוון).
+//   סוג: 1 = SSMT (core/all closed) · 2 = SSMT · 3 = HSSMT · +3 כשב-QS (★/☆)
+//   9999 = המסגרת הזאת לא נסרקת מהגרף הנוכחי
+// הקידומת (11 / 12) מזהה את האינדיקטור והחצי, כדי שהמרכז יזהה חיבור שגוי.
+// המבנה המלא מתועד ב-qt-system/docs/HUB.md — חייב להיות זהה במרכז.
+// ═══════════════════════════════════════════════════════════════════
+
+f_ssCode(int typ, string s, bool qs) => typ == 0 ? 0 : (typ == 2 ? 3 : str.contains(s, "closed)") ? 1 : 2) + (qs ? 3 : 0)
+f_ssSlot(int code, int seq) => code == 0 ? 0 : code * 10 + seq % 10
+
+// מנוע שמעל הגרף צועד רק כשנסגר נר שלו, ולכן שבירה שהמיכל שלה כבר נגמר
+// עדיין יושבת בו עד הנר הבא. כאן היא נחתכת מיד מול השעון של הגרף.
+f_ssEng(Eng e) =>
+    [xR, xL, xK, xB] = f_cycT(e.cls, time)
+    bool stale = e.cls > tfClass and e.started and e.lifeId != xL
+    bool qF    = qsUseCls(e.cls) and qsFilt
+    int  bv    = stale or (qF and not e.bQs) ? 0 : f_ssSlot(f_ssCode(e.bTy, e.bStr, e.bQs), e.bSeq)
+    int  uv    = stale or (qF and not e.uQs) ? 0 : f_ssSlot(f_ssCode(e.uTy, e.uStr, e.uQs), e.uSeq)
+    bv * 100 + uv
+
+f_ssTf(int cls) =>
+    int v = 9999
+    if cls == tfClass
+        bool fB = qsOn and qsFilt and not bInQS
+        bool fU = qsOn and qsFilt and not uInQS
+        int  bv = fB ? 0 : f_ssSlot(f_ssCode(bearType, bearStr, bInQS), bearSeq)
+        int  uv = fU ? 0 : f_ssSlot(f_ssCode(bullType, bullStr, uInQS), bullSeq)
+        v := bv * 100 + uv
+    else if mtfOn and useU1 and egU1.cls == cls
+        v := f_ssEng(egU1)
+    else if mtfOn and useU2 and egU2.cls == cls
+        v := f_ssEng(egU2)
+    else if mtfOn and useU3 and egU3.cls == cls
+        v := f_ssEng(egU3)
+    else if mtfOn and useD1 and egD1.cls == cls
+        v := f_ssEng(egD1)
+    else if mtfOn and useD2 and egD2.cls == cls
+        v := f_ssEng(egD2)
+    v
+
+hubA = 110000000000000.0 + f_ssTf(6) * 100000000.0 + f_ssTf(5) * 10000.0 + f_ssTf(4)
+hubB = 120000000000000.0 + f_ssTf(3) * 100000000.0 + f_ssTf(2) * 10000.0
+plot(hubA, "HUB · SSMT · A", color = color.new(color.gray, 100), display = display.data_window, editable = false)
+plot(hubB, "HUB · SSMT · B", color = color.new(color.gray, 100), display = display.data_window, editable = false)
