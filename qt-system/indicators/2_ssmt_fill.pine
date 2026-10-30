@@ -176,6 +176,10 @@ flashLift    = input.int(1, "הרם את הסימון (שורות)", minval = 0,
 flashTag     = input.string("SF", "תווית פתיחה לשורה", group = grpMtf)
 flashTagCol  = input.color(color.gray, "צבע התווית", group = grpMtf)
 mtfAlert     = input.bool(true, "כלול שבירות ממסגרות אחרות בהתראה", group = grpMtf)
+// כל מסגרת עליונה = 33 סדרות נתונים. התקציב משותף לכל האינדיקטורים בגרף, ו-Bar
+// Replay חרג ממנו. המרכז צריך רק עד 4H, ולכן זו ברירת המחדל. בגרף 4H ומעלה
+// הסריקה ממשיכה עד החודשי כמו קודם.
+maxHtf       = input.string("4H", "מסגרת עליונה לסריקה (בגרף מתחת ל-4H)", options = ["4H", "1D", "1W", "Mo"], group = grpMtf, tooltip = "גבוה יותר = יותר זיכרון. אם מופיעה שגיאת Memory limits — להשאיר על 4H.")
 
 // ═══════════════════════════════════════════════════════════════════
 // בחירת סימבולים
@@ -1629,12 +1633,13 @@ cL3 = math.max(tfClass - 3, 1)
 
 // אילו מדרגות באמת קיימות ונצעדות. מחושב כאן ולא למטה, כי זה מה שקובע
 // אילו request.* באמת צריכים להביא נתונים.
-useH1 = tfClass + 1 <= 8
-useH2 = tfClass + 2 <= 8
-useH3 = tfClass + 3 <= 8
-useH4 = tfClass + 4 <= 8
-useH5 = tfClass + 5 <= 8
-useH6 = tfClass + 6 <= 8
+hiCap = tfClass >= 5 ? 8 : maxHtf == "Mo" ? 8 : maxHtf == "1W" ? 7 : maxHtf == "1D" ? 6 : 5
+useH1 = tfClass + 1 <= hiCap
+useH2 = tfClass + 2 <= hiCap
+useH3 = tfClass + 3 <= hiCap
+useH4 = tfClass + 4 <= hiCap
+useH5 = tfClass + 5 <= hiCap
+useH6 = tfClass + 6 <= hiCap
 useL1 = lowerLevels >= 1 and tfClass >= 2
 useL2 = lowerLevels >= 2 and tfClass >= 3
 useL3 = lowerLevels >= 3 and tfClass >= 4

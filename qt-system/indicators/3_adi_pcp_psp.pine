@@ -397,6 +397,9 @@ i_pnl_h    = input.string("ימין", title="צד הפאנל",
 i_pnl_pad  = input.int(0, title="הרחקת הפאנל מהקצה (שורות)", minval=0, maxval=12, group=grp_mtf)
 i_col_neut = input.color(color.new(#ffffff, 15), title="צבע טקסט נייטרלי", group=grp_mtf)
 i_mtf_alert = input.bool(true, title="התראה על שבירה חדשה ועל ביטול", group=grp_mtf)
+i_long_tf  = input.bool(false, title="סרוק גם 1D ו-1W (בגרף מתחת ליומי)",
+     tooltip="כבוי (ברירת מחדל): חוסך 54 סדרות נתונים — התקציב משותף לכל האינדיקטורים בגרף, ו-Bar Replay חרג ממנו. המרכז צריך רק עד 4H.\nבגרף יומי ומעלה הם נסרקים תמיד.",
+     group=grp_mtf)
 i_debug    = input.bool(false, title="הצג ערכי בדיקה (בפאנל)",
      tooltip="מוסיף לפאנל את הפתיחה והסגירה שהסקריפט קרא לכל נכס, את הכיוון שנגזר מהן, ואת שורת stk.\nstk = כל השבירות שכל מסגרת עדיין מחזיקה, חץ לכל שבירה, החדשה משמאל. '—' = ריק.\nצריך להדליק גם את הפאנל.",
      group=grp_mtf)
@@ -768,13 +771,19 @@ tn4h = f_load(n4h, tk_nq, "240")
 te4h = f_load(e4h, tk_es, "240")
 ty4h = f_load(y4h, tk_ym, "240")
 
-tn1d = f_load(n1d, tk_nq, "D")
-te1d = f_load(e1d, tk_es, "D")
-ty1d = f_load(y1d, tk_ym, "D")
+// Off = the chart's own series, which is already loaded, so it costs nothing.
+// The 1D/1W engines are then not stepped and not shown.
+useLong = i_long_tf or chartSec >= timeframe.in_seconds("D")
+tfD = useLong ? "D" : timeframe.period
+tfW = useLong ? "W" : timeframe.period
 
-tn1w = f_load(n1w, tk_nq, "W")
-te1w = f_load(e1w, tk_es, "W")
-ty1w = f_load(y1w, tk_ym, "W")
+tn1d = f_load(n1d, tk_nq, tfD)
+te1d = f_load(e1d, tk_es, tfD)
+ty1d = f_load(y1d, tk_ym, tfD)
+
+tn1w = f_load(n1w, tk_nq, tfW)
+te1w = f_load(e1w, tk_es, tfW)
+ty1w = f_load(y1w, tk_ym, tfW)
 
 // The two fast timeframes. Read on the last bar only, never stepped through
 // history, so a chart above them is not a problem.
@@ -1159,16 +1168,18 @@ qk1w = i_qt_on ? 7 : 0
 f_step(stCh, bCh, time[2], nCh, eCh, yCh, ymwTfOk, qkCh, cNowCh)
 f_step(st1h, b1h, t1h, n1h, e1h, y1h, false, qk1h, cNow1h)
 f_step(st4h, b4h, t4h, n4h, e4h, y4h, false, qk4h, cNow4h)
-f_step(st1d, b1d, t1d, n1d, e1d, y1d, i_ym_weak, qk1d, cNow1d)
-f_step(st1w, b1w, t1w, n1w, e1w, y1w, i_ym_weak, qk1w, cNow1w)
+if useLong
+    f_step(st1d, b1d, t1d, n1d, e1d, y1d, i_ym_weak, qk1d, cNow1d)
+    f_step(st1w, b1w, t1w, n1w, e1w, y1w, i_ym_weak, qk1w, cNow1w)
 
 // …and then let the unfinished bar take whatever it has already reached, and
 // the clock retire whatever has run out of container.
 f_cut(stCh, bCh, nCh, eCh, yCh, cNowCh)
 f_cut(st1h, b1h, n1h, e1h, y1h, cNow1h)
 f_cut(st4h, b4h, n4h, e4h, y4h, cNow4h)
-f_cut(st1d, b1d, n1d, e1d, y1d, cNow1d)
-f_cut(st1w, b1w, n1w, e1w, y1w, cNow1w)
+if useLong
+    f_cut(st1d, b1d, n1d, e1d, y1d, cNow1d)
+    f_cut(st1w, b1w, n1w, e1w, y1w, cNow1w)
 
 // ══════════════════════════════════════════════════════════════
 //  THE MARKERS ON THE CHART
@@ -1321,8 +1332,8 @@ if mkOk
 
 sh1h = timeframe.in_seconds("60")  >= chartSec
 sh4h = timeframe.in_seconds("240") >= chartSec
-sh1d = timeframe.in_seconds("D")   >= chartSec
-sh1w = timeframe.in_seconds("W")   >= chartSec
+sh1d = useLong and timeframe.in_seconds("D")   >= chartSec
+sh1w = useLong and timeframe.in_seconds("W")   >= chartSec
 
 // The chart's own timeframe belongs in this line only when the line's own
 // rule — 1H and above — is true of it, AND it is not already one of the four
