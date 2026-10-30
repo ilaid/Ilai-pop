@@ -442,7 +442,7 @@ alertcondition(devOn and devUpper and noUpperWick and barstate.isconfirmed, titl
 //   2. Two-Stage — שתי שבירות חיות באותו כיוון, עד שתי מדרגות זו מזו בסולם
 //      4H · 1H · 15m · 5m · 1m. סטאפ A = שתי שבירות SSMT / Fill.
 //      סטאפ B = אחת הרגליים PSP. שני PSP — לא סטאפ.
-//   3. True Open — לכל רגל, ה-True Open של המיכל שלה (Q2 של המחזור):
+//   3. True Open — לכל רגל, ה-True Open של המיכל שלה (Q2 של המחזור, מ-Part A):
 //      4H → TMO · 1H → TWO · 15m → TDO · 5m → T90O · 1m → TMcO.
 //      לונג = מחיר מתחת לפתיחה · שורט = מעל. נמדד ברגע שהסטאפ נוצר: 2/2, 1/2, 0/2.
 //   4. SFP — Fill שנבנה עכשיו על הגרף (4H / 1H / 15m), ו-PSP באותו כיוון
@@ -556,72 +556,19 @@ chIdx = chSec == 14400 ? 0 : chSec == 3600 ? 1 : chSec == 900 ? 2 : chSec == 300
 fri1h = friSkip and dayofweek(time + 21600000, TZ) == dayofweek.friday
 
 // ═══════════════════════════════════════════════════════════════════
-// True Opens — מנרות דקה של נכס הגרף, באותה לוגיקה של Sav FX
+// True Opens — אותן רמות ש-Part A כבר מחשב מנרות הגרף
 //
-// נר הפתיחה הוא הראשון שמתחיל ברגע הזה או אחריו. רמה חיה רק כל עוד המיכל
-// שלה חי. מחושב בהקשר של 1m, כך שגם על גרף 4H ה-TMcO מדויק.
+// בלי שום request.security: משיכת נתוני דקה מתוך גרף גבוה יותר פוצצה את
+// מגבלת הזיכרון ב-Bar Replay. הרמה היא הפתיחה של הנר הראשון שמתחיל ברגע
+// הזה או אחריו, ולכן היא מדויקת כשהרגע נופל על גבול נר של הגרף:
+// TDO / TWO / TMO תמיד, T90O מגרף 15m ומטה, TMcO רק בגרף 1m.
 // ═══════════════════════════════════════════════════════════════════
 
-f_tos() =>
-    int   tdC     = time + (hour(time, TZ) >= 18 ? 86400000 : 0)
-    int   hTdMid   = timestamp(TZ, year(tdC, TZ), month(tdC, TZ), dayofmonth(tdC, TZ), 0, 0, 0)
-    int   pNoon   = hTdMid - 43200000
-    int   dStart  = timestamp(TZ, year(pNoon, TZ), month(pNoon, TZ), dayofmonth(pNoon, TZ), 18, 0, 0)
-    float el      = time - dStart
-    int   sStart  = dStart + int(math.floor(el / 21600000.0)) * 21600000
-    int   mStart  = dStart + int(math.floor(el / 5400000.0)) * 5400000
-    int   tTDO    = hTdMid
-    int   tT90O   = sStart + 5400000
-    int   tTMcO   = mStart + 1350000
-    int   dw      = dayofweek(tdC, TZ)
-    int   dsm     = dw == dayofweek.sunday ? 6 : dw - 2
-    int   hMonNoon = hTdMid + 43200000 - dsm * 86400000
-    int   tTWO    = timestamp(TZ, year(hMonNoon, TZ), month(hMonNoon, TZ), dayofmonth(hMonNoon, TZ), 18, 0, 0)
-    int   hTueNoon = hMonNoon + 86400000
-    int   wY      = year(hTueNoon, TZ)
-    int   wM      = month(hTueNoon, TZ)
-    int   d1      = dayofweek(timestamp(TZ, wY, wM, 1, 12, 0, 0), TZ)
-    int   ftDom   = ((3 - d1 + 7) % 7) + 1
-    int   w2Sun   = timestamp(TZ, wY, wM, ftDom + 7, 12, 0, 0) - 2 * 86400000
-    int   tTMO    = timestamp(TZ, year(w2Sun, TZ), month(w2Sun, TZ), dayofmonth(w2Sun, TZ), 18, 0, 0)
-    var float pMcO = na
-    var int   iMcO = na
-    var float p90O = na
-    var int   i90O = na
-    var float pDO  = na
-    var int   iDO  = na
-    var float pWO  = na
-    var int   iWO  = na
-    var float pMO  = na
-    var int   iMO  = na
-    if not na(iMcO) and iMcO != mStart
-        pMcO := na
-    if time >= tTMcO and time[1] < tTMcO
-        pMcO := open
-        iMcO := mStart
-    if not na(i90O) and i90O != sStart
-        p90O := na
-    if time >= tT90O and time[1] < tT90O
-        p90O := open
-        i90O := sStart
-    if not na(iDO) and iDO != dStart
-        pDO := na
-    if time >= tTDO and time[1] < tTDO
-        pDO := open
-        iDO := dStart
-    if not na(iWO) and iWO != tTWO
-        pWO := na
-    if time >= tTWO and time[1] < tTWO
-        pWO := open
-        iWO := tTWO
-    if not na(iMO) and iMO != tTMO
-        pMO := na
-    if time >= tTMO and time[1] < tTMO
-        pMO := open
-        iMO := tTMO
-    [pMO, pWO, pDO, p90O, pMcO]
-
-[toMO, toWO, toDO, to90O, toMcO] = request.security(syminfo.tickerid, "1", f_tos(), lookahead = barmerge.lookahead_off)
+toMO  = pTMO
+toWO  = pTWO
+toDO  = pTDO
+to90O = pT90O
+toMcO = pTMcO
 
 // ה-True Open של המיכל של כל מסגרת
 f_to(int i) => i == 0 ? toMO : i == 1 ? toWO : i == 2 ? toDO : i == 3 ? to90O : toMcO
@@ -857,6 +804,52 @@ sfpNew = sfpDir != 0 and sfpDir != prevSfp
 phNew  = phDir != 0 and phDir != prevPh
 prevSfp := sfpDir
 prevPh  := phDir
+var int phBar = 0
+if phNew
+    phBar := bar_index
+
+// ═══════════════════════════════════════════════════════════════════
+// סימון על הגרף — רק מה שחי עכשיו
+//
+// תגית אחת לכל היותר לכל כיוון: הסטאפ שמוצג בטבלה, על הנר שבו נוצר.
+// כשהסטאפ מת — התגית נמחקת. כך על הגרף אין היסטוריה, רק מה שרלוונטי.
+//   ▲A / ▼A = שתי הרגליים SSMT / Fill · ▲B / ▼B = אחת מהן PSP
+//   P→H = PSP שעתי ואחריו HSSMT · SFP = Fill בתהליך + PSP שתי מדרגות מתחת
+// ═══════════════════════════════════════════════════════════════════
+
+grpMk   = "סימון על הגרף"
+mkOn    = input.bool(true, "סמן את הסטאפ החי על הנר שבו נוצר", group = grpMk, tooltip = "לכל היותר תגית אחת ללונג ואחת לשורט — אותו סטאפ שבטבלה. נמחקת כשהסטאפ מת.")
+mkModel = input.bool(true, "סמן גם P→H ו-SFP כשהם חיים", group = grpMk)
+
+var label mkLL = na
+var label mkLS = na
+var label mkLP = na
+var label mkLF = na
+
+f_mkLbl(int c, int dir) =>
+    int  la = array.get(cLgA, c)
+    int  lb = array.get(cLgB, c)
+    bool gA = f_sK(la) < 2 and f_sK(lb) < 2
+    string tip = (dir == 1 ? "LONG" : "SHORT") + "\n" + f_slotTxt(la) + " + " + f_slotTxt(lb) + "\nTO " + str.tostring(array.get(cTo, c)) + "/2"
+    label.new(array.get(cBar, c), dir == 1 ? low : high, (dir == 1 ? "▲" : "▼") + (gA ? "A" : "B"), yloc = dir == 1 ? yloc.belowbar : yloc.abovebar, style = dir == 1 ? label.style_label_up : label.style_label_down, color = color.new(dir == 1 ? colBull : colBear, gA ? 0 : 45), textcolor = color.white, size = size.small, tooltip = tip)
+
+if barstate.islast
+    label.delete(mkLL)
+    label.delete(mkLS)
+    label.delete(mkLP)
+    label.delete(mkLF)
+    mkLL := na
+    mkLS := na
+    mkLP := na
+    mkLF := na
+    if mkOn and bestL >= 0
+        mkLL := f_mkLbl(bestL, 1)
+    if mkOn and bestS >= 0
+        mkLS := f_mkLbl(bestS, -1)
+    if mkOn and mkModel and phDir != 0
+        mkLP := label.new(phBar, phDir == 1 ? low : high, "P→H", yloc = phDir == 1 ? yloc.belowbar : yloc.abovebar, style = phDir == 1 ? label.style_label_up : label.style_label_down, color = color.new(colHead, 0), textcolor = color.white, size = size.small, tooltip = phTxt)
+    if mkOn and mkModel and sfpDir != 0
+        mkLF := label.new(bar_index, sfpDir == 1 ? low : high, "SFP", yloc = sfpDir == 1 ? yloc.belowbar : yloc.abovebar, style = sfpDir == 1 ? label.style_label_up : label.style_label_down, color = color.new(colHead, 0), textcolor = color.white, size = size.small, tooltip = sfpTxt)
 
 
 // ═══════════════════════════════════════════════════════════════════
