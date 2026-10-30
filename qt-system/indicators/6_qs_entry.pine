@@ -36,7 +36,7 @@ useK0   = input.bool(true, "חודש · שבוע · יום (יום שלם)", gro
 useK1   = input.bool(true, "שבוע · יום · סשן (6 שעות)", group = grpQS)
 useK2   = input.bool(true, "יום · סשן · 90 דק'", group = grpQS)
 useK3   = input.bool(true, "סשן · 90 · 22.5 דק'", group = grpQS)
-useK4   = input.bool(false, "90 · 22.5 · 5.6 דק' גם לבד", group = grpQS, tooltip = "כבוי (ברירת מחדל): חלון של 5.6 דקות לא נחשב QS בפני עצמו — רק כשהוא חלק מ-QS גדול יותר שכבר פעיל. דלוק = גם לבד.")
+useK4   = input.bool(true, "90 · 22.5 · 5.6 דק'", group = grpQS)
 
 grpBrk  = "שבירות"
 useSsmt = input.bool(true, "SSMT / HSSMT", group = grpBrk)
@@ -188,7 +188,9 @@ f_findBull(nqLoA, esLoA, ymLoA, nqLoCA, esLoCA, ymLoCA, nqCL, esCL, ymCL, nqCLC,
 hotKey = "," + str.replace_all(hotList, " ", "") + ","
 f_qsHot(string s) => str.length(s) == 3 and str.contains(hotKey, "," + s + ",")
 f_kOn(int k) => k == 0 ? useK0 : k == 1 ? useK1 : k == 2 ? useK2 : k == 3 ? useK3 : useK4
-f_kName(int k) => k == 0 ? "M-W-D" : k == 1 ? "W-D-S" : k == 2 ? "D-S-90" : k == 3 ? "S-90-22" : "90-22-5"
+// שם המחזור של החלון: שלוש הרמות, ואורך החלון
+f_kName(int k) => k == 0 ? "Month·Week·Day" : k == 1 ? "Week·Day·Session" : k == 2 ? "Day·Session·90m" : k == 3 ? "Session·90m·22.5m" : "90m·22.5m·5.6m"
+f_kLen(int k) => k == 0 ? "1D" : k == 1 ? "6H" : k == 2 ? "90m" : k == 3 ? "22.5m" : "5.6m"
 
 // שבע הספרות של רגע t, מהגבוה לנמוך: חודש ברבעון QT, שבוע בחודש, יום, סשן,
 // 90 דק', 22.5 דק', 5.625 דק'. רמה בלי מספר (שישי, שבוע מת) = ·
@@ -783,13 +785,13 @@ string alTxt = ""
 if entS != "" and doneS != qsId
     doneS := qsId
     txS   := entS
-    lbS   := label.new(bar_index, high, "▼ QS", yloc = yloc.abovebar, style = label.style_label_down, color = colBear, textcolor = color.white, size = size.small, tooltip = "SHORT · QS " + qsPat + " (" + f_kName(qsK) + ")\n" + entS)
-    alTxt := "▼ SHORT · QS " + qsPat + " · " + str.replace_all(entS, "\n", " · ")
+    lbS   := label.new(bar_index, high, "▼ QS " + qsPat + " · " + f_kLen(qsK), yloc = yloc.abovebar, style = label.style_label_down, color = colBear, textcolor = color.white, size = size.small, tooltip = "SHORT · QS " + qsPat + " (" + f_kName(qsK) + ")\n" + entS)
+    alTxt := "▼ SHORT · QS " + qsPat + " " + f_kLen(qsK) + " · " + str.replace_all(entS, "\n", " · ")
 if entL != "" and doneL != qsId
     doneL := qsId
     txL   := entL
-    lbL   := label.new(bar_index, low, "▲ QS", yloc = yloc.belowbar, style = label.style_label_up, color = colBull, textcolor = color.white, size = size.small, tooltip = "LONG · QS " + qsPat + " (" + f_kName(qsK) + ")\n" + entL)
-    alTxt := alTxt + (alTxt == "" ? "" : "\n") + "▲ LONG · QS " + qsPat + " · " + str.replace_all(entL, "\n", " · ")
+    lbL   := label.new(bar_index, low, "▲ QS " + qsPat + " · " + f_kLen(qsK), yloc = yloc.belowbar, style = label.style_label_up, color = colBull, textcolor = color.white, size = size.small, tooltip = "LONG · QS " + qsPat + " (" + f_kName(qsK) + ")\n" + entL)
+    alTxt := alTxt + (alTxt == "" ? "" : "\n") + "▲ LONG · QS " + qsPat + " " + f_kLen(qsK) + " · " + str.replace_all(entL, "\n", " · ")
 // החלון נגמר (או התחלף) — האישור נגמר והתגית נמחקת
 if doneS != "" and doneS != qsId
     label.delete(lbS)
@@ -820,7 +822,7 @@ f_toTxt(string nm, float v) => nm + (na(v) ? " —" : close > v ? " ↑" : " ↓
 if showTbl and barstate.islast
     color hd = color.new(color.gray, 70)
     table.cell(tb, 0, 0, "QS", bgcolor = qsOn ? color.new(colQS, 30) : hd, text_color = color.white, text_size = szT)
-    table.cell(tb, 1, 0, qsOn ? qsPat + "  " + f_kName(qsK) : "—", bgcolor = qsOn ? color.new(colQS, 30) : hd, text_color = color.white, text_size = szT)
+    table.cell(tb, 1, 0, qsOn ? qsPat + " · " + f_kLen(qsK) + "  (" + f_kName(qsK) + ")" : "—", bgcolor = qsOn ? color.new(colQS, 30) : hd, text_color = color.white, text_size = szT)
     table.cell(tb, 0, 1, "15m", bgcolor = hd, text_color = color.white, text_size = szT)
     table.cell(tb, 1, 1, f_tfTxt(lgB15, lgU15, sB15, pB15, sU15, pU15), bgcolor = f_tfCol(lgB15, lgU15), text_color = color.white, text_size = szT)
     table.cell(tb, 0, 2, "5m", bgcolor = hd, text_color = color.white, text_size = szT)
