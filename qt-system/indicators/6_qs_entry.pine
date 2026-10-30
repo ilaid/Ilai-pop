@@ -828,14 +828,17 @@ var string keyS  = ""
 var string keyL  = ""
 var bool   failS = false
 var bool   failL = false
+// הרצף והמחזור של כל תגית, כדי שיישארו כתובים גם כשהיא מתכווצת
+var string nmS   = ""
+var string nmL   = ""
 // כל התגיות, מהישנה לחדשה — נשארות רק keepN האחרונות
 var array<label> hist = array.new<label>()
 string alTxt = ""
 // אחת השבירות של האישור מתה (נלקחה או שהמיכל שלה נגמר) — האישור נכשל:
 // התגית מקבלת ✕ ונשארת דהויה, ובאותו חלון לא יוצא אישור נוסף בכיוון הזה
-// תגית שנכשלה הופכת ל-✕ אפור וקטן; ההסבר נשאר ב-tooltip
+// תגית שנכשלה הופכת ל-✕ אפור וקטן, עם הרצף והמחזור; שאר ההסבר ב-tooltip
 if keyS != "" and not f_alive(keyS, liveS)
-    label.set_text(lbS, "✕")
+    label.set_text(lbS, "✕ " + nmS)
     label.set_size(lbS, size.tiny)
     label.set_color(lbS, color.new(color.gray, 45))
     label.set_textcolor(lbS, color.white)
@@ -843,7 +846,7 @@ if keyS != "" and not f_alive(keyS, liveS)
     txS   := ""
     failS := true
 if keyL != "" and not f_alive(keyL, liveL)
-    label.set_text(lbL, "✕")
+    label.set_text(lbL, "✕ " + nmL)
     label.set_size(lbL, size.tiny)
     label.set_color(lbL, color.new(color.gray, 45))
     label.set_textcolor(lbL, color.white)
@@ -852,17 +855,17 @@ if keyL != "" and not f_alive(keyL, liveL)
     failL := true
 // החלון נגמר (או התחלף) — האישור נגמר, התגית נשארת דהויה. השבירות שלה
 // ממשיכות להיבדק: אם אחת מהן מתה אחר כך, התגית עדיין מקבלת ✕.
-// החלון נגמר והאישור עדיין חי — התגית מתכווצת לחץ קטן בצבע שלה
+// החלון נגמר והאישור עדיין חי — התגית מתכווצת: חץ, הרצף והמחזור, בצבע שלה
 if doneS != "" and doneS != qsId
     if not failS
-        label.set_text(lbS, "▼")
+        label.set_text(lbS, "▼ " + nmS)
         label.set_size(lbS, size.tiny)
         label.set_color(lbS, color.new(colBear, 25))
     doneS := ""
     txS   := ""
 if doneL != "" and doneL != qsId
     if not failL
-        label.set_text(lbL, "▲")
+        label.set_text(lbL, "▲ " + nmL)
         label.set_size(lbL, size.tiny)
         label.set_color(lbL, color.new(colBull, 25))
     doneL := ""
@@ -873,6 +876,7 @@ if entS != "" and doneS != qsId
     txS   := entS
     keyS  := keyNS
     failS := false
+    nmS   := qsPat + " · " + f_kLen(qsK)
     usedS := str.length(usedS) > 3000 ? "#" + keyNS + "#" : usedS + keyNS + "#"
     lbS   := label.new(bar_index, high, "▼ QS " + qsPat + " · " + f_kLen(qsK), yloc = yloc.abovebar, style = label.style_label_down, color = colBear, textcolor = color.white, size = size.small, tooltip = "SHORT · QS " + qsPat + " (" + f_kName(qsK) + ")\n" + entS)
     array.push(hist, lbS)
@@ -882,6 +886,7 @@ if entL != "" and doneL != qsId
     txL   := entL
     keyL  := keyNL
     failL := false
+    nmL   := qsPat + " · " + f_kLen(qsK)
     usedL := str.length(usedL) > 3000 ? "#" + keyNL + "#" : usedL + keyNL + "#"
     lbL   := label.new(bar_index, low, "▲ QS " + qsPat + " · " + f_kLen(qsK), yloc = yloc.belowbar, style = label.style_label_up, color = colBull, textcolor = color.white, size = size.small, tooltip = "LONG · QS " + qsPat + " (" + f_kName(qsK) + ")\n" + entL)
     array.push(hist, lbL)
