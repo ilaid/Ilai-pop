@@ -45,9 +45,9 @@ useSsmt = input.bool(true, "SSMT / HSSMT", group = grpBrk)
 usePsp  = input.bool(true, "PSP", group = grpBrk)
 useFresh = input.bool(true, "לפחות שבירה אחת טרייה — נוצרה בתוך חלון ה-QS", group = grpBrk, tooltip = "השבירה השנייה יכולה להיות ותיקה יותר, רק שהיא עדיין חיה.")
 
-grpTr   = "בדיקה אחורה (עסקאות)"
-trOn    = input.bool(true, "בדוק כל אישור כעסקה", group = grpTr, tooltip = "סטופ תמיד מעבר לקיצון של חלון ה-QS (הגבוה בשורט, הנמוך בלונג) — שם הנכס שלא הצליח לקחת את הרמה. יעד: R לפי גודל החלון. מחליפים מצב כניסה ומשווים את הסטטיסטיקה.")
-trMode  = input.string("טריגר PCP + SSMT", "כניסה", options = ["טריגר PCP + SSMT", "נר האישור", "סוף חלון ה-QS"], group = grpTr, tooltip = "טריגר PCP + SSMT: נר של 5m או 15m שהוא PCP ונוצר עליו גם SSMT / HSSMT — כניסה בסגירתו.\nנר האישור: הנר שבו כל התנאים התקיימו.\nסוף חלון ה-QS: סגירת הנר האחרון של החלון.")
+grpTr   = "סימון ובדיקה אחורה"
+trOn    = input.bool(false, "בדוק כל אישור כעסקה", group = grpTr, tooltip = "סטופ תמיד מעבר לקיצון של חלון ה-QS (הגבוה בשורט, הנמוך בלונג) — שם הנכס שלא הצליח לקחת את הרמה. יעד: R לפי גודל החלון. מחליפים מצב כניסה ומשווים את הסטטיסטיקה.")
+trMode  = input.string("נר האישור", "מתי לסמן", options = ["נר האישור", "טריגר PCP + SSMT", "סוף חלון ה-QS"], group = grpTr, tooltip = "טריגר PCP + SSMT: נר של 5m או 15m שהוא PCP ונוצר עליו גם SSMT / HSSMT — כניסה בסגירתו.\nנר האישור: הנר שבו כל התנאים התקיימו.\nסוף חלון ה-QS: סגירת הנר האחרון של החלון.")
 trg1m   = input.bool(false, "טריגר גם מנר של 1m", group = grpTr)
 rr56    = input.float(1.3, "יעד בחלון 5.6 דק' (R)", minval = 0.5, step = 0.1, group = grpTr)
 rr225   = input.float(2.0, "יעד בחלון 22.5 דק' (R)", minval = 0.5, step = 0.1, group = grpTr)
@@ -233,6 +233,55 @@ f_qsDigits(int t) =>
     mQ   = (tM >= 4 ? tM - 4 : tM + 8) % 3 + 1
     str.tostring(mQ) + (wk == 0 ? "·" : str.tostring(wk)) + (dN == 0 ? "·" : str.tostring(dN)) + str.tostring(sI + 1) + str.tostring(mI + 1) + str.tostring(qI + 1) + str.tostring(sqI + 1)
 
+// ── חוזק שבירה ו-★ — מועתקים כמו שהם מ-SSMT + HSSMT, כדי שהכיוון השולט
+//    בכל מסגרת ייבחר בדיוק כמו שם: HSSMT > SSMT > SSMT (closed), אחר כך ★,
+//    ואחר כך החדשה ──
+// חוזק השבירה, כשדובית ושורית חיות במקביל וצריך לבחור את הראשית. קודם הסוג:
+//   HSSMT > SSMT > SSMT שהגרעין כבר סגר מעבר לו — (all/core closed).
+// בתוך אותו סוג — שבירה ב-QS (★ או ☆) חזקה משבירה שלא ב-QS. ורק אם גם זה
+// שווה — האחרונה שנעשתה. שבירה שהתבטלה כבר לא חיה, ולכן יוצאת לפני הכול.
+f_rank(int typ, string s, bool inQS) => (typ == 2 ? 3 : str.contains(s, "closed)") ? 1 : 2) * 2 + (inQS ? 1 : 0)
+
+// איזו שלישייה (אינדקס ההתחלה בשבע הספרות) נכתבת בתווית של כל מדרגה (רמה
+// אחת מתחת לייחוס): 0 = חודש-שבוע-יום (4H), 1 = שבוע-יום-סשן (1H),
+// 2 = יום-סשן-מיקרו (15M), 3 = סשן-מיקרו-רבע (5M), 4 = מיקרו-רבע-תת רבע (1M
+// ו-15S — מתחת לתת-רבע אין רמה)
+f_qsK(int cls) => cls <= 2 ? 4 : cls == 3 ? 3 : cls == 4 ? 2 : cls == 5 ? 1 : 0
+
+// הרמה של כל גרף בשבע הספרות (מחזור הייחוס שלו): 1 = שבוע (4H), 2 = יום (1H),
+// 3 = סשן (15M), 4 = 90 דק' (5M), 5 = 22.5 דק' (1M), 6 = 5.625 דק' (15S)
+f_qsLvl(int cls) => cls <= 1 ? 6 : cls == 2 ? 5 : cls == 3 ? 4 : cls == 4 ? 3 : cls == 5 ? 2 : 1
+
+// האם נר [t, t+dur) נכנס לחלון QS — כל שלישייה רצופה שהרמה של הגרף (f_qsLvl)
+// היא חלק ממנה: שתיים מעליה, אחת מעל ואחת מתחת, או שתיים מתחת. למשל ב-5M
+// (רמה 90 דק'): יום-סשן-90, סשן-90-22.5 ו-90-22.5-5.625.
+// החלון הוא התא שבו שלוש הספרות יוצרות רצף חם; נר שחלק ממנו בתוך החלון נחשב
+// בתוכו — כלומר החלון מעוגל החוצה לנרות שלמים (3-3-3 של 09:45–10:07:30 בגרף
+// 5 דק' = 09:45–10:10). כל חלון שנבדק ארוך מהנר, ולכן נר נוגע לכל היותר בשני
+// תאים — בתחילתו ובסופו — ומספיק לבדוק את שני הרגעים. ביומי נבדק יום הנר.
+// מוחזר גם הרצף החם; השלישייה שכתובה בתווית קודמת, ואחריה השאר מלמעלה למטה.
+f_qsAt(int cls, int t, int durMs) =>
+    bool   found = false
+    string pat   = ""
+    // (בגרסה המקורית יש כאן גם את היומי, cls 7 — כאן יש רק 1m / 5m / 15m)
+    if cls >= 1 and cls <= 6
+        d1   = f_qsDigits(t)
+        d2   = f_qsDigits(t + durMs - 1)
+        kOwn = f_qsK(cls)
+        lvl  = f_qsLvl(cls)
+        kLo  = math.max(lvl - 2, 0)
+        kHi  = math.min(lvl, 4)
+        for i = 0 to kHi - kLo + 1
+            k = i == 0 ? kOwn : kLo + i - 1
+            if not found
+                s1 = str.substring(d1, k, k + 3)
+                s2 = str.substring(d2, k, k + 3)
+                h  = f_qsHot(s1) ? s1 : f_qsHot(s2) ? s2 : ""
+                if h != ""
+                    found := true
+                    pat   := h
+    [found, pat]
+
 // ═══════════════════════════════════════════════════════════════════
 // מחזורים — 1m: רבע 22.5 → מיקרו 90 · 5m: מיקרו → סשן · 15m: סשן → יום
 // (cls 2 / 3 / 4, אותו מספור של SSMT). זרע רק ב-1m וב-5m.
@@ -310,6 +359,10 @@ type Eng
     int          uBorn = 0
     int          trgDir = 0
     int          trgBar = -1
+    string       bStr = ""
+    string       uStr = ""
+    bool         bQs  = false
+    bool         uQs  = false
 
 f_newEng(int cls) =>
     Eng.new(cls, nHiA = array.new_float(), nLoA = array.new_float(), nHcA = array.new_float(), nLcA = array.new_float(), eHiA = array.new_float(), eLoA = array.new_float(), eHcA = array.new_float(), eLcA = array.new_float(), yHiA = array.new_float(), yLoA = array.new_float(), yHcA = array.new_float(), yLcA = array.new_float(), cv = array.new_float(36, na), ct = array.new_int(3, 0), pDir = array.new_int(), pNq = array.new_float(), pEs = array.new_float(), pCont = array.new_int(), pSeq = array.new_int(), pBorn = array.new_int())
@@ -410,10 +463,12 @@ f_step(Eng e, int t, float no, float nh, float nl, float nc, float eo, float eh,
         if sDrop
             e.bRefI := e.bRefI > 0 ? e.bRefI - 1 : -1
             e.uRefI := e.uRefI > 0 ? e.uRefI - 1 : -1
-        int nbT = 0
-        int nbI = -1
-        int nuT = 0
-        int nuI = -1
+        int    nbT = 0
+        int    nbI = -1
+        int    nuT = 0
+        int    nuI = -1
+        string nbS = ""
+        string nuS = ""
         if useSsmt and array.size(e.nHiA) > 0
             [xbT, xbI, xbS] = f_findBear(e.nHiA, e.eHiA, e.yHiA, e.nHcA, e.eHcA, e.yHcA, e.nH, e.eH, e.yH, e.nHC, e.eHC, e.yHC)
             [xuT, xuI, xuS] = f_findBull(e.nLoA, e.eLoA, e.yLoA, e.nLcA, e.eLcA, e.yLcA, e.nL, e.eL, e.yL, e.nLC, e.eLC, e.yLC)
@@ -421,6 +476,8 @@ f_step(Eng e, int t, float no, float nh, float nl, float nc, float eo, float eh,
             nbI := xbI
             nuT := xuT
             nuI := xuI
+            nbS := xbS
+            nuS := xuS
         int oBS = e.bSeq
         int oUS = e.uSeq
         int oBT = e.bTy
@@ -430,8 +487,11 @@ f_step(Eng e, int t, float no, float nh, float nl, float nc, float eo, float eh,
                 e.seqC := e.seqC + 1
                 e.bSeq := e.seqC
                 e.bBorn := t + f_clsMs(e.cls)
+                [qb, pb] = f_qsAt(e.cls, t, f_clsMs(e.cls))
+                e.bQs := qb
             e.bRefI := nbI
             e.bTy   := nbT
+            e.bStr  := nbS
         else
             e.bTy   := 0
             e.bRefI := -1
@@ -440,8 +500,11 @@ f_step(Eng e, int t, float no, float nh, float nl, float nc, float eo, float eh,
                 e.seqC := e.seqC + 1
                 e.uSeq := e.seqC
                 e.uBorn := t + f_clsMs(e.cls)
+                [qu, pu] = f_qsAt(e.cls, t, f_clsMs(e.cls))
+                e.uQs := qu
             e.uRefI := nuI
             e.uTy   := nuT
+            e.uStr  := nuS
         else
             e.uTy   := 0
             e.uRefI := -1
@@ -728,7 +791,11 @@ f_leg(Eng e, int d, string nm) =>
     [pU0, nU] = f_pspSeq(e, 1)
     int  pB  = fresh ? pB0 : -1
     int  pU  = fresh ? pU0 : -1
-    int  dom = sB >= 0 or sU >= 0 ? (sB > sU ? -1 : 1) : (pB >= 0 or pU >= 0 ? (pB > pU ? -1 : 1) : 0)
+    // הכיוון השולט — כמו ב-SSMT + HSSMT: כששני הכיוונים חיים, החזקה (סוג, ★)
+    // ובשוויון החדשה. בלי SSMT חי — ה-PSP החדש ביותר.
+    int  rB  = sB >= 0 ? f_rank(e.bTy, e.bStr, e.bQs) : -1
+    int  rU  = sU >= 0 ? f_rank(e.uTy, e.uStr, e.uQs) : -1
+    int  dom = sB >= 0 or sU >= 0 ? (rB != rU ? (rB > rU ? -1 : 1) : (sB > sU ? -1 : 1)) : (pB >= 0 or pU >= 0 ? (pB > pU ? -1 : 1) : 0)
     int    ssT = 0
     bool   psp = false
     string kS  = ""
@@ -1103,6 +1170,13 @@ if entL != "" and doneL != qsId
     alTxt := alTxt + (alTxt == "" ? "" : "\n") + "▲ LONG · QS " + qsPat + " " + f_kLen(qsK) + " · " + str.replace_all(entL, "\n", " · ")
 while array.size(hist) > keepN
     label.delete(array.shift(hist))
+// המיקום של ה-QS: כל עוד החלון חי, התגית יושבת על הנר שעשה את הקיצון של
+// החלון עד עכשיו — הגבוה בשורט, הנמוך בלונג. כשהחלון נגמר היא נשארת שם.
+if qsOn and doneS == qsId
+    label.set_x(lbS, wHiB)
+if qsOn and doneL == qsId
+    label.set_x(lbL, wLoB)
+
 bgcolor(showBg and qsOn ? color.new(colQS, 90) : na, title = "QS window")
 
 f_trOpen(tS)
