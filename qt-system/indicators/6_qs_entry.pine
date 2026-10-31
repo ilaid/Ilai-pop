@@ -60,6 +60,7 @@ colBear = input.color(#ef5350, "שורט", group = grpVis)
 colQS   = input.color(#4b56ba, "QS", group = grpVis)
 showTbl = input.bool(true, "הצג טבלה", group = grpVis)
 showBg  = input.bool(true, "צבע את הרקע בזמן חלון QS", group = grpVis, tooltip = "כך רואים בדיוק איפה החלון מתחיל ונגמר.")
+showW   = input.bool(true, "סמן על הגרף גם את השלב המוקדם (◦)", group = grpVis, tooltip = "תגית קטנה ודהויה ברגע שבתוך QS יש שבירה אחת והמחיר כבר מעבר לשתי הפתיחות שלה — לפני השבירה השנייה.")
 keepN   = input.int(5, "כמה אישורים להשאיר על הגרף", minval = 1, maxval = 50, group = grpVis, tooltip = "רק האחרונים נשארים; הישנים יותר נמחקים. ב-Bar Replay זה מתקדם עם הנרות.")
 posIn   = input.string("ימין למעלה", "מיקום הטבלה", options = ["ימין למעלה", "ימין באמצע", "ימין למטה", "מרכז למעלה", "מרכז באמצע", "מרכז למטה", "שמאל למעלה", "שמאל באמצע", "שמאל למטה"], group = grpVis)
 szIn    = input.string("קטן", "גודל הטבלה", options = ["זעיר", "קטן", "רגיל", "גדול", "ענק"], group = grpVis)
@@ -1058,7 +1059,6 @@ f_trOpen(Trd t) =>
             t.tgt := t.dir == -1 ? ent - risk * t.rr : ent + risk * t.rr
             t.mfe := 0.0
             t.st  := 2
-            label.set_x(t.lb, t.dir == -1 ? eHiB : eLoB)
     t.st
 
 f_trCheck(Trd t) =>
@@ -1073,9 +1073,6 @@ f_trCheck(Trd t) =>
             array.set(stW, t.k, array.get(stW, t.k) + (win ? 1 : 0))
             array.set(stR, t.k, array.get(stR, t.k) + (win ? t.rr : -1.0))
             array.set(stM, t.k, array.get(stM, t.k) + math.min(t.mfe, 20.0))
-            label.set_text(t.lb, label.get_text(t.lb) + (win ? "  +" + str.tostring(t.rr) + "R" : "  −1R"))
-            if loss
-                label.set_color(t.lb, color.new(color.gray, 45))
             t.st := 0
     t.st
 
@@ -1174,9 +1171,9 @@ if entS != "" and doneS != qsId
     txS   := entS
     keyS  := keyNS
     failS := false
-    nmS   := qsShow + " · " + f_kLen(qsK)
+    nmS   := qsShow + " · " + f_kLen(qsK) + " · " + str.format_time(time, "HH:mm", TZ)
     usedS := str.length(usedS) > 3000 ? "#" + keyNS + "#" : usedS + keyNS + "#"
-    lbS   := label.new(bar_index, high, "▼ QS " + qsShow + " · " + f_kLen(qsK), yloc = yloc.abovebar, style = label.style_label_down, color = colBear, textcolor = color.white, size = size.small, tooltip = "SHORT · QS " + qsPat + " (" + f_kName(qsK) + ")\n" + entS)
+    lbS   := label.new(bar_index, high, "▼ QS " + nmS, yloc = yloc.abovebar, style = label.style_label_down, color = colBear, textcolor = color.white, size = size.small, tooltip = "SHORT · QS " + qsShow + " (" + f_kName(qsK) + ")\nמחפשים כניסה אחרי הנר של " + str.format_time(time, "HH:mm", TZ) + "\n" + entS)
     array.push(hist, lbS)
     f_trArm(tS, lbS, entPxS)
     alTxt := "▼ SHORT · QS " + qsPat + " " + f_kLen(qsK) + " · " + str.replace_all(entS, "\n", " · ")
@@ -1185,21 +1182,14 @@ if entL != "" and doneL != qsId
     txL   := entL
     keyL  := keyNL
     failL := false
-    nmL   := qsShow + " · " + f_kLen(qsK)
+    nmL   := qsShow + " · " + f_kLen(qsK) + " · " + str.format_time(time, "HH:mm", TZ)
     usedL := str.length(usedL) > 3000 ? "#" + keyNL + "#" : usedL + keyNL + "#"
-    lbL   := label.new(bar_index, low, "▲ QS " + qsShow + " · " + f_kLen(qsK), yloc = yloc.belowbar, style = label.style_label_up, color = colBull, textcolor = color.white, size = size.small, tooltip = "LONG · QS " + qsPat + " (" + f_kName(qsK) + ")\n" + entL)
+    lbL   := label.new(bar_index, low, "▲ QS " + nmL, yloc = yloc.belowbar, style = label.style_label_up, color = colBull, textcolor = color.white, size = size.small, tooltip = "LONG · QS " + qsShow + " (" + f_kName(qsK) + ")\nמחפשים כניסה אחרי הנר של " + str.format_time(time, "HH:mm", TZ) + "\n" + entL)
     array.push(hist, lbL)
     f_trArm(tL, lbL, entPxL)
     alTxt := alTxt + (alTxt == "" ? "" : "\n") + "▲ LONG · QS " + qsPat + " " + f_kLen(qsK) + " · " + str.replace_all(entL, "\n", " · ")
 while array.size(hist) > keepN
     label.delete(array.shift(hist))
-// המיקום של ה-QS: כל עוד החלון חי, התגית יושבת על הנר שעשה את הקיצון של
-// החלון עד עכשיו — הגבוה בשורט, הנמוך בלונג. כשהחלון נגמר היא נשארת שם.
-if qsOn and doneS == qsId
-    label.set_x(lbS, wHiB)
-if qsOn and doneL == qsId
-    label.set_x(lbL, wLoB)
-
 bgcolor(showBg and qsOn ? color.new(colQS, 90) : na, title = "QS window")
 
 f_trOpen(tS)
@@ -1209,6 +1199,16 @@ f_trCheck(tL)
 
 var string wDoneS = ""
 var string wDoneL = ""
+var string hdS    = ""
+var string hdL    = ""
+if showW and watchS != "" and txS == "" and doneS != qsId and hdS != qsId
+    hdS := qsId
+    array.push(hist, label.new(bar_index, high, "◦ ▼ " + qsShow + " · " + str.format_time(time, "HH:mm", TZ), yloc = yloc.abovebar, style = label.style_label_down, color = color.new(colBear, 70), textcolor = color.white, size = size.tiny, tooltip = "שלב מוקדם · QS " + qsShow + "\n" + watchS + " · מחכה לשבירה שנייה"))
+if showW and watchL != "" and txL == "" and doneL != qsId and hdL != qsId
+    hdL := qsId
+    array.push(hist, label.new(bar_index, low, "◦ ▲ " + qsShow + " · " + str.format_time(time, "HH:mm", TZ), yloc = yloc.belowbar, style = label.style_label_up, color = color.new(colBull, 70), textcolor = color.white, size = size.tiny, tooltip = "שלב מוקדם · QS " + qsShow + "\n" + watchL + " · מחכה לשבירה שנייה"))
+while array.size(hist) > keepN
+    label.delete(array.shift(hist))
 string wTxt = ""
 if alertW and watchS != "" and txS == "" and wDoneS != qsId
     wDoneS := qsId
