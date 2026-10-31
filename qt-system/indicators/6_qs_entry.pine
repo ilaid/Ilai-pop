@@ -64,6 +64,7 @@ keepN   = input.int(5, "כמה אישורים להשאיר על הגרף", minva
 posIn   = input.string("ימין למעלה", "מיקום הטבלה", options = ["ימין למעלה", "ימין באמצע", "ימין למטה", "מרכז למעלה", "מרכז באמצע", "מרכז למטה", "שמאל למעלה", "שמאל באמצע", "שמאל למטה"], group = grpVis)
 szIn    = input.string("קטן", "גודל הטבלה", options = ["זעיר", "קטן", "רגיל", "גדול", "ענק"], group = grpVis)
 alertOn = input.bool(true, "התראה על אישור כניסה", group = grpVis)
+alertW  = input.bool(false, "התראה מוקדמת: QS + שבירה אחת + פתיחות", group = grpVis, tooltip = "יוצאת ברגע שבתוך QS יש שבירה אחת והמחיר כבר מעבר לשתי הפתיחות שלה — לפני השבירה השנייה. בטבלה זה מופיע תמיד בשורת ENTRY כ-◦.")
 
 TZ = "America/New_York"
 
@@ -831,10 +832,17 @@ f_k2(string kS, string kP) => kS + "+" + kP
 f_live(string a, string b, string c, string d, string e, string f) => "|" + a + "|" + b + "|" + c + "|" + d + "|" + e + "|" + f + "|"
 liveS = f_live(kSB15, kPB15, kSB5, kPB5, kSB1, kPB1)
 liveL = f_live(kSU15, kPU15, kSU5, kPU5, kSU1, kPU1)
+// "5mS12" → "5mS": המסגרת והסוג, בלי המזהה
+f_cl(string k) => k == "" ? "" : str.contains(k, "S") ? str.substring(k, 0, str.pos(k, "S") + 1) : str.substring(k, 0, str.pos(k, "P") + 1)
+// אישור חי כל עוד בכל אחת מהמסגרות שלו יש עדיין שבירה חיה מאותו סוג ובאותו
+// כיוון. לא חייבת להיות אותה שבירה בדיוק — SSMT שעבר לרמה אחרת, או PSP חדש
+// שנוצר ליד הקודם, לא מבטלים את האישור. מה שמבטל: אין יותר שבירה כזו, או
+// ששבירה הפוכה חזקה יותר השתלטה על המסגרת.
 f_alive(string key, string live) =>
     bool ok = key != ""
     for part in str.split(key, "+")
-        if not str.contains(live, "|" + part + "|")
+        string c = f_cl(part)
+        if c != "" and not str.contains(live, "|" + c)
             ok := false
     ok
 lgB1  = f_one(sB1, pB1)
@@ -1076,6 +1084,21 @@ var string usedS = "#"
 var string usedL = "#"
 [entS, keyNS] = f_entry(-1, lgB15, lgB5, lgB1, sB15, pB15, sB5, pB5, sB1, pB1, kSB15, kPB15, kSB5, kPB5, kSB1, kPB1, usedS, freshS)
 [entL, keyNL] = f_entry(1, lgU15, lgU5, lgU1, sU15, pU15, sU5, pU5, sU1, pU1, kSU15, kPU15, kSU5, kPU5, kSU1, kPU1, usedL, freshL)
+// ── התראה מוקדמת: בתוך QS, שבירה אחת כבר קיימת והמחיר כבר מעבר לשתי הפתיחות
+//    שלה (הפתיחה של המסגרת והפתיחה שמעליה). זה הזמן להתחיל לחפש כניסה —
+//    האישור המלא עדיין מחכה לשבירה השנייה. לא משנה שום דבר בלוגיקה. ──
+f_watch(int d, int g15, int g5, int g1) =>
+    string w = ""
+    if g15 > 0 and f_beyond(d, toD, toW)
+        w := "15m " + f_legName(g15)
+    else if g5 > 0 and f_beyond(d, to90, toD)
+        w := "5m " + f_legName(g5)
+    else if g1 > 0 and f_beyond(d, toMc, to90)
+        w := "1m " + f_legName(g1)
+    w
+watchS = qsOn ? f_watch(-1, lgB15, lgB5, lgB1) : ""
+watchL = qsOn ? f_watch(1, lgU15, lgU5, lgU1) : ""
+
 // במצב טריגר — צריך גם נר PCP + SSMT בכיוון, שנסגר בנר הזה של הגרף
 isTrg = trMode == "טריגר PCP + SSMT"
 f_trg(int d) => (e5.trgBar == bar_index and e5.trgDir == d) or (e15.trgBar == bar_index and e15.trgDir == d) or (trg1m and e1.trgBar == bar_index and e1.trgDir == d)
@@ -1184,6 +1207,17 @@ f_trOpen(tL)
 f_trCheck(tS)
 f_trCheck(tL)
 
+var string wDoneS = ""
+var string wDoneL = ""
+string wTxt = ""
+if alertW and watchS != "" and txS == "" and wDoneS != qsId
+    wDoneS := qsId
+    wTxt := wTxt + (wTxt == "" ? "" : "\n") + "◦ ▼ QS " + qsShow + " " + f_kLen(qsK) + " · " + watchS + " · מחכה לשבירה שנייה"
+if alertW and watchL != "" and txL == "" and wDoneL != qsId
+    wDoneL := qsId
+    wTxt := wTxt + (wTxt == "" ? "" : "\n") + "◦ ▲ QS " + qsShow + " " + f_kLen(qsK) + " · " + watchL + " · מחכה לשבירה שנייה"
+if alertW and wTxt != ""
+    alert("QS Entry · " + syminfo.ticker + "\n" + wTxt, alert.freq_once_per_bar)
 if alertOn and alTxt != ""
     alert("QS Entry · " + syminfo.ticker + "\n" + alTxt, alert.freq_once_per_bar)
 
@@ -1213,8 +1247,8 @@ if showTbl and barstate.islast
     table.cell(tb, 1, 3, f_tfTxt(lgB1, lgU1, sB1, pB1, sU1, pU1), bgcolor = f_tfCol(lgB1, lgU1), text_color = color.white, text_size = szT)
     table.cell(tb, 0, 4, "TO", bgcolor = hd, text_color = color.white, text_size = szT)
     table.cell(tb, 1, 4, f_toTxt("TWO", toW) + "  " + f_toTxt("TDO", toD) + "  " + f_toTxt("T90O", to90) + "  " + f_toTxt("TMcO", toMc), bgcolor = color.new(color.gray, 85), text_color = color.white, text_size = szT)
-    string eT = txS != "" ? "▼ SHORT  " + str.replace_all(txS, "\n", " · ") : txL != "" ? "▲ LONG  " + str.replace_all(txL, "\n", " · ") : "—"
-    color  eC = txS != "" ? color.new(colBear, 20) : txL != "" ? color.new(colBull, 20) : color.new(color.gray, 85)
+    string eT = txS != "" ? "▼ SHORT  " + str.replace_all(txS, "\n", " · ") : txL != "" ? "▲ LONG  " + str.replace_all(txL, "\n", " · ") : watchS != "" ? "◦ ▼ " + watchS + " · waiting for 2nd" : watchL != "" ? "◦ ▲ " + watchL + " · waiting for 2nd" : "—"
+    color  eC = txS != "" ? color.new(colBear, 20) : txL != "" ? color.new(colBull, 20) : watchS != "" ? color.new(colBear, 65) : watchL != "" ? color.new(colBull, 65) : color.new(color.gray, 85)
     table.cell(tb, 0, 5, "ENTRY", bgcolor = hd, text_color = color.white, text_size = szT)
     table.cell(tb, 1, 5, eT, bgcolor = eC, text_color = color.white, text_size = szT)
     if trOn
