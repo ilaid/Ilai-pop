@@ -7,9 +7,8 @@ indicator("QS Entry | Quarterly Theory", shorttitle = "QS Entry", overlay = true
 // אישור כניסה = שלושה תנאים באותו רגע:
 //   1. חלון QS פעיל — שלוש רמות צמודות בכתובת הזמן יוצרות רצף חם.
 //   2. בדיוק שתי שבירות קורלציה חיות באותו כיוון, מתוך 15m · 5m · 1m · 15s
-//      (עד שתי מדרגות זו מזו) — בשתי מסגרות שונות, או SSMT ו-PSP באותה מסגרת.
-//      שתיהן לפני ה-QS, אחת לפני ואחת בתוכו (העיקרי, ★), או שתיהן בתוכו.
-//      ב-15s רק SSMT / HSSMT (בלי PSP), והפתיחה שלה היא TNcP.
+//      (עד שתי מדרגות זו מזו) — בשתי מסגרות שונות, או SSMT ו-PSP באותה
+//      מסגרת. לפחות אחת נוצרה בתוך ה-QS (אפשר לכבות). ב-15s רק SSMT / HSSMT.
 //   3. המחיר מעבר לשתי פתיחות: ה-True Open של המיכל של כל שבירה
 //      (15m → TDO · 5m → T90O · 1m → TMcO · 15s → TNcP). שתי שבירות באותה מסגרת —
 //      הפתיחה שלה והפתיחה שמעליה (1m: TMcO + T90O · 5m: T90O + TDO ·
@@ -44,9 +43,9 @@ useK4   = input.bool(true, "90 · 22.5 · 5.6 דק'", group = grpQS)
 grpBrk  = "שבירות"
 useSsmt = input.bool(true, "SSMT / HSSMT", group = grpBrk)
 usePsp  = input.bool(true, "PSP", group = grpBrk)
-use15s  = input.bool(true, "SSMT / HSSMT ב-15 שניות (מחזור 5.6 דק')", group = grpBrk, tooltip = "שבירות של 15s בין תתי-המחזורים של 5.625 דק' — למשל בדיוק על הקיצון של ה-QS. רק SSMT / HSSMT, בלי PSP. מזדווגות עם 1m (TNcP + TMcO) או עם 5m (TNcP + T90O).")
-real15s = input.bool(false, "15s מנתוני שניות אמיתיים (דורש Plus ומעלה)", group = grpBrk, tooltip = "כבוי = מחזור ה-15 שניות (תתי-מחזורים של 5.625 דק') מחושב מנרות דקה, כמו באינדיקטור SSMT + HSSMT — בלי צורך במנוי.")
-useFresh = input.bool(false, "חובה: לפחות שבירה אחת נוצרה בתוך חלון ה-QS", group = grpBrk, tooltip = "כבוי: שתי השבירות יכולות להיות גם מלפני ה-QS, רק שהן עדיין חיות. אישור שאחת השבירות שלו נוצרה בתוך ה-QS (המצב העיקרי) מסומן ★ בכל מקרה.")
+useFresh = input.bool(true, "לפחות שבירה אחת טרייה — נוצרה בתוך חלון ה-QS", group = grpBrk, tooltip = "השבירה השנייה יכולה להיות ותיקה יותר, רק שהיא עדיין חיה.\nכבוי: גם שתי שבירות מלפני ה-QS נחשבות.")
+use15s  = input.bool(true, "SSMT / HSSMT של 15 שניות (מחזור 5.6 דק')", group = grpBrk, tooltip = "שבירות בין תתי-המחזורים של 5.625 דק' בתוך רבע 22.5 — למשל בדיוק על הקיצון של ה-QS. רק SSMT / HSSMT, בלי PSP. זוגות: 1m + 15s (TMcO + TNcP) · 5m + 15s (T90O + TNcP).")
+real15s = input.bool(false, "15s מנתוני שניות אמיתיים (דורש Plus ומעלה)", group = grpBrk, tooltip = "כבוי = מחזור ה-15s מחושב מנרות דקה, כמו באינדיקטור SSMT + HSSMT — בלי צורך במנוי.")
 
 grpTr   = "סימון ובדיקה אחורה"
 trOn    = input.bool(false, "בדוק כל אישור כעסקה", group = grpTr, tooltip = "סטופ תמיד מעבר לקיצון של חלון ה-QS (הגבוה בשורט, הנמוך בלונג) — שם הנכס שלא הצליח לקחת את הרמה. יעד: R לפי גודל החלון. מחליפים מצב כניסה ומשווים את הסטטיסטיקה.")
@@ -755,6 +754,7 @@ var Eng e5  = f_newEng(3)
 var Eng e15 = f_newEng(4)
 var TOs tos = TOs.new()
 
+// 15s: כברירת מחדל מנרות דקה (כמו SSMT + HSSMT), או מנתוני שניות אמיתיים
 if use15s and not real15s
     if lo1
         f_feedLtf(eS, b1nt, b1no, b1nh, b1nl, b1nc, b1et, b1eo, b1eh, b1el, b1ec, b1yt, b1yo, b1yh, b1yl, b1yc)
@@ -875,8 +875,8 @@ f_alive(string key, string live) =>
         if c != "" and not str.contains(live, "|" + c)
             ok := false
     ok
-lgBs  = sBs
-lgUs  = sUs
+lgBs  = use15s ? sBs : 0
+lgUs  = use15s ? sUs : 0
 lgB1  = f_one(sB1, pB1)
 lgU1  = f_one(sU1, pU1)
 lgB5  = f_one(sB5, pB5)
@@ -1097,6 +1097,7 @@ f_trOpen(Trd t) =>
             t.tgt := t.dir == -1 ? ent - risk * t.rr : ent + risk * t.rr
             t.mfe := 0.0
             t.st  := 2
+            label.set_x(t.lb, t.dir == -1 ? eHiB : eLoB)
     t.st
 
 f_trCheck(Trd t) =>
@@ -1119,9 +1120,6 @@ var string usedS = "#"
 var string usedL = "#"
 [entS, keyNS] = f_entry(-1, lgB15, lgB5, lgB1, lgBs, sB15, pB15, sB5, pB5, sB1, pB1, kSB15, kPB15, kSB5, kPB5, kSB1, kPB1, kSBs, usedS, freshS)
 [entL, keyNL] = f_entry(1, lgU15, lgU5, lgU1, lgUs, sU15, pU15, sU5, pU5, sU1, pU1, kSU15, kPU15, kSU5, kPU5, kSU1, kPU1, kSUs, usedL, freshL)
-// ★ = לפחות אחת משתי השבירות נוצרה בתוך חלון ה-QS (המצב העיקרי)
-stS = entS != "" and f_hasFresh(freshS, keyNS) ? " ★" : ""
-stL = entL != "" and f_hasFresh(freshL, keyNL) ? " ★" : ""
 
 // במצב טריגר — צריך גם נר PCP + SSMT בכיוון, שנסגר בנר הזה של הגרף
 isTrg = trMode == "טריגר PCP + SSMT"
@@ -1198,9 +1196,9 @@ if entS != "" and doneS != qsId
     txS   := entS
     keyS  := keyNS
     failS := false
-    nmS   := qsShow + " · " + f_kLen(qsK) + " · " + str.format_time(time, "HH:mm", TZ) + stS
+    nmS   := qsShow + " · " + f_kLen(qsK)
     usedS := str.length(usedS) > 3000 ? "#" + keyNS + "#" : usedS + keyNS + "#"
-    lbS   := label.new(bar_index, high, "▼ QS " + nmS, yloc = yloc.abovebar, style = label.style_label_down, color = colBear, textcolor = color.white, size = size.small, tooltip = "SHORT · QS " + qsShow + " (" + f_kName(qsK) + ")\nמחפשים כניסה אחרי הנר של " + str.format_time(time, "HH:mm", TZ) + "\n" + entS)
+    lbS   := label.new(bar_index, high, "▼ QS " + qsShow + " · " + f_kLen(qsK), yloc = yloc.abovebar, style = label.style_label_down, color = colBear, textcolor = color.white, size = size.small, tooltip = "SHORT · QS " + qsShow + " (" + f_kName(qsK) + ")\nכל התנאים התקיימו בנר של " + str.format_time(time, "HH:mm", TZ) + "\n" + entS)
     array.push(hist, lbS)
     f_trArm(tS, lbS, entPxS)
     alTxt := "▼ SHORT · QS " + qsPat + " " + f_kLen(qsK) + " · " + str.replace_all(entS, "\n", " · ")
@@ -1209,14 +1207,21 @@ if entL != "" and doneL != qsId
     txL   := entL
     keyL  := keyNL
     failL := false
-    nmL   := qsShow + " · " + f_kLen(qsK) + " · " + str.format_time(time, "HH:mm", TZ) + stL
+    nmL   := qsShow + " · " + f_kLen(qsK)
     usedL := str.length(usedL) > 3000 ? "#" + keyNL + "#" : usedL + keyNL + "#"
-    lbL   := label.new(bar_index, low, "▲ QS " + nmL, yloc = yloc.belowbar, style = label.style_label_up, color = colBull, textcolor = color.white, size = size.small, tooltip = "LONG · QS " + qsShow + " (" + f_kName(qsK) + ")\nמחפשים כניסה אחרי הנר של " + str.format_time(time, "HH:mm", TZ) + "\n" + entL)
+    lbL   := label.new(bar_index, low, "▲ QS " + qsShow + " · " + f_kLen(qsK), yloc = yloc.belowbar, style = label.style_label_up, color = colBull, textcolor = color.white, size = size.small, tooltip = "LONG · QS " + qsShow + " (" + f_kName(qsK) + ")\nכל התנאים התקיימו בנר של " + str.format_time(time, "HH:mm", TZ) + "\n" + entL)
     array.push(hist, lbL)
     f_trArm(tL, lbL, entPxL)
     alTxt := alTxt + (alTxt == "" ? "" : "\n") + "▲ LONG · QS " + qsPat + " " + f_kLen(qsK) + " · " + str.replace_all(entL, "\n", " · ")
 while array.size(hist) > keepN
     label.delete(array.shift(hist))
+// המיקום של ה-QS: כל עוד החלון חי, התגית יושבת על הנר שעשה את הקיצון של
+// החלון עד עכשיו — הגבוה בשורט, הנמוך בלונג. כשהחלון נגמר היא נשארת שם.
+if qsOn and doneS == qsId
+    label.set_x(lbS, wHiB)
+if qsOn and doneL == qsId
+    label.set_x(lbL, wLoB)
+
 bgcolor(showBg and qsOn ? color.new(colQS, 90) : na, title = "QS window")
 
 f_trOpen(tS)
