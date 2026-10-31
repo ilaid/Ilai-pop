@@ -1,0 +1,1279 @@
+//@version=5
+indicator("QS Entry | Quarterly Theory", shorttitle = "QS Entry", overlay = true, max_labels_count = 100)
+
+// ═══════════════════════════════════════════════════════════════════
+// QS Entry — אינדיקטור אחד למודל אחד
+//
+// אישור כניסה = שלושה תנאים באותו רגע:
+//   1. חלון QS פעיל — שלוש רמות צמודות בכתובת הזמן יוצרות רצף חם.
+//   2. בדיוק שתי שבירות קורלציה חיות באותו כיוון, מתוך 15m · 5m · 1m · 15s
+//      (עד שתי מדרגות זו מזו) — בשתי מסגרות שונות, או SSMT ו-PSP באותה מסגרת.
+//      שתיהן לפני ה-QS, אחת לפני ואחת בתוכו (העיקרי, ★), או שתיהן בתוכו.
+//      ב-15s רק SSMT / HSSMT (בלי PSP), והפתיחה שלה היא TNcP.
+//   3. המחיר מעבר לשתי פתיחות: ה-True Open של המיכל של כל שבירה
+//      (15m → TDO · 5m → T90O · 1m → TMcO · 15s → TNcP). שתי שבירות באותה מסגרת —
+//      הפתיחה שלה והפתיחה שמעליה (1m: TMcO + T90O · 5m: T90O + TDO ·
+//      15m: TDO + TWO). שורט = נגיעה מעל שתיהן · לונג = מתחת. מספיק פתיל.
+//
+// סוגי השבירות בגרסה הזו: SSMT / HSSMT ו-PSP. אותה לוגיקה בדיוק של
+// האינדיקטורים SSMT + HSSMT ו-ADI — הפונקציות הועתקו מהם כמו שהן.
+// הכול מחושב כאן, בלי חיבור לאינדיקטורים אחרים, ולכן בלי בעיית הזיכרון.
+//
+// ספר החוקים: qt-system/docs/RULES.md
+// ═══════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════
+// הגדרות
+// ═══════════════════════════════════════════════════════════════════
+
+grpSym = "נתונים"
+contractSet = input.string("אוטומטי", "סט חוזים", options = ["אוטומטי", "רגיל", "מיקרו"], group = grpSym, tooltip = "אוטומטי = לפי הגרף: גרף MNQ/MES/MYM קורא מיקרו, כל גרף אחר קורא רגיל.")
+adjMode  = input.string("בלי יישור", "נתוני חוזה רציף", options = ["בלי יישור", "מיושר לגלגול", "ברירת המחדל של הסימבול"], group = grpSym)
+settleIn = input.string("כבוי — כמו הגרף", "Settlement כסגירה יומית", options = ["כבוי — כמו הגרף", "דלוק", "ברירת המחדל של הסימבול"], group = grpSym)
+
+grpQS   = "חלונות QS"
+hotList = input.string("111,114,141,144,411,414,441,444,222,333", "רצפים חמים", group = grpQS)
+// שבירות של 15m / 5m / 1m מחפשות QS קטן, באותו מחזור קטן. חלון של יום
+// שלם או של סשן שלם לא רלוונטי להן, ולכן שני הגדולים כבויים כברירת מחדל.
+useK0   = input.bool(false, "חודש · שבוע · יום (יום שלם)", group = grpQS, tooltip = "כבוי כברירת מחדל: חלון של יום שלם לא רלוונטי לשבירות של 15m / 5m / 1m.")
+useK1   = input.bool(false, "שבוע · יום · סשן (6 שעות)", group = grpQS, tooltip = "כבוי כברירת מחדל: חלון של סשן שלם לא רלוונטי לשבירות של 15m / 5m / 1m.")
+useK2   = input.bool(true, "יום · סשן · 90 דק'", group = grpQS)
+useK3   = input.bool(true, "סשן · 90 · 22.5 דק'", group = grpQS)
+useK4   = input.bool(true, "90 · 22.5 · 5.6 דק'", group = grpQS)
+
+grpBrk  = "שבירות"
+useSsmt = input.bool(true, "SSMT / HSSMT", group = grpBrk)
+usePsp  = input.bool(true, "PSP", group = grpBrk)
+use15s  = input.bool(true, "SSMT / HSSMT ב-15 שניות (מחזור 5.6 דק')", group = grpBrk, tooltip = "שבירות של 15s בין תתי-המחזורים של 5.625 דק' — למשל בדיוק על הקיצון של ה-QS. רק SSMT / HSSMT, בלי PSP. מזדווגות עם 1m (TNcP + TMcO) או עם 5m (TNcP + T90O).")
+real15s = input.bool(false, "15s מנתוני שניות אמיתיים (דורש Plus ומעלה)", group = grpBrk, tooltip = "כבוי = מחזור ה-15 שניות (תתי-מחזורים של 5.625 דק') מחושב מנרות דקה, כמו באינדיקטור SSMT + HSSMT — בלי צורך במנוי.")
+useFresh = input.bool(false, "חובה: לפחות שבירה אחת נוצרה בתוך חלון ה-QS", group = grpBrk, tooltip = "כבוי: שתי השבירות יכולות להיות גם מלפני ה-QS, רק שהן עדיין חיות. אישור שאחת השבירות שלו נוצרה בתוך ה-QS (המצב העיקרי) מסומן ★ בכל מקרה.")
+
+grpTr   = "סימון ובדיקה אחורה"
+trOn    = input.bool(false, "בדוק כל אישור כעסקה", group = grpTr, tooltip = "סטופ תמיד מעבר לקיצון של חלון ה-QS (הגבוה בשורט, הנמוך בלונג) — שם הנכס שלא הצליח לקחת את הרמה. יעד: R לפי גודל החלון. מחליפים מצב כניסה ומשווים את הסטטיסטיקה.")
+trMode  = input.string("נר האישור", "מתי לסמן", options = ["נר האישור", "טריגר PCP + SSMT", "סוף חלון ה-QS"], group = grpTr, tooltip = "טריגר PCP + SSMT: נר של 5m או 15m שהוא PCP ונוצר עליו גם SSMT / HSSMT — כניסה בסגירתו.\nנר האישור: הנר שבו כל התנאים התקיימו.\nסוף חלון ה-QS: סגירת הנר האחרון של החלון.")
+trg1m   = input.bool(false, "טריגר גם מנר של 1m", group = grpTr)
+rr56    = input.float(1.3, "יעד בחלון 5.6 דק' (R)", minval = 0.5, step = 0.1, group = grpTr)
+rr225   = input.float(2.0, "יעד בחלון 22.5 דק' (R)", minval = 0.5, step = 0.1, group = grpTr)
+rr90    = input.float(3.0, "יעד בחלון 90 דק' (R)", minval = 0.5, step = 0.1, group = grpTr)
+rrBig   = input.float(4.0, "יעד בחלון של סשן / יום (R)", minval = 0.5, step = 0.1, group = grpTr)
+
+grpVis  = "תצוגה"
+colBull = input.color(#26a69a, "לונג", group = grpVis)
+colBear = input.color(#ef5350, "שורט", group = grpVis)
+colQS   = input.color(#4b56ba, "QS", group = grpVis)
+showTbl = input.bool(true, "הצג טבלה", group = grpVis)
+showBg  = input.bool(true, "צבע את הרקע בזמן חלון QS", group = grpVis, tooltip = "כך רואים בדיוק איפה החלון מתחיל ונגמר.")
+keepN   = input.int(5, "כמה אישורים להשאיר על הגרף", minval = 1, maxval = 50, group = grpVis, tooltip = "רק האחרונים נשארים; הישנים יותר נמחקים. ב-Bar Replay זה מתקדם עם הנרות.")
+posIn   = input.string("ימין למעלה", "מיקום הטבלה", options = ["ימין למעלה", "ימין באמצע", "ימין למטה", "מרכז למעלה", "מרכז באמצע", "מרכז למטה", "שמאל למעלה", "שמאל באמצע", "שמאל למטה"], group = grpVis)
+szIn    = input.string("קטן", "גודל הטבלה", options = ["זעיר", "קטן", "רגיל", "גדול", "ענק"], group = grpVis)
+alertOn = input.bool(true, "התראה על אישור כניסה", group = grpVis)
+
+TZ = "America/New_York"
+
+// ═══════════════════════════════════════════════════════════════════
+// סימבולים — אותה מדיניות כמו שלושת האינדיקטורים
+// ═══════════════════════════════════════════════════════════════════
+
+bAdj = adjMode == "מיושר לגלגול" ? backadjustment.on : adjMode == "בלי יישור" ? backadjustment.off : backadjustment.inherit
+bSet = settleIn == "דלוק" ? settlement_as_close.on : settleIn == "ברירת המחדל של הסימבול" ? settlement_as_close.inherit : settlement_as_close.off
+
+chartIsMicro = str.contains(syminfo.tickerid, "MNQ") or str.contains(syminfo.tickerid, "MES") or str.contains(syminfo.tickerid, "MYM")
+useMicro     = contractSet == "מיקרו" or (contractSet == "אוטומטי" and chartIsMicro)
+sNQ = ticker.modify(useMicro ? "CME_MINI:MNQ1!"  : "CME_MINI:NQ1!",  backadjustment = bAdj, settlement_as_close = bSet)
+sES = ticker.modify(useMicro ? "CME_MINI:MES1!"  : "CME_MINI:ES1!",  backadjustment = bAdj, settlement_as_close = bSet)
+sYM = ticker.modify(useMicro ? "CBOT_MINI:MYM1!" : "CBOT_MINI:YM1!", backadjustment = bAdj, settlement_as_close = bSet)
+
+// נכס הגרף: 0 = NQ, 1 = ES, 2 = YM — ממנו נלקחים ה-True Opens
+cA = str.contains(syminfo.tickerid, "NQ") ? 0 : str.contains(syminfo.tickerid, "ES") ? 1 : 2
+
+chSec = timeframe.in_seconds()
+
+// ═══════════════════════════════════════════════════════════════════
+// SSMT — פונקציות הזיהוי, מועתקות כמו שהן מ-SSMT + HSSMT
+// ═══════════════════════════════════════════════════════════════════
+
+f_str(bNQ, bES, bYM, isBull) =>
+    s = ""
+    s := bNQ ? s + "NQ " : s
+    s := bES ? s + "ES " : s
+    s := (bYM and not isBull) ? s + "YM " : s
+    str.trim(s)
+
+// דובי: הסטייה הכי עדכנית (סשן קרוב-ביותר קודם). המחרוזת = כל מי שלקח את הגבוה
+// בפתיל (כולל NQ). הסוג = H אם יש גם סגירה מעבר תקפה, אחרת S.
+f_findBear(nqHiA, esHiA, ymHiA, nqHiCA, esHiCA, ymHiCA, nqCH, esCH, ymCH, nqCHC, esCHC, ymCHC) =>
+    bT = 0
+    bI = -1
+    bS = ""
+    n = array.size(nqHiA)
+    if n > 0
+        float nqMH  = nqCH
+        float esMH  = esCH
+        float ymMH  = ymCH
+        float nqMHc = nqCHC
+        float esMHc = esCHC
+        float ymMHc = ymCHC
+        // אין עצירה כשהגרעין הסכים על רבע מסוים: הגבוה של רבע ישן יותר (אסיה)
+        // בדרך כלל גבוה מזה של הרבע שאחריו (לונדון), ולקיחת לונדון לא אומרת
+        // שאסיה נלקחה. המקסימום המצטבר כבר מבטיח שרבע שכן נלקח לא ידווח.
+        for i = n - 1 to 0
+            if bT == 0
+                nw = nqMH > array.get(nqHiA, i)    // פתיל מעל הפתיל-הגבוה של הייחוס (SSMT)
+                ew = esMH > array.get(esHiA, i)
+                yw = ymMH > array.get(ymHiA, i)
+                nc = nqMHc > array.get(nqHiCA, i)  // סגירה מעל הסגירה-הגבוהה של הייחוס (HSSMT)
+                ec = esMHc > array.get(esHiCA, i)
+                yc = ymMHc > array.get(ymHiCA, i)
+                hValid = (nc or ec or yc) and not (nc and ec)   // סטיית סגירה: מישהו סגר מעבר, לא שני החזקים
+                wValid = (nw or ew or yw) and not (nw and ew)   // סטיית פתיל: מישהו סחף מעבר, לא שני החזקים
+                if hValid or wValid
+                    hN = hValid and nc
+                    hE = hValid and ec
+                    hY = hValid and yc
+                    hs = f_str(hN, hE, hY, false)                                        // סגר מעל הסגירה-הגבוהה → H
+                    ss = f_str(nw and not hN, ew and not hE, yw and not hY, false)       // סחף מעל הפתיל בלבד → S
+                    ss := wValid ? ss : ""
+                    lbl = hs != "" ? "H " + hs : ""
+                    lbl := ss != "" ? (lbl != "" ? lbl + " S " + ss : "S " + ss) : lbl
+                    // אין HSSMT כי הסגירות הסכימו, אבל ה-SSMT (פתיל) עדיין תקף — מסמנים זאת
+                    if not hValid and nc and ec
+                        lbl := lbl + (yc ? " (all closed)" : " (core closed)")
+                    bT := hs != "" ? 2 : 1
+                    bI := i
+                    bS := lbl
+            nqMH  := math.max(nqMH,  array.get(nqHiA, i))
+            esMH  := math.max(esMH,  array.get(esHiA, i))
+            ymMH  := math.max(ymMH,  array.get(ymHiA, i))
+            nqMHc := math.max(nqMHc, array.get(nqHiCA, i))
+            esMHc := math.max(esMHc, array.get(esHiCA, i))
+            ymMHc := math.max(ymMHc, array.get(ymHiCA, i))
+    [bT, bI, bS]
+
+// שורי: המחרוזת = מי מהחזקים (NQ/ES) לקח את הנמוך בפתיל (YM מושמט מהתווית).
+// הסוג = H אם יש סגירה מעבר תקפה. תקף עד שכל השלושה לקחו את הנמוך.
+f_findBull(nqLoA, esLoA, ymLoA, nqLoCA, esLoCA, ymLoCA, nqCL, esCL, ymCL, nqCLC, esCLC, ymCLC) =>
+    bT = 0
+    bI = -1
+    bS = ""
+    n = array.size(nqLoA)
+    if n > 0
+        float nqML  = nqCL
+        float esML  = esCL
+        float ymML  = ymCL
+        float nqMLc = nqCLC
+        float esMLc = esCLC
+        float ymMLc = ymCLC
+        // אותו עיקרון כמו בדובי: לא עוצרים ברבע שהגרעין לקח, כי הנמוך של רבע
+        // ישן יותר בדרך כלל נמוך יותר ועדיין לא נלקח. המינימום המצטבר מסנן.
+        for i = n - 1 to 0
+            if bT == 0
+                nw = nqML < array.get(nqLoA, i)    // פתיל מתחת לפתיל-הנמוך של הייחוס (SSMT)
+                ew = esML < array.get(esLoA, i)
+                yw = ymML < array.get(ymLoA, i)
+                nc = nqMLc < array.get(nqLoCA, i)  // סגירה מתחת לסגירה-הנמוכה של הייחוס (HSSMT)
+                ec = esMLc < array.get(esLoCA, i)
+                yc = ymMLc < array.get(ymLoCA, i)
+                hValid = (nc or ec) and not (nc and ec and yc)   // סטיית סגירה: חזק אחד סגר מתחת, לא כל השלושה
+                wValid = (nw or ew) and not (nw and ew and yw)   // סטיית פתיל: חזק אחד סחף מתחת, לא כל השלושה
+                if hValid or wValid
+                    hN = hValid and nc
+                    hE = hValid and ec
+                    hY = hValid and yc
+                    hs = f_str(hN, hE, hY, true)                                         // סגר מתחת לסגירה-הנמוכה → H (YM מושמט)
+                    ss = f_str(nw and not hN, ew and not hE, yw and not hY, true)        // סחף מתחת לפתיל בלבד → S (YM מושמט)
+                    ss := wValid ? ss : ""
+                    lbl = hs != "" ? "H " + hs : ""
+                    lbl := ss != "" ? (lbl != "" ? lbl + " S " + ss : "S " + ss) : lbl
+                    // כל השלושה סגרו מתחת — ה-HSSMT בטל, אבל ה-SSMT (פתיל) עדיין תקף
+                    if not hValid and nc and ec and yc
+                        lbl := lbl + " (all closed)"
+                    bT := hs != "" ? 2 : 1
+                    bI := i
+                    bS := lbl
+            nqML  := math.min(nqML,  array.get(nqLoA, i))
+            esML  := math.min(esML,  array.get(esLoA, i))
+            ymML  := math.min(ymML,  array.get(ymLoA, i))
+            nqMLc := math.min(nqMLc, array.get(nqLoCA, i))
+            esMLc := math.min(esMLc, array.get(esLoCA, i))
+            ymMLc := math.min(ymMLc, array.get(ymLoCA, i))
+    [bT, bI, bS]
+
+// ═══════════════════════════════════════════════════════════════════
+// QS — כתובת הזמן, מועתקת מ-SSMT + HSSMT
+// ═══════════════════════════════════════════════════════════════════
+
+hotKey = "," + str.replace_all(hotList, " ", "") + ","
+f_qsHot(string s) => str.length(s) == 3 and str.contains(hotKey, "," + s + ",")
+f_kOn(int k) => k == 0 ? useK0 : k == 1 ? useK1 : k == 2 ? useK2 : k == 3 ? useK3 : useK4
+// שם המחזור של החלון: שלוש הרמות, ואורך החלון
+f_kName(int k) => k == 0 ? "Month·Week·Day" : k == 1 ? "Week·Day·Session" : k == 2 ? "Day·Session·90m" : k == 3 ? "Session·90m·22.5m" : "90m·22.5m·5.6m"
+f_kLen(int k) => k == 0 ? "1D" : k == 1 ? "6H" : k == 2 ? "90m" : k == 3 ? "22.5m" : "5.6m"
+
+// שבע הספרות של רגע t, מהגבוה לנמוך: חודש ברבעון QT, שבוע בחודש, יום, סשן,
+// 90 דק', 22.5 דק', 5.625 דק'. רמה בלי מספר (שישי, שבוע מת) = ·
+// החודש נקבע לפי יום שלישי של השבוע — אותו עוגן שמשייך את השבוע לחודש.
+f_qsDigits(int t) =>
+    mOD  = hour(t, TZ) * 60 + minute(t, TZ)
+    post = mOD >= 1080
+    mFD  = post ? mOD - 1080 : mOD + 360
+    sFD  = mFD * 60 + second(t, TZ)
+    tdt  = post ? t + 86400000 : t
+    sI   = math.floor(sFD / 21600)
+    sIS  = sFD % 21600
+    mI   = math.floor(sIS / 5400)
+    sIM  = sIS % 5400
+    qI   = math.floor(sIM / 1350)
+    sqI  = math.floor((sIM % 1350) / 337.5)
+    dw   = dayofweek(tdt, TZ)
+    dN   = dw == dayofweek.monday ? 1 : dw == dayofweek.tuesday ? 2 : dw == dayofweek.wednesday ? 3 : dw == dayofweek.thursday ? 4 : 0
+    dsm  = dw == dayofweek.sunday ? 6 : dw - 2
+    mon  = tdt - dsm * 86400000
+    tue  = mon + 86400000
+    thu  = mon + 3 * 86400000
+    tM   = month(tue, TZ)
+    dead = tM != month(thu, TZ)
+    wk   = dead ? 0 : math.floor((dayofmonth(tue, TZ) - 1) / 7) + 1
+    mQ   = (tM >= 4 ? tM - 4 : tM + 8) % 3 + 1
+    str.tostring(mQ) + (wk == 0 ? "·" : str.tostring(wk)) + (dN == 0 ? "·" : str.tostring(dN)) + str.tostring(sI + 1) + str.tostring(mI + 1) + str.tostring(qI + 1) + str.tostring(sqI + 1)
+
+// ── חוזק שבירה ו-★ — מועתקים כמו שהם מ-SSMT + HSSMT, כדי שהכיוון השולט
+//    בכל מסגרת ייבחר בדיוק כמו שם: HSSMT > SSMT > SSMT (closed), אחר כך ★,
+//    ואחר כך החדשה ──
+// חוזק השבירה, כשדובית ושורית חיות במקביל וצריך לבחור את הראשית. קודם הסוג:
+//   HSSMT > SSMT > SSMT שהגרעין כבר סגר מעבר לו — (all/core closed).
+// בתוך אותו סוג — שבירה ב-QS (★ או ☆) חזקה משבירה שלא ב-QS. ורק אם גם זה
+// שווה — האחרונה שנעשתה. שבירה שהתבטלה כבר לא חיה, ולכן יוצאת לפני הכול.
+f_rank(int typ, string s, bool inQS) => (typ == 2 ? 3 : str.contains(s, "closed)") ? 1 : 2) * 2 + (inQS ? 1 : 0)
+
+// איזו שלישייה (אינדקס ההתחלה בשבע הספרות) נכתבת בתווית של כל מדרגה (רמה
+// אחת מתחת לייחוס): 0 = חודש-שבוע-יום (4H), 1 = שבוע-יום-סשן (1H),
+// 2 = יום-סשן-מיקרו (15M), 3 = סשן-מיקרו-רבע (5M), 4 = מיקרו-רבע-תת רבע (1M
+// ו-15S — מתחת לתת-רבע אין רמה)
+f_qsK(int cls) => cls <= 2 ? 4 : cls == 3 ? 3 : cls == 4 ? 2 : cls == 5 ? 1 : 0
+
+// הרמה של כל גרף בשבע הספרות (מחזור הייחוס שלו): 1 = שבוע (4H), 2 = יום (1H),
+// 3 = סשן (15M), 4 = 90 דק' (5M), 5 = 22.5 דק' (1M), 6 = 5.625 דק' (15S)
+f_qsLvl(int cls) => cls <= 1 ? 6 : cls == 2 ? 5 : cls == 3 ? 4 : cls == 4 ? 3 : cls == 5 ? 2 : 1
+
+// האם נר [t, t+dur) נכנס לחלון QS — כל שלישייה רצופה שהרמה של הגרף (f_qsLvl)
+// היא חלק ממנה: שתיים מעליה, אחת מעל ואחת מתחת, או שתיים מתחת. למשל ב-5M
+// (רמה 90 דק'): יום-סשן-90, סשן-90-22.5 ו-90-22.5-5.625.
+// החלון הוא התא שבו שלוש הספרות יוצרות רצף חם; נר שחלק ממנו בתוך החלון נחשב
+// בתוכו — כלומר החלון מעוגל החוצה לנרות שלמים (3-3-3 של 09:45–10:07:30 בגרף
+// 5 דק' = 09:45–10:10). כל חלון שנבדק ארוך מהנר, ולכן נר נוגע לכל היותר בשני
+// תאים — בתחילתו ובסופו — ומספיק לבדוק את שני הרגעים. ביומי נבדק יום הנר.
+// מוחזר גם הרצף החם; השלישייה שכתובה בתווית קודמת, ואחריה השאר מלמעלה למטה.
+f_qsAt(int cls, int t, int durMs) =>
+    bool   found = false
+    string pat   = ""
+    // (בגרסה המקורית יש כאן גם את היומי, cls 7 — כאן יש רק 1m / 5m / 15m)
+    if cls >= 1 and cls <= 6
+        d1   = f_qsDigits(t)
+        d2   = f_qsDigits(t + durMs - 1)
+        kOwn = f_qsK(cls)
+        lvl  = f_qsLvl(cls)
+        kLo  = math.max(lvl - 2, 0)
+        kHi  = math.min(lvl, 4)
+        for i = 0 to kHi - kLo + 1
+            k = i == 0 ? kOwn : kLo + i - 1
+            if not found
+                s1 = str.substring(d1, k, k + 3)
+                s2 = str.substring(d2, k, k + 3)
+                h  = f_qsHot(s1) ? s1 : f_qsHot(s2) ? s2 : ""
+                if h != ""
+                    found := true
+                    pat   := h
+    [found, pat]
+
+// ═══════════════════════════════════════════════════════════════════
+// מחזורים — 1m: רבע 22.5 → מיקרו 90 · 5m: מיקרו → סשן · 15m: סשן → יום
+// (cls 2 / 3 / 4, אותו מספור של SSMT). זרע רק ב-1m וב-5m.
+// ═══════════════════════════════════════════════════════════════════
+
+f_cyc(int cls, int t) =>
+    int  mOD  = hour(t, TZ) * 60 + minute(t, TZ)
+    bool post = mOD >= 1080
+    int  mFD  = post ? mOD - 1080 : mOD + 360
+    int  tdt  = post ? t + 86400000 : t
+    int  tdId = year(tdt, TZ) * 10000 + month(tdt, TZ) * 100 + dayofmonth(tdt, TZ)
+    int  sFD  = mFD * 60 + second(t, TZ)
+    int  seId = tdId * 10 + int(math.floor(sFD / 21600))
+    int  miId = seId * 10 + int(math.floor((sFD % 21600) / 5400))
+    int  quId = miId * 10 + int(math.floor((sFD % 5400) / 1350))
+    int  naId = quId * 10 + int(math.floor((sFD % 1350) * 2 / 675))
+    int  rId  = cls == 1 ? naId : cls == 2 ? quId : cls == 3 ? miId : seId
+    int  lId  = cls == 1 ? quId : cls == 2 ? miId : cls == 3 ? seId : tdId
+    [rId, lId]
+
+f_dir(float o, float c) => c > o ? 1 : c < o ? -1 : 0
+
+// ═══════════════════════════════════════════════════════════════════
+// מנוע למסגרת אחת: SSMT (כמו SSMT + HSSMT) ו-PSP (כמו ADI)
+// ═══════════════════════════════════════════════════════════════════
+
+type Eng
+    int    cls
+    int    lastT   = 0
+    int    refId   = 0
+    int    lifeId  = 0
+    bool   started = false
+    bool   sAct    = false
+    int    bTy     = 0
+    int    uTy     = 0
+    int    bSeq    = 0
+    int    uSeq    = 0
+    int    seqC    = 0
+    int    bRefI   = -1
+    int    uRefI   = -1
+    float  nH  = na
+    float  nL  = na
+    float  nHC = na
+    float  nLC = na
+    float  eH  = na
+    float  eL  = na
+    float  eHC = na
+    float  eLC = na
+    float  yH  = na
+    float  yL  = na
+    float  yHC = na
+    float  yLC = na
+    array<float> nHiA
+    array<float> nLoA
+    array<float> nHcA
+    array<float> nLcA
+    array<float> eHiA
+    array<float> eLoA
+    array<float> eHcA
+    array<float> eLcA
+    array<float> yHiA
+    array<float> yLoA
+    array<float> yHcA
+    array<float> yLcA
+    // PSP: שלושת הנרות האחרונים (12 ערכים לנר: לכל נכס o,h,l,c), ומחסנית
+    array<float> cv
+    array<int>   ct
+    int          cn = 0
+    array<int>   pDir
+    array<float> pNq
+    array<float> pEs
+    array<int>   pCont
+    array<int>   pSeq
+    array<int>   pBorn
+    int          bBorn = 0
+    int          uBorn = 0
+    int          trgDir = 0
+    int          trgBar = -1
+    string       bStr = ""
+    string       uStr = ""
+    bool         bQs  = false
+    bool         uQs  = false
+
+f_newEng(int cls) =>
+    Eng.new(cls, nHiA = array.new_float(), nLoA = array.new_float(), nHcA = array.new_float(), nLcA = array.new_float(), eHiA = array.new_float(), eLoA = array.new_float(), eHcA = array.new_float(), eLcA = array.new_float(), yHiA = array.new_float(), yLoA = array.new_float(), yHcA = array.new_float(), yLcA = array.new_float(), cv = array.new_float(36, na), ct = array.new_int(3, 0), pDir = array.new_int(), pNq = array.new_float(), pEs = array.new_float(), pCont = array.new_int(), pSeq = array.new_int(), pBorn = array.new_int())
+
+f_cv(Eng e, int j, int a, int f) => array.get(e.cv, j * 12 + a * 4 + f)
+// אורך נר של המסגרת — שבירה "נולדת" בסגירת הנר שיצר אותה
+f_clsMs(int cls) => cls == 1 ? (real15s ? 15000 : 60000) : cls == 2 ? 60000 : cls == 3 ? 300000 : 900000
+
+// צעד אחד = נר סגור אחד של המסגרת
+f_step(Eng e, int t, float no, float nh, float nl, float nc, float eo, float eh, float el, float ec, float yo, float yh, float yl, float yc) =>
+    if not na(t) and t != e.lastT and not na(nc) and not na(ec) and not na(yc)
+        e.lastT := t
+        [rId, lId] = f_cyc(e.cls, t)
+        bool kL      = e.cls != 4
+        bool newRef  = e.started and rId != e.refId
+        bool newLife = e.started and lId != e.lifeId
+        bool sPush   = newRef and newLife and kL and not na(e.nH)
+        bool sDrop   = newRef and (not newLife) and e.sAct
+
+        // ── SSMT: רמות לכל תת-מחזור שנגמר במיכל ──
+        if newRef
+            if newLife
+                array.clear(e.nHiA)
+                array.clear(e.nLoA)
+                array.clear(e.nHcA)
+                array.clear(e.nLcA)
+                array.clear(e.eHiA)
+                array.clear(e.eLoA)
+                array.clear(e.eHcA)
+                array.clear(e.eLcA)
+                array.clear(e.yHiA)
+                array.clear(e.yLoA)
+                array.clear(e.yHcA)
+                array.clear(e.yLcA)
+            if ((not newLife) or kL) and not na(e.nH)
+                array.push(e.nHiA, e.nH)
+                array.push(e.nLoA, e.nL)
+                array.push(e.nHcA, e.nHC)
+                array.push(e.nLcA, e.nLC)
+                array.push(e.eHiA, e.eH)
+                array.push(e.eLoA, e.eL)
+                array.push(e.eHcA, e.eHC)
+                array.push(e.eLcA, e.eLC)
+                array.push(e.yHiA, e.yH)
+                array.push(e.yLoA, e.yL)
+                array.push(e.yHcA, e.yHC)
+                array.push(e.yLcA, e.yLC)
+            if sDrop and array.size(e.nHiA) > 0
+                array.remove(e.nHiA, 0)
+                array.remove(e.nLoA, 0)
+                array.remove(e.nHcA, 0)
+                array.remove(e.nLcA, 0)
+                array.remove(e.eHiA, 0)
+                array.remove(e.eLoA, 0)
+                array.remove(e.eHcA, 0)
+                array.remove(e.eLcA, 0)
+                array.remove(e.yHiA, 0)
+                array.remove(e.yLoA, 0)
+                array.remove(e.yHcA, 0)
+                array.remove(e.yLcA, 0)
+            e.nH := nh
+            e.nL := nl
+            e.nHC := nc
+            e.nLC := nc
+            e.eH := eh
+            e.eL := el
+            e.eHC := ec
+            e.eLC := ec
+            e.yH := yh
+            e.yL := yl
+            e.yHC := yc
+            e.yLC := yc
+        else
+            e.nH  := na(e.nH)  or nh > e.nH  ? nh : e.nH
+            e.nL  := na(e.nL)  or nl < e.nL  ? nl : e.nL
+            e.nHC := na(e.nHC) or nc > e.nHC ? nc : e.nHC
+            e.nLC := na(e.nLC) or nc < e.nLC ? nc : e.nLC
+            e.eH  := na(e.eH)  or eh > e.eH  ? eh : e.eH
+            e.eL  := na(e.eL)  or el < e.eL  ? el : e.eL
+            e.eHC := na(e.eHC) or ec > e.eHC ? ec : e.eHC
+            e.eLC := na(e.eLC) or ec < e.eLC ? ec : e.eLC
+            e.yH  := na(e.yH)  or yh > e.yH  ? yh : e.yH
+            e.yL  := na(e.yL)  or yl < e.yL  ? yl : e.yL
+            e.yHC := na(e.yHC) or yc > e.yHC ? yc : e.yHC
+            e.yLC := na(e.yLC) or yc < e.yLC ? yc : e.yLC
+        if newRef and newLife
+            e.sAct := sPush
+        else if newRef
+            e.sAct := false
+        e.started := true
+        e.refId   := rId
+        e.lifeId  := lId
+        if newLife
+            e.bTy   := 0
+            e.uTy   := 0
+            e.bRefI := -1
+            e.uRefI := -1
+        if sDrop
+            e.bRefI := e.bRefI > 0 ? e.bRefI - 1 : -1
+            e.uRefI := e.uRefI > 0 ? e.uRefI - 1 : -1
+        int    nbT = 0
+        int    nbI = -1
+        int    nuT = 0
+        int    nuI = -1
+        string nbS = ""
+        string nuS = ""
+        if useSsmt and array.size(e.nHiA) > 0
+            [xbT, xbI, xbS] = f_findBear(e.nHiA, e.eHiA, e.yHiA, e.nHcA, e.eHcA, e.yHcA, e.nH, e.eH, e.yH, e.nHC, e.eHC, e.yHC)
+            [xuT, xuI, xuS] = f_findBull(e.nLoA, e.eLoA, e.yLoA, e.nLcA, e.eLcA, e.yLcA, e.nL, e.eL, e.yL, e.nLC, e.eLC, e.yLC)
+            nbT := xbT
+            nbI := xbI
+            nuT := xuT
+            nuI := xuI
+            nbS := xbS
+            nuS := xuS
+        int oBS = e.bSeq
+        int oUS = e.uSeq
+        int oBT = e.bTy
+        int oUT = e.uTy
+        if nbT != 0
+            if e.bTy == 0 or nbI != e.bRefI
+                e.seqC := e.seqC + 1
+                e.bSeq := e.seqC
+                e.bBorn := t + f_clsMs(e.cls)
+                [qb, pb] = f_qsAt(e.cls, t, f_clsMs(e.cls))
+                e.bQs := qb
+            e.bRefI := nbI
+            e.bTy   := nbT
+            e.bStr  := nbS
+        else
+            e.bTy   := 0
+            e.bRefI := -1
+        if nuT != 0
+            if e.uTy == 0 or nuI != e.uRefI
+                e.seqC := e.seqC + 1
+                e.uSeq := e.seqC
+                e.uBorn := t + f_clsMs(e.cls)
+                [qu, pu] = f_qsAt(e.cls, t, f_clsMs(e.cls))
+                e.uQs := qu
+            e.uRefI := nuI
+            e.uTy   := nuT
+            e.uStr  := nuS
+        else
+            e.uTy   := 0
+            e.uRefI := -1
+
+        // ── PSP: קודם הנר הזה לוקח רמות (פתיל), NQ ו-ES מכריעים, YM לא ──
+        if array.size(e.pDir) > 0
+            for i = array.size(e.pDir) - 1 to 0
+                int   pd = array.get(e.pDir, i)
+                float lq = array.get(e.pNq, i)
+                float ls = array.get(e.pEs, i)
+                if not na(lq) and (pd == -1 ? nh > lq : nl < lq)
+                    array.set(e.pNq, i, na)
+                if not na(ls) and (pd == -1 ? eh > ls : el < ls)
+                    array.set(e.pEs, i, na)
+                if (na(array.get(e.pNq, i)) and na(array.get(e.pEs, i))) or array.get(e.pCont, i) != lId
+                    array.remove(e.pDir, i)
+                    array.remove(e.pNq, i)
+                    array.remove(e.pEs, i)
+                    array.remove(e.pCont, i)
+                    array.remove(e.pSeq, i)
+                    array.remove(e.pBorn, i)
+        // ── הזזת שלושת הנרות: 2 ← 1 ← 0 ← הנר החדש ──
+        for j = 2 to 1
+            for x = 0 to 11
+                array.set(e.cv, j * 12 + x, array.get(e.cv, (j - 1) * 12 + x))
+        array.set(e.ct, 2, array.get(e.ct, 1))
+        array.set(e.ct, 1, array.get(e.ct, 0))
+        array.set(e.ct, 0, t)
+        array.set(e.cv, 0, no)
+        array.set(e.cv, 1, nh)
+        array.set(e.cv, 2, nl)
+        array.set(e.cv, 3, nc)
+        array.set(e.cv, 4, eo)
+        array.set(e.cv, 5, eh)
+        array.set(e.cv, 6, el)
+        array.set(e.cv, 7, ec)
+        array.set(e.cv, 8, yo)
+        array.set(e.cv, 9, yh)
+        array.set(e.cv, 10, yl)
+        array.set(e.cv, 11, yc)
+        e.cn := math.min(e.cn + 1, 3)
+        // ── טריגר: הנר הזה הוא PCP, ובאותו נר נוצר (או שודרג ל-H) SSMT ──
+        bool nwB  = e.bTy != 0 and (e.bSeq != oBS or (e.bTy == 2 and oBT == 1))
+        bool nwU  = e.uTy != 0 and (e.uSeq != oUS or (e.uTy == 2 and oUT == 1))
+        int  d0N  = f_dir(no, nc)
+        int  d0E  = f_dir(eo, ec)
+        int  d0Y  = f_dir(yo, yc)
+        bool pcp0 = d0N != d0E or (d0Y > 0 and (d0E < 0 or d0N < 0))
+        if pcp0 and (nwB or nwU)
+            e.trgDir := nwB ? -1 : 1
+            e.trgBar := bar_index
+        // ── PSP חדש על הנר האמצעי: PCP + סווינג של 3 נרות ──
+        if usePsp and e.cls != 1 and e.cn == 3
+            int  dN   = f_dir(f_cv(e, 1, 0, 0), f_cv(e, 1, 0, 3))
+            int  dE   = f_dir(f_cv(e, 1, 1, 0), f_cv(e, 1, 1, 3))
+            int  dY   = f_dir(f_cv(e, 1, 2, 0), f_cv(e, 1, 2, 3))
+            bool divP = dN != dE
+            bool divY = dY > 0 and (dE < 0 or dN < 0)
+            if divP or divY
+                bool hiN = f_cv(e, 1, 0, 1) > f_cv(e, 2, 0, 1) and f_cv(e, 1, 0, 1) > f_cv(e, 0, 0, 1)
+                bool hiE = f_cv(e, 1, 1, 1) > f_cv(e, 2, 1, 1) and f_cv(e, 1, 1, 1) > f_cv(e, 0, 1, 1)
+                bool hiY = divY and f_cv(e, 1, 2, 1) > f_cv(e, 2, 2, 1) and f_cv(e, 1, 2, 1) > f_cv(e, 0, 2, 1)
+                bool loN = f_cv(e, 1, 0, 2) < f_cv(e, 2, 0, 2) and f_cv(e, 1, 0, 2) < f_cv(e, 0, 0, 2)
+                bool loE = f_cv(e, 1, 1, 2) < f_cv(e, 2, 1, 2) and f_cv(e, 1, 1, 2) < f_cv(e, 0, 1, 2)
+                bool loY = divY and f_cv(e, 1, 2, 2) < f_cv(e, 2, 2, 2) and f_cv(e, 1, 2, 2) < f_cv(e, 0, 2, 2)
+                int  nHi = (hiN ? 1 : 0) + (hiE ? 1 : 0) + (hiY ? 1 : 0)
+                int  nLo = (loN ? 1 : 0) + (loE ? 1 : 0) + (loY ? 1 : 0)
+                if nHi > 0 or nLo > 0
+                    [rM, lM] = f_cyc(e.cls, array.get(e.ct, 1))
+                    if lM == lId
+                        bool bear = nHi >= nLo
+                        e.seqC := e.seqC + 1
+                        array.unshift(e.pDir, bear ? -1 : 1)
+                        array.unshift(e.pNq, bear ? f_cv(e, 1, 0, 1) : f_cv(e, 1, 0, 2))
+                        array.unshift(e.pEs, bear ? f_cv(e, 1, 1, 1) : f_cv(e, 1, 1, 2))
+                        array.unshift(e.pCont, lM)
+                        array.unshift(e.pSeq, e.seqC)
+                        array.unshift(e.pBorn, t + f_clsMs(e.cls))
+                        while array.size(e.pDir) > 5
+                            array.pop(e.pDir)
+                            array.pop(e.pNq)
+                            array.pop(e.pEs)
+                            array.pop(e.pCont)
+                            array.pop(e.pSeq)
+                            array.pop(e.pBorn)
+    e.lastT
+
+// ═══════════════════════════════════════════════════════════════════
+// True Opens — מנרות דקה של הגרף עצמו (כמו Sav FX): הנר הראשון שמתחיל
+// ברגע הזה או אחריו. ברבע הראשון של מיכל, לפני שהפתיחה החדשה הודפסה,
+// נשארת הפתיחה של אותו מיכל מהמחזור הקודם.
+// ═══════════════════════════════════════════════════════════════════
+
+type TOs
+    int   lastT = 0
+    float pNcO  = na
+    float pMcO  = na
+    int   iMcO  = na
+    float p90O  = na
+    int   i90O  = na
+    float pDO   = na
+    int   iDO   = na
+    float pWO   = na
+    int   iWO   = na
+
+f_toStep(TOs o, int t, float op) =>
+    if not na(t) and not na(op) and t != o.lastT
+        int   tdC    = t + (hour(t, TZ) >= 18 ? 86400000 : 0)
+        int   tdMid  = timestamp(TZ, year(tdC, TZ), month(tdC, TZ), dayofmonth(tdC, TZ), 0, 0, 0)
+        int   pNoon  = tdMid - 43200000
+        int   dStart = timestamp(TZ, year(pNoon, TZ), month(pNoon, TZ), dayofmonth(pNoon, TZ), 18, 0, 0)
+        float el     = t - dStart
+        int   sStart = dStart + int(math.floor(el / 21600000.0)) * 21600000
+        int   mStart = dStart + int(math.floor(el / 5400000.0)) * 5400000
+        int   qStart = dStart + int(math.floor(el / 1350000.0)) * 1350000
+        int   tNcO   = qStart + 337500
+        int   tDO    = tdMid
+        int   t90O   = sStart + 5400000
+        int   tMcO   = mStart + 1350000
+        int   dw     = dayofweek(tdC, TZ)
+        int   dsm    = dw == dayofweek.sunday ? 6 : dw - 2
+        int   mNoon  = tdMid + 43200000 - dsm * 86400000
+        int   tWO    = timestamp(TZ, year(mNoon, TZ), month(mNoon, TZ), dayofmonth(mNoon, TZ), 18, 0, 0)
+        int   pt     = o.lastT
+        if t >= tWO and pt != 0 and pt < tWO
+            o.pWO := op
+            o.iWO := tWO
+        if t >= tNcO and pt != 0 and pt < tNcO
+            o.pNcO := op
+        if t >= tMcO and pt != 0 and pt < tMcO
+            o.pMcO := op
+            o.iMcO := mStart
+        if t >= t90O and pt != 0 and pt < t90O
+            o.p90O := op
+            o.i90O := sStart
+        if t >= tDO and pt != 0 and pt < tDO
+            o.pDO := op
+            o.iDO := dStart
+        o.lastT := t
+    o.lastT
+
+// ═══════════════════════════════════════════════════════════════════
+// נתונים: לכל מסגרת — נרות סגורים מ-request.security כשהיא מעל הגרף או
+// שווה לו, ותת-נרות מ-request.security_lower_tf כשהיא מתחתיו. בקשה שלא
+// בשימוש מקבלת את מסגרת הגרף ("12M" למטה), כך שאינה מושכת נתונים חדשים.
+// ═══════════════════════════════════════════════════════════════════
+
+loS  = chSec > 15
+lo1  = chSec > 60
+lo5  = chSec > 300
+lo15 = chSec > 900
+hS  = loS or not use15s or not real15s ? timeframe.period : "15S"
+h1  = lo1  ? timeframe.period : "1"
+h5  = lo5  ? timeframe.period : "5"
+h15 = lo15 ? timeframe.period : "15"
+lS  = loS and use15s and real15s ? "15S" : "12M"
+l1  = lo1  ? "1"  : "12M"
+l5  = lo5  ? "5"  : "12M"
+l15 = lo15 ? "15" : "12M"
+lkh = barmerge.lookahead_off
+
+[aSt, aSno, aSnh, aSnl, aSnc] = request.security(sNQ, hS, [time[1], open[1], high[1], low[1], close[1]], lookahead = lkh)
+[aSeo, aSeh, aSel, aSec]      = request.security(sES, hS, [open[1], high[1], low[1], close[1]], lookahead = lkh)
+[aSyo, aSyh, aSyl, aSyc]      = request.security(sYM, hS, [open[1], high[1], low[1], close[1]], lookahead = lkh)
+[a1t, a1no, a1nh, a1nl, a1nc] = request.security(sNQ, h1, [time[1], open[1], high[1], low[1], close[1]], lookahead = lkh)
+[a1eo, a1eh, a1el, a1ec]      = request.security(sES, h1, [open[1], high[1], low[1], close[1]], lookahead = lkh)
+[a1yo, a1yh, a1yl, a1yc]      = request.security(sYM, h1, [open[1], high[1], low[1], close[1]], lookahead = lkh)
+[a5t, a5no, a5nh, a5nl, a5nc] = request.security(sNQ, h5, [time[1], open[1], high[1], low[1], close[1]], lookahead = lkh)
+[a5eo, a5eh, a5el, a5ec]      = request.security(sES, h5, [open[1], high[1], low[1], close[1]], lookahead = lkh)
+[a5yo, a5yh, a5yl, a5yc]      = request.security(sYM, h5, [open[1], high[1], low[1], close[1]], lookahead = lkh)
+[aFt, aFno, aFnh, aFnl, aFnc] = request.security(sNQ, h15, [time[1], open[1], high[1], low[1], close[1]], lookahead = lkh)
+[aFeo, aFeh, aFel, aFec]      = request.security(sES, h15, [open[1], high[1], low[1], close[1]], lookahead = lkh)
+[aFyo, aFyh, aFyl, aFyc]      = request.security(sYM, h15, [open[1], high[1], low[1], close[1]], lookahead = lkh)
+
+[qSnt, qSno, qSnh, qSnl, qSnc] = request.security_lower_tf(sNQ, lS, [time, open, high, low, close], ignore_invalid_timeframe = true)
+[qSet, qSeo, qSeh, qSel, qSec] = request.security_lower_tf(sES, lS, [time, open, high, low, close], ignore_invalid_timeframe = true)
+[qSyt, qSyo, qSyh, qSyl, qSyc] = request.security_lower_tf(sYM, lS, [time, open, high, low, close], ignore_invalid_timeframe = true)
+[b1nt, b1no, b1nh, b1nl, b1nc] = request.security_lower_tf(sNQ, l1, [time, open, high, low, close], ignore_invalid_timeframe = true)
+[b1et, b1eo, b1eh, b1el, b1ec] = request.security_lower_tf(sES, l1, [time, open, high, low, close], ignore_invalid_timeframe = true)
+[b1yt, b1yo, b1yh, b1yl, b1yc] = request.security_lower_tf(sYM, l1, [time, open, high, low, close], ignore_invalid_timeframe = true)
+[b5nt, b5no, b5nh, b5nl, b5nc] = request.security_lower_tf(sNQ, l5, [time, open, high, low, close], ignore_invalid_timeframe = true)
+[b5et, b5eo, b5eh, b5el, b5ec] = request.security_lower_tf(sES, l5, [time, open, high, low, close], ignore_invalid_timeframe = true)
+[b5yt, b5yo, b5yh, b5yl, b5yc] = request.security_lower_tf(sYM, l5, [time, open, high, low, close], ignore_invalid_timeframe = true)
+[bFnt, bFno, bFnh, bFnl, bFnc] = request.security_lower_tf(sNQ, l15, [time, open, high, low, close], ignore_invalid_timeframe = true)
+[bFet, bFeo, bFeh, bFel, bFec] = request.security_lower_tf(sES, l15, [time, open, high, low, close], ignore_invalid_timeframe = true)
+[bFyt, bFyo, bFyh, bFyl, bFyc] = request.security_lower_tf(sYM, l15, [time, open, high, low, close], ignore_invalid_timeframe = true)
+
+// סמן רץ: מחזיר את האינדקס האחרון במערך הזמנים שזמנו <= t, החל מ-from.
+// המערכים ממוינים ולכן הסמן רק מתקדם — מעבר אחד על כל תת-הנרות.
+// חשוב: ב-Pine האופרטור and לא מובטח כ-short-circuit, ולכן אסור לכתוב
+// while k < n - 1 and array.get(ta, k + 1) <= t — ה-array.get יורץ גם
+// כשהתנאי הראשון שקרי ויזרוק Index out of range. לכן שני if מקוננים.
+f_cur(array<int> ta, int t, int from) =>
+    n = array.size(ta)
+    k = from < 0 ? 0 : from > n - 1 ? n - 1 : from
+    if n > 0
+        bool go = true
+        while go
+            if k < n - 1
+                if array.get(ta, k + 1) <= t
+                    k := k + 1
+                else
+                    go := false
+            else
+                go := false
+    k
+
+// גודל של מערך שעלול להיות na (מסגרת לא חוקית) — בלי להתרסק
+f_aszF(array<float> a) =>
+    int n = -1
+    if not na(a)
+        n := array.size(a)
+    n
+
+f_aszI(array<int> a) =>
+    int n = -1
+    if not na(a)
+        n := array.size(a)
+    n
+
+// הזנת תת-נרות: מזווגים לפי זמן (NQ הוא המפתח). על נר גרף חי לא מזינים את
+// תת-הנר האחרון — הוא עוד לא נסגר.
+f_feedLtf(Eng e, array<int> nt, array<float> no, array<float> nh, array<float> nl, array<float> nc, array<int> et, array<float> eo, array<float> eh, array<float> el, array<float> ec, array<int> yt, array<float> yo, array<float> yh, array<float> yl, array<float> yc) =>
+    int szN = f_aszF(nc)
+    int szE = f_aszF(ec)
+    int szY = f_aszF(yc)
+    int szT = f_aszI(nt)
+    if szN > 0 and szT == szN and szE > 0 and szY > 0 and f_aszI(et) == szE and f_aszI(yt) == szY
+        int last = barstate.isconfirmed ? szN - 1 : szN - 2
+        if last >= 0
+            int ke = 0
+            int ky = 0
+            for j = 0 to last
+                int tj = array.get(nt, j)
+                ke := f_cur(et, tj, ke)
+                ky := f_cur(yt, tj, ky)
+                if array.get(et, ke) <= tj and array.get(yt, ky) <= tj
+                    f_step(e, tj, array.get(no, j), array.get(nh, j), array.get(nl, j), array.get(nc, j), array.get(eo, ke), array.get(eh, ke), array.get(el, ke), array.get(ec, ke), array.get(yo, ky), array.get(yh, ky), array.get(yl, ky), array.get(yc, ky))
+    e.lastT
+
+var Eng eS  = f_newEng(1)
+var Eng e1  = f_newEng(2)
+var Eng e5  = f_newEng(3)
+var Eng e15 = f_newEng(4)
+var TOs tos = TOs.new()
+
+if use15s and not real15s
+    if lo1
+        f_feedLtf(eS, b1nt, b1no, b1nh, b1nl, b1nc, b1et, b1eo, b1eh, b1el, b1ec, b1yt, b1yo, b1yh, b1yl, b1yc)
+    else
+        f_step(eS, a1t, a1no, a1nh, a1nl, a1nc, a1eo, a1eh, a1el, a1ec, a1yo, a1yh, a1yl, a1yc)
+else if use15s and chSec >= 15
+    if loS
+        f_feedLtf(eS, qSnt, qSno, qSnh, qSnl, qSnc, qSet, qSeo, qSeh, qSel, qSec, qSyt, qSyo, qSyh, qSyl, qSyc)
+    else
+        f_step(eS, aSt, aSno, aSnh, aSnl, aSnc, aSeo, aSeh, aSel, aSec, aSyo, aSyh, aSyl, aSyc)
+if lo1
+    f_feedLtf(e1, b1nt, b1no, b1nh, b1nl, b1nc, b1et, b1eo, b1eh, b1el, b1ec, b1yt, b1yo, b1yh, b1yl, b1yc)
+else
+    f_step(e1, a1t, a1no, a1nh, a1nl, a1nc, a1eo, a1eh, a1el, a1ec, a1yo, a1yh, a1yl, a1yc)
+if lo5
+    f_feedLtf(e5, b5nt, b5no, b5nh, b5nl, b5nc, b5et, b5eo, b5eh, b5el, b5ec, b5yt, b5yo, b5yh, b5yl, b5yc)
+else
+    f_step(e5, a5t, a5no, a5nh, a5nl, a5nc, a5eo, a5eh, a5el, a5ec, a5yo, a5yh, a5yl, a5yc)
+if lo15
+    f_feedLtf(e15, bFnt, bFno, bFnh, bFnl, bFnc, bFet, bFeo, bFeh, bFel, bFec, bFyt, bFyo, bFyh, bFyl, bFyc)
+else
+    f_step(e15, aFt, aFno, aFnh, aFnl, aFnc, aFeo, aFeh, aFel, aFec, aFyo, aFyh, aFyl, aFyc)
+
+// True Opens: בגרף דקה — מהגרף עצמו; מעליו — מתת-נרות דקה של הסימבול של הגרף,
+// עם אותו יישור לגלגול כמו הגרף (B-ADJ), כדי שישבו על אותם מחירים של הנרות
+[gTt, gTo] = request.security_lower_tf(syminfo.tickerid, l1, [time, open], ignore_invalid_timeframe = true)
+if lo1
+    array<int>   tt = gTt
+    array<float> tOp = gTo
+    int szt = f_aszI(tt)
+    if szt > 0 and f_aszF(tOp) == szt
+        for j = 0 to szt - 1
+            f_toStep(tos, array.get(tt, j), array.get(tOp, j))
+else
+    f_toStep(tos, time, open)
+
+// ═══════════════════════════════════════════════════════════════════
+// שבירה חיה בכל מסגרת, וכיוון שולט
+//
+// SSMT חדש יותר בכיוון ההפוך מרדים את הישן (באותה מסגרת). PSP לא מרדים
+// SSMT; אם אין SSMT חי, ה-PSP החדש ביותר קובע. מנוע שמעל הגרף צועד רק
+// כשנסגר נר שלו, ולכן שבירה שהמיכל שלה נגמר נחתכת כאן מול השעון של הגרף.
+// ═══════════════════════════════════════════════════════════════════
+
+f_pspSeq(Eng e, int d) =>
+    int sq = -1
+    int bn = 0
+    if array.size(e.pDir) > 0
+        for i = 0 to array.size(e.pDir) - 1
+            if sq == -1 and array.get(e.pDir, i) == d
+                sq := array.get(e.pSeq, i)
+                bn := array.get(e.pBorn, i)
+    [sq, bn]
+
+// השבירות של המסגרת בכיוון d: [סוג ה-SSMT (0 / 1 = SSMT / 2 = HSSMT), האם יש PSP,
+// ומזהה לכל אחת — "5mS12" / "5mP7" — כדי לדעת אם זו אותה שבירה או חדשה]
+f_leg(Eng e, int d, string nm) =>
+    [rN, lN] = f_cyc(e.cls, time)
+    bool fresh = e.started and e.lifeId == lN
+    int  sB  = fresh and e.bTy != 0 ? e.bSeq : -1
+    int  sU  = fresh and e.uTy != 0 ? e.uSeq : -1
+    [pB0, nB] = f_pspSeq(e, -1)
+    [pU0, nU] = f_pspSeq(e, 1)
+    int  pB  = fresh ? pB0 : -1
+    int  pU  = fresh ? pU0 : -1
+    // הכיוון השולט — כמו ב-SSMT + HSSMT: כששני הכיוונים חיים, החזקה (סוג, ★)
+    // ובשוויון החדשה. בלי SSMT חי — ה-PSP החדש ביותר.
+    int  rB  = sB >= 0 ? f_rank(e.bTy, e.bStr, e.bQs) : -1
+    int  rU  = sU >= 0 ? f_rank(e.uTy, e.uStr, e.uQs) : -1
+    int  dom = sB >= 0 or sU >= 0 ? (rB != rU ? (rB > rU ? -1 : 1) : (sB > sU ? -1 : 1)) : (pB >= 0 or pU >= 0 ? (pB > pU ? -1 : 1) : 0)
+    int    ssT = 0
+    bool   psp = false
+    string kS  = ""
+    string kP  = ""
+    int    tSb  = 0
+    int    tPb  = 0
+    if dom == d
+        int ss = d == -1 ? sB : sU
+        int pq = d == -1 ? pB : pU
+        ssT := ss >= 0 ? (d == -1 ? e.bTy : e.uTy) : 0
+        psp := pq >= 0
+        kS  := ss >= 0 ? nm + "S" + str.tostring(ss) : ""
+        kP  := pq >= 0 ? nm + "P" + str.tostring(pq) : ""
+        tSb  := d == -1 ? e.bBorn : e.uBorn
+        tPb  := d == -1 ? nB : nU
+    [ssT, psp, kS, kP, tSb, tPb]
+
+// רגל אחת של המסגרת (לזוג בין מסגרות): SSMT קודם, אחרת PSP
+f_one(int ss, bool ps) => ss > 0 ? ss : ps ? 3 : 0
+f_legName(int g) => g == 2 ? "HSSMT" : g == 1 ? "SSMT" : g == 3 ? "PSP" : "—"
+
+[sBs, pBs, kSBs, kPBs, tSBs, tPBs]         = f_leg(eS, -1, "15s")
+[sUs, pUs, kSUs, kPUs, tSUs, tPUs]         = f_leg(eS, 1, "15s")
+[sB1, pB1, kSB1, kPB1, tSB1, tPB1]         = f_leg(e1, -1, "1m")
+[sU1, pU1, kSU1, kPU1, tSU1, tPU1]         = f_leg(e1, 1, "1m")
+[sB5, pB5, kSB5, kPB5, tSB5, tPB5]         = f_leg(e5, -1, "5m")
+[sU5, pU5, kSU5, kPU5, tSU5, tPU5]         = f_leg(e5, 1, "5m")
+[sB15, pB15, kSB15, kPB15, tSB15, tPB15]   = f_leg(e15, -1, "15m")
+[sU15, pU15, kSU15, kPU15, tSU15, tPU15]   = f_leg(e15, 1, "15m")
+
+// מזהה הרגל לזוג בין מסגרות (SSMT קודם), ומזהה לזוג באותה מסגרת
+f_k1(string kS, string kP) => kS != "" ? kS : kP
+f_k2(string kS, string kP) => kS + "+" + kP
+// כל השבירות שחיות עכשיו בכיוון — כדי לבדוק אם אישור עדיין תקף
+f_live(string a, string b, string c, string d, string e, string f) => "|" + a + "|" + b + "|" + c + "|" + d + "|" + e + "|" + f + "|"
+liveS = f_live(kSB15, kPB15, kSB5, kPB5, kSB1, kPB1) + kSBs + "|"
+liveL = f_live(kSU15, kPU15, kSU5, kPU5, kSU1, kPU1) + kSUs + "|"
+// "5mS12" → "5mS": המסגרת והסוג, בלי המזהה
+f_cl(string k) => k == "" ? "" : str.contains(k, "S") ? str.substring(k, 0, str.pos(k, "S") + 1) : str.substring(k, 0, str.pos(k, "P") + 1)
+// אישור חי כל עוד בכל אחת מהמסגרות שלו יש עדיין שבירה חיה מאותו סוג ובאותו
+// כיוון. לא חייבת להיות אותה שבירה בדיוק — SSMT שעבר לרמה אחרת, או PSP חדש
+// שנוצר ליד הקודם, לא מבטלים את האישור. מה שמבטל: אין יותר שבירה כזו, או
+// ששבירה הפוכה חזקה יותר השתלטה על המסגרת.
+f_alive(string key, string live) =>
+    bool ok = key != ""
+    for part in str.split(key, "+")
+        string c = f_cl(part)
+        if c != "" and not str.contains(live, "|" + c)
+            ok := false
+    ok
+lgBs  = sBs
+lgUs  = sUs
+lgB1  = f_one(sB1, pB1)
+lgU1  = f_one(sU1, pU1)
+lgB5  = f_one(sB5, pB5)
+lgU5  = f_one(sU5, pU5)
+lgB15 = f_one(sB15, pB15)
+lgU15 = f_one(sU15, pU15)
+
+// ═══════════════════════════════════════════════════════════════════
+// חלון QS על הנר הנוכחי — מהרמה הגבוהה לנמוכה, מבין החלונות הדלוקים. כש-333
+// פעיל על כל ה-22.5 דקות, זה חלון ה-22.5 — גם אם בתוכו יש גם 5.6 חם.
+// ═══════════════════════════════════════════════════════════════════
+
+durMs = chSec * 1000
+dA = f_qsDigits(time)
+dB = f_qsDigits(time + durMs - 1)
+string qsPat = ""
+int    qsK   = -1
+string qsKey = ""
+string qsD   = ""
+for k = 0 to 4
+    if qsPat == "" and f_kOn(k)
+        string s1 = str.substring(dA, k, k + 3)
+        string s2 = str.substring(dB, k, k + 3)
+        if f_qsHot(s1)
+            qsPat := s1
+            qsK   := k
+            qsKey := str.substring(dA, 0, k + 3)
+            qsD   := dA
+        else if f_qsHot(s2)
+            qsPat := s2
+            qsK   := k
+            qsKey := str.substring(dB, 0, k + 3)
+            qsD   := dB
+qsOn = qsPat != ""
+// רצף של ארבע רמות: כשגם השלישייה שמתחת (או שמעל) חמה באותו רגע, למשל
+// 3333 = סשן · 90 · 22.5 · 5.6. זה רק לתצוגה — החלון עצמו לא משתנה.
+string qsShow = qsPat
+if qsOn
+    int a0 = qsK
+    int a1 = qsK + 3
+    if qsK + 1 <= 4 and f_qsHot(str.substring(qsD, qsK + 1, qsK + 4))
+        a1 := qsK + 4
+    if qsK - 1 >= 0 and f_kOn(qsK - 1) and f_qsHot(str.substring(qsD, qsK - 1, qsK + 2))
+        a0 := qsK - 1
+    qsShow := str.substring(qsD, a0, a1)
+// מזהה החלון — כדי שתגית ואישור יהיו פעם אחת לכל חלון
+[qR, qL] = f_cyc(4, time)
+qsId = qsOn ? str.tostring(qL) + ":" + str.tostring(qsK) + ":" + qsKey : ""
+
+// ── החלון: מתי התחיל, והקיצונים שלו (בשביל הסטופ) ──
+var string wId   = ""
+var int    wStart = 0
+var float  wHi   = na
+var float  wLo   = na
+var int    wHiB  = 0
+var int    wLoB  = 0
+var float  eHi   = na    // החלון שנגמר עכשיו
+var float  eLo   = na
+var int    eHiB  = 0
+var int    eLoB  = 0
+var string eId   = ""
+bool wEnded = false
+if qsId != wId
+    if wId != ""
+        eHi    := wHi
+        eLo    := wLo
+        eHiB   := wHiB
+        eLoB   := wLoB
+        eId    := wId
+        wEnded := true
+    wId := qsId
+    if qsOn
+        wStart := time
+        wHi    := high
+        wLo    := low
+        wHiB   := bar_index
+        wLoB   := bar_index
+else if qsOn
+    if high > wHi
+        wHi  := high
+        wHiB := bar_index
+    if low < wLo
+        wLo  := low
+        wLoB := bar_index
+
+// שבירות טריות — נולדו בתוך החלון הנוכחי
+f_fr(string k, int t) => k != "" and t > wStart ? k : ""
+freshS = f_live(f_fr(kSB15, tSB15), f_fr(kPB15, tPB15), f_fr(kSB5, tSB5), f_fr(kPB5, tPB5), f_fr(kSB1, tSB1), f_fr(kPB1, tPB1)) + f_fr(kSBs, tSBs) + "|"
+freshL = f_live(f_fr(kSU15, tSU15), f_fr(kPU15, tPU15), f_fr(kSU5, tSU5), f_fr(kPU5, tPU5), f_fr(kSU1, tSU1), f_fr(kPU1, tPU1)) + f_fr(kSUs, tSUs) + "|"
+
+// ═══════════════════════════════════════════════════════════════════
+// אישור כניסה
+// ═══════════════════════════════════════════════════════════════════
+
+toD  = tos.pDO
+to90 = tos.p90O
+toMc = tos.pMcO
+toNc = tos.pNcO
+toW  = tos.pWO
+
+// מחיר מעבר לשתי הפתיחות של הזוג, בכיוון d (מספיק פתיל)
+// "נגיעה אפילו לשנייה בתוך ה-QS": הקיצון של החלון עד עכשיו
+f_beyond(int d, float a, float b) => not na(a) and not na(b) and (d == -1 ? wHi > a and wHi > b : wLo < a and wLo < b)
+
+// הזוג הראשון שמתקיים: בין מסגרות (15m+5m, 5m+1m, 15m+1m), ואחר כך SSMT
+// ו-PSP באותה מסגרת (15m, 5m, 1m)
+// מחזיר גם מפתח של שתי השבירות: אותו זוג שכבר נתן אישור לא נותן עוד אחד
+f_new(string used, string k) => not str.contains(used, "#" + k + "#")
+f_hasFresh(string fresh, string key) =>
+    bool any = false
+    for part in str.split(key, "+")
+        if part != "" and str.contains(fresh, "|" + part + "|")
+            any := true
+    any
+f_ok(string used, string fresh, string k) => f_new(used, k) and (not useFresh or f_hasFresh(fresh, k))
+f_entry(int d, int g15, int g5, int g1, int gS, int s15, bool p15, int s5, bool p5, int s1, bool p1, string a15, string b15, string a5, string b5, string a1, string b1, string aS, string used, string fresh) =>
+    string txt = ""
+    string key = ""
+    string k15 = f_k1(a15, b15)
+    string k5  = f_k1(a5, b5)
+    string k1  = f_k1(a1, b1)
+    if g15 > 0 and g5 > 0 and f_beyond(d, toD, to90) and f_ok(used, fresh, k15 + "+" + k5)
+        txt := "15m " + f_legName(g15) + " + 5m " + f_legName(g5) + "\nTDO + T90O"
+        key := k15 + "+" + k5
+    else if g5 > 0 and g1 > 0 and f_beyond(d, to90, toMc) and f_ok(used, fresh, k5 + "+" + k1)
+        txt := "5m " + f_legName(g5) + " + 1m " + f_legName(g1) + "\nT90O + TMcO"
+        key := k5 + "+" + k1
+    else if g15 > 0 and g1 > 0 and f_beyond(d, toD, toMc) and f_ok(used, fresh, k15 + "+" + k1)
+        txt := "15m " + f_legName(g15) + " + 1m " + f_legName(g1) + "\nTDO + TMcO"
+        key := k15 + "+" + k1
+    else if g1 > 0 and gS > 0 and f_beyond(d, toMc, toNc) and f_ok(used, fresh, k1 + "+" + aS)
+        txt := "1m " + f_legName(g1) + " + 15s " + f_legName(gS) + "\nTMcO + TNcP"
+        key := k1 + "+" + aS
+    else if g5 > 0 and gS > 0 and f_beyond(d, to90, toNc) and f_ok(used, fresh, k5 + "+" + aS)
+        txt := "5m " + f_legName(g5) + " + 15s " + f_legName(gS) + "\nT90O + TNcP"
+        key := k5 + "+" + aS
+    else if s15 > 0 and p15 and f_beyond(d, toD, toW) and f_ok(used, fresh, f_k2(a15, b15))
+        txt := "15m " + f_legName(s15) + " + 15m PSP\nTDO + TWO"
+        key := f_k2(a15, b15)
+    else if s5 > 0 and p5 and f_beyond(d, to90, toD) and f_ok(used, fresh, f_k2(a5, b5))
+        txt := "5m " + f_legName(s5) + " + 5m PSP\nT90O + TDO"
+        key := f_k2(a5, b5)
+    else if s1 > 0 and p1 and f_beyond(d, toMc, to90) and f_ok(used, fresh, f_k2(a1, b1))
+        txt := "1m " + f_legName(s1) + " + 1m PSP\nTMcO + T90O"
+        key := f_k2(a1, b1)
+    [txt, key]
+
+// ═══════════════════════════════════════════════════════════════════
+// בדיקה אחורה — כל אישור נבדק כעסקה
+//   כניסה: סגירת הנר האחרון של חלון ה-QS (ה-QS מייצר את הקיצון, ולכן
+//          מחכים שהחלון ייגמר — נר מאוחר יותר באותו חלון יכול לעשות את הקיצון)
+//   סטופ:  הגבוה (שורט) או הנמוך (לונג) של כל החלון
+//   יעד:   R לפי גודל החלון. סטופ ויעד באותו נר = הפסד (שמרני).
+// אישור שהשבירות שלו מתו לפני סוף החלון — מתבטל, בלי עסקה.
+// ═══════════════════════════════════════════════════════════════════
+
+type Trd
+    int    dir
+    int    st  = 0     // 0 = אין · 1 = ממתין לסוף החלון · 2 = עסקה פתוחה
+    string win = ""
+    int    k   = -1
+    float  ent = na
+    float  stp = na
+    float  tgt = na
+    float  rr  = na
+    float  mfe = 0.0
+    label  lb
+
+var Trd tS = Trd.new(-1)
+var Trd tL = Trd.new(1)
+// סטטיסטיקה לכל סוג חלון (k = 0..4): עסקאות, הצלחות, סכום R
+var array<int>   stN = array.new_int(5, 0)
+var array<int>   stW = array.new_int(5, 0)
+var array<float> stR = array.new_float(5, 0.0)
+var array<float> stM = array.new_float(5, 0.0)   // סכום ה-R המקסימלי שכל עסקה הגיעה אליו
+
+f_rr(int k) => k == 4 ? rr56 : k == 3 ? rr225 : k == 2 ? rr90 : rrBig
+
+// כניסה מיידית (טריגר / נר האישור): סטופ מעבר לקיצון של החלון עד עכשיו
+f_trArm(Trd t, label lb, float px) =>
+    if trOn and t.st == 0
+        t.win := qsId
+        t.k   := qsK
+        t.lb  := lb
+        t.mfe := 0.0
+        if trMode == "סוף חלון ה-QS"
+            t.st := 1
+        else
+            float stp  = t.dir == -1 ? wHi + syminfo.mintick : wLo - syminfo.mintick
+            float risk = t.dir == -1 ? stp - px : px - stp
+            if not na(risk) and risk > 0
+                t.ent := px
+                t.stp := stp
+                t.rr  := f_rr(t.k)
+                t.tgt := t.dir == -1 ? px - risk * t.rr : px + risk * t.rr
+                t.st  := 2
+    t.st
+
+f_trCancel(Trd t) =>
+    if t.st == 1
+        t.st := 0
+    t.st
+
+prevClose = close[1]
+
+// החלון של העסקה נגמר — נכנסים, והתגית עוברת לנר שעשה את הקיצון של החלון
+f_trOpen(Trd t) =>
+    if t.st == 1 and wEnded and t.win == eId
+        float ent  = prevClose
+        float stp  = t.dir == -1 ? eHi : eLo
+        float risk = t.dir == -1 ? stp - ent : ent - stp
+        if na(risk) or risk <= 0
+            t.st := 0
+        else
+            t.ent := ent
+            t.stp := stp
+            t.rr  := f_rr(t.k)
+            t.tgt := t.dir == -1 ? ent - risk * t.rr : ent + risk * t.rr
+            t.mfe := 0.0
+            t.st  := 2
+    t.st
+
+f_trCheck(Trd t) =>
+    if t.st == 2
+        float risk = math.abs(t.stp - t.ent)
+        if risk > 0
+            t.mfe := math.max(t.mfe, (t.dir == -1 ? t.ent - low : high - t.ent) / risk)
+        bool loss = t.dir == -1 ? high >= t.stp : low <= t.stp
+        bool win  = not loss and (t.dir == -1 ? low <= t.tgt : high >= t.tgt)
+        if loss or win
+            array.set(stN, t.k, array.get(stN, t.k) + 1)
+            array.set(stW, t.k, array.get(stW, t.k) + (win ? 1 : 0))
+            array.set(stR, t.k, array.get(stR, t.k) + (win ? t.rr : -1.0))
+            array.set(stM, t.k, array.get(stM, t.k) + math.min(t.mfe, 20.0))
+            t.st := 0
+    t.st
+
+// זוגות שכבר נתנו אישור, לכל כיוון — אישור חדש רק עם שבירה חדשה
+var string usedS = "#"
+var string usedL = "#"
+[entS, keyNS] = f_entry(-1, lgB15, lgB5, lgB1, lgBs, sB15, pB15, sB5, pB5, sB1, pB1, kSB15, kPB15, kSB5, kPB5, kSB1, kPB1, kSBs, usedS, freshS)
+[entL, keyNL] = f_entry(1, lgU15, lgU5, lgU1, lgUs, sU15, pU15, sU5, pU5, sU1, pU1, kSU15, kPU15, kSU5, kPU5, kSU1, kPU1, kSUs, usedL, freshL)
+// ★ = לפחות אחת משתי השבירות נוצרה בתוך חלון ה-QS (המצב העיקרי)
+stS = entS != "" and f_hasFresh(freshS, keyNS) ? " ★" : ""
+stL = entL != "" and f_hasFresh(freshL, keyNL) ? " ★" : ""
+
+// במצב טריגר — צריך גם נר PCP + SSMT בכיוון, שנסגר בנר הזה של הגרף
+isTrg = trMode == "טריגר PCP + SSMT"
+f_trg(int d) => (e5.trgBar == bar_index and e5.trgDir == d) or (e15.trgBar == bar_index and e15.trgDir == d) or (trg1m and e1.trgBar == bar_index and e1.trgDir == d)
+// מחיר הכניסה בטריגר: סגירת נר הטריגר. מנוע שמעל הגרף או שווה לו צועד
+// בנר שאחרי הסגירה, ולכן זו הסגירה של הנר הקודם של הגרף.
+f_trgPx(int d) =>
+    bool fromUp = (e15.trgBar == bar_index and e15.trgDir == d and not lo15) or (e5.trgBar == bar_index and e5.trgDir == d and not lo5) or (trg1m and e1.trgBar == bar_index and e1.trgDir == d and not lo1)
+    fromUp ? close[1] : close
+entS := qsOn and (not isTrg or f_trg(-1)) ? entS : ""
+entL := qsOn and (not isTrg or f_trg(1)) ? entL : ""
+entPxS = isTrg ? f_trgPx(-1) : close
+entPxL = isTrg ? f_trgPx(1) : close
+
+// פעם אחת לכל חלון ולכל כיוון. כשהחלון נגמר התגית נשארת כהיסטוריה, דהויה,
+// כך שרואים שהיא כבר לא רלוונטית — והאישור בטבלה נמחק.
+var string doneS = ""
+var string doneL = ""
+var label  lbS   = na
+var label  lbL   = na
+var string txS   = ""
+var string txL   = ""
+var string keyS  = ""
+var string keyL  = ""
+var bool   failS = false
+var bool   failL = false
+// הרצף והמחזור של כל תגית, כדי שיישארו כתובים גם כשהיא מתכווצת
+var string nmS   = ""
+var string nmL   = ""
+// כל התגיות, מהישנה לחדשה — נשארות רק keepN האחרונות
+var array<label> hist = array.new<label>()
+string alTxt = ""
+// אחת השבירות של האישור מתה (נלקחה או שהמיכל שלה נגמר) — האישור נכשל:
+// התגית מקבלת ✕ ונשארת דהויה, ובאותו חלון לא יוצא אישור נוסף בכיוון הזה
+// תגית שנכשלה הופכת ל-✕ אפור וקטן, עם הרצף והמחזור; שאר ההסבר ב-tooltip
+if keyS != "" and not f_alive(keyS, liveS)
+    label.set_text(lbS, "✕ " + nmS)
+    label.set_size(lbS, size.tiny)
+    label.set_color(lbS, color.new(color.gray, 45))
+    label.set_textcolor(lbS, color.white)
+    keyS  := ""
+    txS   := ""
+    failS := true
+    f_trCancel(tS)
+if keyL != "" and not f_alive(keyL, liveL)
+    label.set_text(lbL, "✕ " + nmL)
+    label.set_size(lbL, size.tiny)
+    label.set_color(lbL, color.new(color.gray, 45))
+    label.set_textcolor(lbL, color.white)
+    keyL  := ""
+    txL   := ""
+    failL := true
+    f_trCancel(tL)
+// החלון נגמר (או התחלף) — האישור נגמר, התגית נשארת דהויה. השבירות שלה
+// ממשיכות להיבדק: אם אחת מהן מתה אחר כך, התגית עדיין מקבלת ✕.
+// החלון נגמר והאישור עדיין חי — התגית מתכווצת: חץ, הרצף והמחזור, בצבע שלה
+if doneS != "" and doneS != qsId
+    if not failS
+        label.set_text(lbS, "▼ " + nmS)
+        label.set_size(lbS, size.tiny)
+        label.set_color(lbS, color.new(colBear, 25))
+    doneS := ""
+    txS   := ""
+if doneL != "" and doneL != qsId
+    if not failL
+        label.set_text(lbL, "▲ " + nmL)
+        label.set_size(lbL, size.tiny)
+        label.set_color(lbL, color.new(colBull, 25))
+    doneL := ""
+    txL   := ""
+
+if entS != "" and doneS != qsId
+    doneS := qsId
+    txS   := entS
+    keyS  := keyNS
+    failS := false
+    nmS   := qsShow + " · " + f_kLen(qsK) + " · " + str.format_time(time, "HH:mm", TZ) + stS
+    usedS := str.length(usedS) > 3000 ? "#" + keyNS + "#" : usedS + keyNS + "#"
+    lbS   := label.new(bar_index, high, "▼ QS " + nmS, yloc = yloc.abovebar, style = label.style_label_down, color = colBear, textcolor = color.white, size = size.small, tooltip = "SHORT · QS " + qsShow + " (" + f_kName(qsK) + ")\nמחפשים כניסה אחרי הנר של " + str.format_time(time, "HH:mm", TZ) + "\n" + entS)
+    array.push(hist, lbS)
+    f_trArm(tS, lbS, entPxS)
+    alTxt := "▼ SHORT · QS " + qsPat + " " + f_kLen(qsK) + " · " + str.replace_all(entS, "\n", " · ")
+if entL != "" and doneL != qsId
+    doneL := qsId
+    txL   := entL
+    keyL  := keyNL
+    failL := false
+    nmL   := qsShow + " · " + f_kLen(qsK) + " · " + str.format_time(time, "HH:mm", TZ) + stL
+    usedL := str.length(usedL) > 3000 ? "#" + keyNL + "#" : usedL + keyNL + "#"
+    lbL   := label.new(bar_index, low, "▲ QS " + nmL, yloc = yloc.belowbar, style = label.style_label_up, color = colBull, textcolor = color.white, size = size.small, tooltip = "LONG · QS " + qsShow + " (" + f_kName(qsK) + ")\nמחפשים כניסה אחרי הנר של " + str.format_time(time, "HH:mm", TZ) + "\n" + entL)
+    array.push(hist, lbL)
+    f_trArm(tL, lbL, entPxL)
+    alTxt := alTxt + (alTxt == "" ? "" : "\n") + "▲ LONG · QS " + qsPat + " " + f_kLen(qsK) + " · " + str.replace_all(entL, "\n", " · ")
+while array.size(hist) > keepN
+    label.delete(array.shift(hist))
+bgcolor(showBg and qsOn ? color.new(colQS, 90) : na, title = "QS window")
+
+f_trOpen(tS)
+f_trOpen(tL)
+f_trCheck(tS)
+f_trCheck(tL)
+
+if alertOn and alTxt != ""
+    alert("QS Entry · " + syminfo.ticker + "\n" + alTxt, alert.freq_once_per_bar)
+
+// ═══════════════════════════════════════════════════════════════════
+// טבלה
+// ═══════════════════════════════════════════════════════════════════
+
+posT = posIn == "ימין למעלה" ? position.top_right : posIn == "ימין באמצע" ? position.middle_right : posIn == "ימין למטה" ? position.bottom_right : posIn == "מרכז למעלה" ? position.top_center : posIn == "מרכז באמצע" ? position.middle_center : posIn == "מרכז למטה" ? position.bottom_center : posIn == "שמאל למעלה" ? position.top_left : posIn == "שמאל באמצע" ? position.middle_left : position.bottom_left
+szT  = szIn == "זעיר" ? size.tiny : szIn == "רגיל" ? size.normal : szIn == "גדול" ? size.large : szIn == "ענק" ? size.huge : size.small
+var table tb = table.new(posT, 2, 13, border_width = 1)
+
+f_tfTxt(int gB, int gU, int sB, bool pB, int sU, bool pU) => gB > 0 ? "▼ " + f_legName(gB) + (sB > 0 and pB ? " + PSP" : "") : gU > 0 ? "▲ " + f_legName(gU) + (sU > 0 and pU ? " + PSP" : "") : "—"
+f_tfCol(int gB, int gU) => gB > 0 ? color.new(colBear, 75) : gU > 0 ? color.new(colBull, 75) : color.new(color.gray, 85)
+// "12 עסקאות · 58% · +6.4R"
+f_stTxt(int n, int w, float r, float m) => str.tostring(n) + " trades · " + (n > 0 ? str.tostring(math.round(w * 100.0 / n)) : "0") + "% · " + (r >= 0 ? "+" : "") + str.tostring(r, "#.#") + "R · max " + (n > 0 ? str.tostring(m / n, "#.#") : "0") + "R"
+f_toTxt(string nm, float v) => nm + (na(v) ? " —" : close > v ? " ↑" : " ↓")
+
+if showTbl and barstate.islast
+    color hd = color.new(color.gray, 70)
+    table.cell(tb, 0, 0, "QS", bgcolor = qsOn ? color.new(colQS, 30) : hd, text_color = color.white, text_size = szT)
+    table.cell(tb, 1, 0, qsOn ? qsShow + " · " + f_kLen(qsK) + "  (" + f_kName(qsK) + ")" : "—", bgcolor = qsOn ? color.new(colQS, 30) : hd, text_color = color.white, text_size = szT)
+    table.cell(tb, 0, 1, "15m", bgcolor = hd, text_color = color.white, text_size = szT)
+    table.cell(tb, 1, 1, f_tfTxt(lgB15, lgU15, sB15, pB15, sU15, pU15), bgcolor = f_tfCol(lgB15, lgU15), text_color = color.white, text_size = szT)
+    table.cell(tb, 0, 2, "5m", bgcolor = hd, text_color = color.white, text_size = szT)
+    table.cell(tb, 1, 2, f_tfTxt(lgB5, lgU5, sB5, pB5, sU5, pU5), bgcolor = f_tfCol(lgB5, lgU5), text_color = color.white, text_size = szT)
+    table.cell(tb, 0, 3, "1m", bgcolor = hd, text_color = color.white, text_size = szT)
+    table.cell(tb, 1, 3, f_tfTxt(lgB1, lgU1, sB1, pB1, sU1, pU1), bgcolor = f_tfCol(lgB1, lgU1), text_color = color.white, text_size = szT)
+    table.cell(tb, 0, 4, "15s", bgcolor = hd, text_color = color.white, text_size = szT)
+    table.cell(tb, 1, 4, use15s ? f_tfTxt(lgBs, lgUs, 0, false, 0, false) : "off", bgcolor = f_tfCol(lgBs, lgUs), text_color = color.white, text_size = szT)
+    table.cell(tb, 0, 5, "TO", bgcolor = hd, text_color = color.white, text_size = szT)
+    table.cell(tb, 1, 5, f_toTxt("TWO", toW) + "  " + f_toTxt("TDO", toD) + "  " + f_toTxt("T90O", to90) + "  " + f_toTxt("TMcO", toMc) + "  " + f_toTxt("TNcP", toNc), bgcolor = color.new(color.gray, 85), text_color = color.white, text_size = szT)
+    string eT = txS != "" ? "▼ SHORT  " + str.replace_all(txS, "\n", " · ") : txL != "" ? "▲ LONG  " + str.replace_all(txL, "\n", " · ") : "—"
+    color  eC = txS != "" ? color.new(colBear, 20) : txL != "" ? color.new(colBull, 20) : color.new(color.gray, 85)
+    table.cell(tb, 0, 6, "ENTRY", bgcolor = hd, text_color = color.white, text_size = szT)
+    table.cell(tb, 1, 6, eT, bgcolor = eC, text_color = color.white, text_size = szT)
+    if trOn
+        int   nA = 0
+        int   wA = 0
+        float rA = 0.0
+        float mA = 0.0
+        for k = 0 to 4
+            nA += array.get(stN, k)
+            wA += array.get(stW, k)
+            rA += array.get(stR, k)
+            mA += array.get(stM, k)
+        table.cell(tb, 0, 7, "TEST", bgcolor = hd, text_color = color.white, text_size = szT)
+        table.cell(tb, 1, 7, f_stTxt(nA, wA, rA, mA), bgcolor = color.new(rA >= 0 ? colBull : colBear, 70), text_color = color.white, text_size = szT)
+        int row = 8
+        for k = 4 to 0
+            if array.get(stN, k) > 0
+                table.cell(tb, 0, row, f_kLen(k), bgcolor = hd, text_color = color.white, text_size = szT)
+                table.cell(tb, 1, row, f_stTxt(array.get(stN, k), array.get(stW, k), array.get(stR, k), array.get(stM, k)), bgcolor = color.new(color.gray, 85), text_color = color.white, text_size = szT)
+                row += 1
