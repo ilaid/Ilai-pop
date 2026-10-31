@@ -46,7 +46,9 @@ usePsp  = input.bool(true, "PSP", group = grpBrk)
 useFresh = input.bool(true, "לפחות שבירה אחת טרייה — נוצרה בתוך חלון ה-QS", group = grpBrk, tooltip = "השבירה השנייה יכולה להיות ותיקה יותר, רק שהיא עדיין חיה.")
 
 grpTr   = "בדיקה אחורה (עסקאות)"
-trOn    = input.bool(true, "בדוק כל אישור כעסקה", group = grpTr, tooltip = "כניסה בסגירת הנר האחרון של חלון ה-QS. סטופ: מעבר לגבוה (שורט) או לנמוך (לונג) של כל החלון — ה-QS אמור לייצר את הקיצון שממנו התנועה מתחילה. יעד: R לפי גודל החלון.")
+trOn    = input.bool(true, "בדוק כל אישור כעסקה", group = grpTr, tooltip = "סטופ תמיד מעבר לקיצון של חלון ה-QS (הגבוה בשורט, הנמוך בלונג) — שם הנכס שלא הצליח לקחת את הרמה. יעד: R לפי גודל החלון. מחליפים מצב כניסה ומשווים את הסטטיסטיקה.")
+trMode  = input.string("טריגר PCP + SSMT", "כניסה", options = ["טריגר PCP + SSMT", "נר האישור", "סוף חלון ה-QS"], group = grpTr, tooltip = "טריגר PCP + SSMT: נר של 5m או 15m שהוא PCP ונוצר עליו גם SSMT / HSSMT — כניסה בסגירתו.\nנר האישור: הנר שבו כל התנאים התקיימו.\nסוף חלון ה-QS: סגירת הנר האחרון של החלון.")
+trg1m   = input.bool(false, "טריגר גם מנר של 1m", group = grpTr)
 rr56    = input.float(1.3, "יעד בחלון 5.6 דק' (R)", minval = 0.5, step = 0.1, group = grpTr)
 rr225   = input.float(2.0, "יעד בחלון 22.5 דק' (R)", minval = 0.5, step = 0.1, group = grpTr)
 rr90    = input.float(3.0, "יעד בחלון 90 דק' (R)", minval = 0.5, step = 0.1, group = grpTr)
@@ -306,6 +308,8 @@ type Eng
     array<int>   pBorn
     int          bBorn = 0
     int          uBorn = 0
+    int          trgDir = 0
+    int          trgBar = -1
 
 f_newEng(int cls) =>
     Eng.new(cls, nHiA = array.new_float(), nLoA = array.new_float(), nHcA = array.new_float(), nLcA = array.new_float(), eHiA = array.new_float(), eLoA = array.new_float(), eHcA = array.new_float(), eLcA = array.new_float(), yHiA = array.new_float(), yLoA = array.new_float(), yHcA = array.new_float(), yLcA = array.new_float(), cv = array.new_float(36, na), ct = array.new_int(3, 0), pDir = array.new_int(), pNq = array.new_float(), pEs = array.new_float(), pCont = array.new_int(), pSeq = array.new_int(), pBorn = array.new_int())
@@ -417,6 +421,10 @@ f_step(Eng e, int t, float no, float nh, float nl, float nc, float eo, float eh,
             nbI := xbI
             nuT := xuT
             nuI := xuI
+        int oBS = e.bSeq
+        int oUS = e.uSeq
+        int oBT = e.bTy
+        int oUT = e.uTy
         if nbT != 0
             if e.bTy == 0 or nbI != e.bRefI
                 e.seqC := e.seqC + 1
@@ -475,6 +483,16 @@ f_step(Eng e, int t, float no, float nh, float nl, float nc, float eo, float eh,
         array.set(e.cv, 10, yl)
         array.set(e.cv, 11, yc)
         e.cn := math.min(e.cn + 1, 3)
+        // ── טריגר: הנר הזה הוא PCP, ובאותו נר נוצר (או שודרג ל-H) SSMT ──
+        bool nwB  = e.bTy != 0 and (e.bSeq != oBS or (e.bTy == 2 and oBT == 1))
+        bool nwU  = e.uTy != 0 and (e.uSeq != oUS or (e.uTy == 2 and oUT == 1))
+        int  d0N  = f_dir(no, nc)
+        int  d0E  = f_dir(eo, ec)
+        int  d0Y  = f_dir(yo, yc)
+        bool pcp0 = d0N != d0E or (d0Y > 0 and (d0E < 0 or d0N < 0))
+        if pcp0 and (nwB or nwU)
+            e.trgDir := nwB ? -1 : 1
+            e.trgBar := bar_index
         // ── PSP חדש על הנר האמצעי: PCP + סווינג של 3 נרות ──
         if usePsp and e.cn == 3
             int  dN   = f_dir(f_cv(e, 1, 0, 0), f_cv(e, 1, 0, 3))
@@ -512,8 +530,9 @@ f_step(Eng e, int t, float no, float nh, float nl, float nc, float eo, float eh,
     e.lastT
 
 // ═══════════════════════════════════════════════════════════════════
-// True Opens — מנרות דקה של נכס הגרף (כמו Sav FX): הנר הראשון שמתחיל
-// ברגע הזה או אחריו. רמה חיה רק כל עוד המיכל שלה חי.
+// True Opens — מנרות דקה של הגרף עצמו (כמו Sav FX): הנר הראשון שמתחיל
+// ברגע הזה או אחריו. ברבע הראשון של מיכל, לפני שהפתיחה החדשה הודפסה,
+// נשארת הפתיחה של אותו מיכל מהמחזור הקודם.
 // ═══════════════════════════════════════════════════════════════════
 
 type TOs
@@ -544,23 +563,15 @@ f_toStep(TOs o, int t, float op) =>
         int   mNoon  = tdMid + 43200000 - dsm * 86400000
         int   tWO    = timestamp(TZ, year(mNoon, TZ), month(mNoon, TZ), dayofmonth(mNoon, TZ), 18, 0, 0)
         int   pt     = o.lastT
-        if not na(o.iWO) and o.iWO != tWO
-            o.pWO := na
         if t >= tWO and pt != 0 and pt < tWO
             o.pWO := op
             o.iWO := tWO
-        if not na(o.iMcO) and o.iMcO != mStart
-            o.pMcO := na
         if t >= tMcO and pt != 0 and pt < tMcO
             o.pMcO := op
             o.iMcO := mStart
-        if not na(o.i90O) and o.i90O != sStart
-            o.p90O := na
         if t >= t90O and pt != 0 and pt < t90O
             o.p90O := op
             o.i90O := sStart
-        if not na(o.iDO) and o.iDO != dStart
-            o.pDO := na
         if t >= tDO and pt != 0 and pt < tDO
             o.pDO := op
             o.iDO := dStart
@@ -675,10 +686,12 @@ if lo15
 else
     f_step(e15, aFt, aFno, aFnh, aFnl, aFnc, aFeo, aFeh, aFel, aFec, aFyo, aFyh, aFyl, aFyc)
 
-// True Opens: בגרף דקה — מהגרף עצמו; מעליו — מתת-נרות הדקה של נכס הגרף
+// True Opens: בגרף דקה — מהגרף עצמו; מעליו — מתת-נרות דקה של הסימבול של הגרף,
+// עם אותו יישור לגלגול כמו הגרף (B-ADJ), כדי שישבו על אותם מחירים של הנרות
+[gTt, gTo] = request.security_lower_tf(syminfo.tickerid, l1, [time, open], ignore_invalid_timeframe = true)
 if lo1
-    array<int>   tt = cA == 0 ? b1nt : cA == 1 ? b1et : b1yt
-    array<float> tOp = cA == 0 ? b1no : cA == 1 ? b1eo : b1yo
+    array<int>   tt = gTt
+    array<float> tOp = gTo
     int szt = f_aszI(tt)
     if szt > 0 and f_aszF(tOp) == szt
         for j = 0 to szt - 1
@@ -857,7 +870,8 @@ toMc = tos.pMcO
 toW  = tos.pWO
 
 // מחיר מעבר לשתי הפתיחות של הזוג, בכיוון d (מספיק פתיל)
-f_beyond(int d, float a, float b) => not na(a) and not na(b) and (d == -1 ? high > a and high > b : low < a and low < b)
+// "נגיעה אפילו לשנייה בתוך ה-QS": הקיצון של החלון עד עכשיו
+f_beyond(int d, float a, float b) => not na(a) and not na(b) and (d == -1 ? wHi > a and wHi > b : wLo < a and wLo < b)
 
 // הזוג הראשון שמתקיים: בין מסגרות (15m+5m, 5m+1m, 15m+1m), ואחר כך SSMT
 // ו-PSP באותה מסגרת (15m, 5m, 1m)
@@ -914,6 +928,7 @@ type Trd
     float  stp = na
     float  tgt = na
     float  rr  = na
+    float  mfe = 0.0
     label  lb
 
 var Trd tS = Trd.new(-1)
@@ -922,15 +937,28 @@ var Trd tL = Trd.new(1)
 var array<int>   stN = array.new_int(5, 0)
 var array<int>   stW = array.new_int(5, 0)
 var array<float> stR = array.new_float(5, 0.0)
+var array<float> stM = array.new_float(5, 0.0)   // סכום ה-R המקסימלי שכל עסקה הגיעה אליו
 
 f_rr(int k) => k == 4 ? rr56 : k == 3 ? rr225 : k == 2 ? rr90 : rrBig
 
-f_trArm(Trd t, label lb) =>
+// כניסה מיידית (טריגר / נר האישור): סטופ מעבר לקיצון של החלון עד עכשיו
+f_trArm(Trd t, label lb, float px) =>
     if trOn and t.st == 0
-        t.st  := 1
         t.win := qsId
         t.k   := qsK
         t.lb  := lb
+        t.mfe := 0.0
+        if trMode == "סוף חלון ה-QS"
+            t.st := 1
+        else
+            float stp  = t.dir == -1 ? wHi + syminfo.mintick : wLo - syminfo.mintick
+            float risk = t.dir == -1 ? stp - px : px - stp
+            if not na(risk) and risk > 0
+                t.ent := px
+                t.stp := stp
+                t.rr  := f_rr(t.k)
+                t.tgt := t.dir == -1 ? px - risk * t.rr : px + risk * t.rr
+                t.st  := 2
     t.st
 
 f_trCancel(Trd t) =>
@@ -953,18 +981,23 @@ f_trOpen(Trd t) =>
             t.stp := stp
             t.rr  := f_rr(t.k)
             t.tgt := t.dir == -1 ? ent - risk * t.rr : ent + risk * t.rr
+            t.mfe := 0.0
             t.st  := 2
             label.set_x(t.lb, t.dir == -1 ? eHiB : eLoB)
     t.st
 
 f_trCheck(Trd t) =>
     if t.st == 2
+        float risk = math.abs(t.stp - t.ent)
+        if risk > 0
+            t.mfe := math.max(t.mfe, (t.dir == -1 ? t.ent - low : high - t.ent) / risk)
         bool loss = t.dir == -1 ? high >= t.stp : low <= t.stp
         bool win  = not loss and (t.dir == -1 ? low <= t.tgt : high >= t.tgt)
         if loss or win
             array.set(stN, t.k, array.get(stN, t.k) + 1)
             array.set(stW, t.k, array.get(stW, t.k) + (win ? 1 : 0))
             array.set(stR, t.k, array.get(stR, t.k) + (win ? t.rr : -1.0))
+            array.set(stM, t.k, array.get(stM, t.k) + math.min(t.mfe, 20.0))
             label.set_text(t.lb, label.get_text(t.lb) + (win ? "  +" + str.tostring(t.rr) + "R" : "  −1R"))
             if loss
                 label.set_color(t.lb, color.new(color.gray, 45))
@@ -976,8 +1009,18 @@ var string usedS = "#"
 var string usedL = "#"
 [entS, keyNS] = f_entry(-1, lgB15, lgB5, lgB1, sB15, pB15, sB5, pB5, sB1, pB1, kSB15, kPB15, kSB5, kPB5, kSB1, kPB1, usedS, freshS)
 [entL, keyNL] = f_entry(1, lgU15, lgU5, lgU1, sU15, pU15, sU5, pU5, sU1, pU1, kSU15, kPU15, kSU5, kPU5, kSU1, kPU1, usedL, freshL)
-entS := qsOn ? entS : ""
-entL := qsOn ? entL : ""
+// במצב טריגר — צריך גם נר PCP + SSMT בכיוון, שנסגר בנר הזה של הגרף
+isTrg = trMode == "טריגר PCP + SSMT"
+f_trg(int d) => (e5.trgBar == bar_index and e5.trgDir == d) or (e15.trgBar == bar_index and e15.trgDir == d) or (trg1m and e1.trgBar == bar_index and e1.trgDir == d)
+// מחיר הכניסה בטריגר: סגירת נר הטריגר. מנוע שמעל הגרף או שווה לו צועד
+// בנר שאחרי הסגירה, ולכן זו הסגירה של הנר הקודם של הגרף.
+f_trgPx(int d) =>
+    bool fromUp = (e15.trgBar == bar_index and e15.trgDir == d and not lo15) or (e5.trgBar == bar_index and e5.trgDir == d and not lo5) or (trg1m and e1.trgBar == bar_index and e1.trgDir == d and not lo1)
+    fromUp ? close[1] : close
+entS := qsOn and (not isTrg or f_trg(-1)) ? entS : ""
+entL := qsOn and (not isTrg or f_trg(1)) ? entL : ""
+entPxS = isTrg ? f_trgPx(-1) : close
+entPxL = isTrg ? f_trgPx(1) : close
 
 // פעם אחת לכל חלון ולכל כיוון. כשהחלון נגמר התגית נשארת כהיסטוריה, דהויה,
 // כך שרואים שהיא כבר לא רלוונטית — והאישור בטבלה נמחק.
@@ -1045,7 +1088,7 @@ if entS != "" and doneS != qsId
     usedS := str.length(usedS) > 3000 ? "#" + keyNS + "#" : usedS + keyNS + "#"
     lbS   := label.new(bar_index, high, "▼ QS " + qsShow + " · " + f_kLen(qsK), yloc = yloc.abovebar, style = label.style_label_down, color = colBear, textcolor = color.white, size = size.small, tooltip = "SHORT · QS " + qsPat + " (" + f_kName(qsK) + ")\n" + entS)
     array.push(hist, lbS)
-    f_trArm(tS, lbS)
+    f_trArm(tS, lbS, entPxS)
     alTxt := "▼ SHORT · QS " + qsPat + " " + f_kLen(qsK) + " · " + str.replace_all(entS, "\n", " · ")
 if entL != "" and doneL != qsId
     doneL := qsId
@@ -1056,7 +1099,7 @@ if entL != "" and doneL != qsId
     usedL := str.length(usedL) > 3000 ? "#" + keyNL + "#" : usedL + keyNL + "#"
     lbL   := label.new(bar_index, low, "▲ QS " + qsShow + " · " + f_kLen(qsK), yloc = yloc.belowbar, style = label.style_label_up, color = colBull, textcolor = color.white, size = size.small, tooltip = "LONG · QS " + qsPat + " (" + f_kName(qsK) + ")\n" + entL)
     array.push(hist, lbL)
-    f_trArm(tL, lbL)
+    f_trArm(tL, lbL, entPxL)
     alTxt := alTxt + (alTxt == "" ? "" : "\n") + "▲ LONG · QS " + qsPat + " " + f_kLen(qsK) + " · " + str.replace_all(entL, "\n", " · ")
 while array.size(hist) > keepN
     label.delete(array.shift(hist))
@@ -1081,7 +1124,7 @@ var table tb = table.new(posT, 2, 11, border_width = 1)
 f_tfTxt(int gB, int gU, int sB, bool pB, int sU, bool pU) => gB > 0 ? "▼ " + f_legName(gB) + (sB > 0 and pB ? " + PSP" : "") : gU > 0 ? "▲ " + f_legName(gU) + (sU > 0 and pU ? " + PSP" : "") : "—"
 f_tfCol(int gB, int gU) => gB > 0 ? color.new(colBear, 75) : gU > 0 ? color.new(colBull, 75) : color.new(color.gray, 85)
 // "12 עסקאות · 58% · +6.4R"
-f_stTxt(int n, int w, float r) => str.tostring(n) + " trades · " + (n > 0 ? str.tostring(math.round(w * 100.0 / n)) : "0") + "% · " + (r >= 0 ? "+" : "") + str.tostring(r, "#.#") + "R"
+f_stTxt(int n, int w, float r, float m) => str.tostring(n) + " trades · " + (n > 0 ? str.tostring(math.round(w * 100.0 / n)) : "0") + "% · " + (r >= 0 ? "+" : "") + str.tostring(r, "#.#") + "R · max " + (n > 0 ? str.tostring(m / n, "#.#") : "0") + "R"
 f_toTxt(string nm, float v) => nm + (na(v) ? " —" : close > v ? " ↑" : " ↓")
 
 if showTbl and barstate.islast
@@ -1104,15 +1147,17 @@ if showTbl and barstate.islast
         int   nA = 0
         int   wA = 0
         float rA = 0.0
+        float mA = 0.0
         for k = 0 to 4
             nA += array.get(stN, k)
             wA += array.get(stW, k)
             rA += array.get(stR, k)
+            mA += array.get(stM, k)
         table.cell(tb, 0, 6, "TEST", bgcolor = hd, text_color = color.white, text_size = szT)
-        table.cell(tb, 1, 6, f_stTxt(nA, wA, rA), bgcolor = color.new(rA >= 0 ? colBull : colBear, 70), text_color = color.white, text_size = szT)
+        table.cell(tb, 1, 6, f_stTxt(nA, wA, rA, mA), bgcolor = color.new(rA >= 0 ? colBull : colBear, 70), text_color = color.white, text_size = szT)
         int row = 7
         for k = 4 to 0
             if array.get(stN, k) > 0
                 table.cell(tb, 0, row, f_kLen(k), bgcolor = hd, text_color = color.white, text_size = szT)
-                table.cell(tb, 1, row, f_stTxt(array.get(stN, k), array.get(stW, k), array.get(stR, k)), bgcolor = color.new(color.gray, 85), text_color = color.white, text_size = szT)
+                table.cell(tb, 1, row, f_stTxt(array.get(stN, k), array.get(stW, k), array.get(stR, k), array.get(stM, k)), bgcolor = color.new(color.gray, 85), text_color = color.white, text_size = szT)
                 row += 1
