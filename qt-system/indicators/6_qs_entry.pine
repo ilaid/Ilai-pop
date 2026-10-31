@@ -682,9 +682,9 @@ lkh = barmerge.lookahead_off
 [aFeo, aFeh, aFel, aFec]      = request.security(sES, h15, [open[1], high[1], low[1], close[1]], lookahead = lkh)
 [aFyo, aFyh, aFyl, aFyc]      = request.security(sYM, h15, [open[1], high[1], low[1], close[1]], lookahead = lkh)
 
-[bSnt, bSno, bSnh, bSnl, bSnc] = request.security_lower_tf(sNQ, lS, [time, open, high, low, close], ignore_invalid_timeframe = true)
-[bSet, bSeo, bSeh, bSel, bSec] = request.security_lower_tf(sES, lS, [time, open, high, low, close], ignore_invalid_timeframe = true)
-[bSyt, bSyo, bSyh, bSyl, bSyc] = request.security_lower_tf(sYM, lS, [time, open, high, low, close], ignore_invalid_timeframe = true)
+[qSnt, qSno, qSnh, qSnl, qSnc] = request.security_lower_tf(sNQ, lS, [time, open, high, low, close], ignore_invalid_timeframe = true)
+[qSet, qSeo, qSeh, qSel, qSec] = request.security_lower_tf(sES, lS, [time, open, high, low, close], ignore_invalid_timeframe = true)
+[qSyt, qSyo, qSyh, qSyl, qSyc] = request.security_lower_tf(sYM, lS, [time, open, high, low, close], ignore_invalid_timeframe = true)
 [b1nt, b1no, b1nh, b1nl, b1nc] = request.security_lower_tf(sNQ, l1, [time, open, high, low, close], ignore_invalid_timeframe = true)
 [b1et, b1eo, b1eh, b1el, b1ec] = request.security_lower_tf(sES, l1, [time, open, high, low, close], ignore_invalid_timeframe = true)
 [b1yt, b1yo, b1yh, b1yl, b1yc] = request.security_lower_tf(sYM, l1, [time, open, high, low, close], ignore_invalid_timeframe = true)
@@ -756,7 +756,7 @@ var TOs tos = TOs.new()
 
 if use15s and chSec >= 15
     if loS
-        f_feedLtf(eS, bSnt, bSno, bSnh, bSnl, bSnc, bSet, bSeo, bSeh, bSel, bSec, bSyt, bSyo, bSyh, bSyl, bSyc)
+        f_feedLtf(eS, qSnt, qSno, qSnh, qSnl, qSnc, qSet, qSeo, qSeh, qSel, qSec, qSyt, qSyo, qSyh, qSyl, qSyc)
     else
         f_step(eS, aSt, aSno, aSnh, aSnl, aSnc, aSeo, aSeh, aSel, aSec, aSyo, aSyh, aSyl, aSyc)
 if lo1
