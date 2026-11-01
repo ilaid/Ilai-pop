@@ -1119,6 +1119,23 @@ f_trCheck(Trd t) =>
             t.st := 0
     t.st
 
+// השבירות של האישור, כל אחת עם השעה של הנר שלה (לפי זמן הפתיחה, כמו בגרף):
+// SSMT — הנר שעשה את השבירה · PSP — נר הסווינג עצמו. ככה אפשר ללכת לנר
+// ולראות אותו גם באינדיקטורים האחרים.
+f_part(int d, string p) =>
+    bool   isP = str.contains(p, "P")
+    string tf  = str.startswith(p, "15m") ? "15m" : str.startswith(p, "15s") ? "15s" : str.startswith(p, "5m") ? "5m" : "1m"
+    int    ms  = tf == "15m" ? 900000 : tf == "5m" ? 300000 : tf == "15s" ? (real15s ? 15000 : 60000) : 60000
+    int    ty  = tf == "15m" ? (d == -1 ? sB15 : sU15) : tf == "5m" ? (d == -1 ? sB5 : sU5) : tf == "1m" ? (d == -1 ? sB1 : sU1) : (d == -1 ? sBs : sUs)
+    int    bt  = isP ? (tf == "15m" ? (d == -1 ? tPB15 : tPU15) : tf == "5m" ? (d == -1 ? tPB5 : tPU5) : (d == -1 ? tPB1 : tPU1)) : (tf == "15m" ? (d == -1 ? tSB15 : tSU15) : tf == "5m" ? (d == -1 ? tSB5 : tSU5) : tf == "1m" ? (d == -1 ? tSB1 : tSU1) : (d == -1 ? tSBs : tSUs))
+    tf + " " + (isP ? "PSP" : f_legName(ty)) + " " + str.format_time(bt - (isP ? 2 : 1) * ms, "HH:mm", TZ)
+f_brkTxt(int d, string key) =>
+    string o = ""
+    for p in str.split(key, "+")
+        if p != ""
+            o := o + (o == "" ? "" : " + ") + f_part(d, p)
+    o
+
 // זוגות שכבר נתנו אישור, לכל כיוון — אישור חדש רק עם שבירה חדשה
 var string usedS = "#"
 var string usedL = "#"
@@ -1245,13 +1262,13 @@ if entS != "" and doneS != qsId
     txS   := entS
     keyS  := keyNS
     failS := false
-    nmS   := qsShow + " · " + f_kLen(qsK) + (not useFresh and f_hasFresh(freshS, keyNS) ? " ★" : "") + (showBrk ? "\n" + array.get(str.split(entS, "\n"), 0) : "")
+    nmS   := qsShow + " · " + f_kLen(qsK) + (not useFresh and f_hasFresh(freshS, keyNS) ? " ★" : "") + (showBrk ? "\n" + f_brkTxt(-1, keyNS) : "")
     xOnS  := true
     xS    := wHi
     xEndS := 0
     xKS   := qsK
     usedS := str.length(usedS) > 3000 ? "#" + keyNS + "#" : usedS + keyNS + "#"
-    lbS   := label.new(wHiB, wHi + lblOff, "▼ QS " + nmS, yloc = yloc.price, style = label.style_label_down, color = colBear, textcolor = color.white, size = size.small, tooltip = "SHORT · QS " + qsShow + " (" + f_kName(qsK) + ")\nכל התנאים התקיימו בנר של " + str.format_time(time, "HH:mm", TZ) + "\n" + entS)
+    lbS   := label.new(wHiB, wHi + lblOff, "▼ QS " + nmS, yloc = yloc.price, style = label.style_label_down, color = colBear, textcolor = color.white, size = size.small, tooltip = "SHORT · QS " + qsShow + " (" + f_kName(qsK) + ")\nכל התנאים התקיימו בנר של " + str.format_time(time, "HH:mm", TZ) + "\n" + entS + "\nהשבירות: " + f_brkTxt(-1, keyNS))
     array.push(hist, lbS)
     f_trArm(tS, lbS, entPxS)
     alTxt := "▼ SHORT · QS " + qsPat + " " + f_kLen(qsK) + " · " + str.replace_all(entS, "\n", " · ")
@@ -1260,13 +1277,13 @@ if entL != "" and doneL != qsId
     txL   := entL
     keyL  := keyNL
     failL := false
-    nmL   := qsShow + " · " + f_kLen(qsK) + (not useFresh and f_hasFresh(freshL, keyNL) ? " ★" : "") + (showBrk ? "\n" + array.get(str.split(entL, "\n"), 0) : "")
+    nmL   := qsShow + " · " + f_kLen(qsK) + (not useFresh and f_hasFresh(freshL, keyNL) ? " ★" : "") + (showBrk ? "\n" + f_brkTxt(1, keyNL) : "")
     xOnL  := true
     xL    := wLo
     xEndL := 0
     xKL   := qsK
     usedL := str.length(usedL) > 3000 ? "#" + keyNL + "#" : usedL + keyNL + "#"
-    lbL   := label.new(wLoB, wLo - lblOff, "▲ QS " + nmL, yloc = yloc.price, style = label.style_label_up, color = colBull, textcolor = color.white, size = size.small, tooltip = "LONG · QS " + qsShow + " (" + f_kName(qsK) + ")\nכל התנאים התקיימו בנר של " + str.format_time(time, "HH:mm", TZ) + "\n" + entL)
+    lbL   := label.new(wLoB, wLo - lblOff, "▲ QS " + nmL, yloc = yloc.price, style = label.style_label_up, color = colBull, textcolor = color.white, size = size.small, tooltip = "LONG · QS " + qsShow + " (" + f_kName(qsK) + ")\nכל התנאים התקיימו בנר של " + str.format_time(time, "HH:mm", TZ) + "\n" + entL + "\nהשבירות: " + f_brkTxt(1, keyNL))
     array.push(hist, lbL)
     f_trArm(tL, lbL, entPxL)
     alTxt := alTxt + (alTxt == "" ? "" : "\n") + "▲ LONG · QS " + qsPat + " " + f_kLen(qsK) + " · " + str.replace_all(entL, "\n", " · ")
