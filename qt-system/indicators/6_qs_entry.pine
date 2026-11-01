@@ -43,7 +43,8 @@ useK4   = input.bool(true, "90 · 22.5 · 5.6 דק'", group = grpQS)
 grpBrk  = "שבירות"
 useSsmt = input.bool(true, "SSMT / HSSMT", group = grpBrk)
 usePsp  = input.bool(true, "PSP", group = grpBrk)
-useFresh = input.bool(true, "לפחות שבירה אחת טרייה — נוצרה בתוך חלון ה-QS", group = grpBrk, tooltip = "השבירה השנייה יכולה להיות ותיקה יותר, רק שהיא עדיין חיה.\nכבוי: גם שתי שבירות מלפני ה-QS נחשבות.")
+useFresh = input.bool(true, "פילטר: לפחות שבירה אחת נוצרה בתוך ה-QS", group = grpBrk, tooltip = "דלוק: אחת השבירות חייבת להיווצר בתוך החלון; השנייה יכולה להיות מלפני, כל עוד היא חיה.\nכבוי: גם שתי שבירות שנוצרו לפני ה-QS (ועדיין חיות) נותנות סימון. אז סטאפ שאחת השבירות שלו נוצרה בתוך ה-QS מסומן ★.")
+failMode = input.string("הקיצון של ה-QS נלקח", "מתי אישור נכשל (✕)", options = ["הקיצון של ה-QS נלקח", "אחת השבירות מתה"], group = grpBrk, tooltip = "הקיצון של ה-QS נלקח: בזמן החלון לקיחה של רמות היא חלק מהסטאפ (ה-QS עושה את הקיצון). ✕ רק אם אחרי סוף החלון המחיר עובר את הקיצון שלו, בתוך המחזור שמעליו (5.6 → 22.5 דק' · 22.5 → 90 דק' · 90 → 6 שעות).\nאחת השבירות מתה: כמו קודם — ✕ ברגע שאחת משתי השבירות כבר לא חיה.")
 use15s  = input.bool(true, "SSMT / HSSMT של 15 שניות (מחזור 5.6 דק')", group = grpBrk, tooltip = "שבירות בין תתי-המחזורים של 5.625 דק' בתוך רבע 22.5 — למשל בדיוק על הקיצון של ה-QS. רק SSMT / HSSMT, בלי PSP. זוגות: 1m + 15s (TMcO + TNcP) · 5m + 15s (T90O + TNcP).")
 real15s = input.bool(false, "15s מנתוני שניות אמיתיים (דורש Plus ומעלה)", group = grpBrk, tooltip = "כבוי = מחזור ה-15s מחושב מנרות דקה, כמו באינדיקטור SSMT + HSSMT — בלי צורך במנוי.")
 
@@ -62,7 +63,9 @@ colBear = input.color(#ef5350, "שורט", group = grpVis)
 colQS   = input.color(#4b56ba, "QS", group = grpVis)
 showTbl = input.bool(true, "הצג טבלה", group = grpVis)
 showBg  = input.bool(true, "צבע את הרקע בזמן חלון QS", group = grpVis, tooltip = "כך רואים בדיוק איפה החלון מתחיל ונגמר.")
-showX   = input.bool(true, "השאר על הגרף אישורים שנכשלו (✕)", group = grpVis, tooltip = "כבוי: אישור שאחת השבירות שלו מתה נמחק מהגרף, ונשארים רק אלה שהחזיקו.")
+showX   = input.bool(true, "השאר על הגרף אישורים שנכשלו (✕)", group = grpVis, tooltip = "כבוי: אישור שנכשל נמחק מהגרף, ונשארים רק אלה שהחזיקו.")
+showBrk = input.bool(true, "כתוב על התגית את שתי השבירות", group = grpVis, tooltip = "שורה שנייה בתגית, למשל: 15m HSSMT + 1m SSMT. נשארת גם כשהתגית מתכווצת או מקבלת ✕.")
+lblOff  = input.float(0.0, "הרם את התגית מהנר (נקודות)", minval = 0.0, step = 0.25, group = grpVis, tooltip = "0 = החץ נוגע בדיוק בפתיל של הקיצון. כל מספר אחר מרחיק את התגית מהנר בכמות הנקודות הזאת.")
 keepN   = input.int(5, "כמה אישורים להשאיר על הגרף", minval = 1, maxval = 50, group = grpVis, tooltip = "רק האחרונים נשארים; הישנים יותר נמחקים. ב-Bar Replay זה מתקדם עם הנרות.")
 posIn   = input.string("ימין למעלה", "מיקום הטבלה", options = ["ימין למעלה", "ימין באמצע", "ימין למטה", "מרכז למעלה", "מרכז באמצע", "מרכז למטה", "שמאל למעלה", "שמאל באמצע", "שמאל למטה"], group = grpVis)
 szIn    = input.string("קטן", "גודל הטבלה", options = ["זעיר", "קטן", "רגיל", "גדול", "ענק"], group = grpVis)
@@ -1098,7 +1101,7 @@ f_trOpen(Trd t) =>
             t.tgt := t.dir == -1 ? ent - risk * t.rr : ent + risk * t.rr
             t.mfe := 0.0
             t.st  := 2
-            label.set_xy(t.lb, t.dir == -1 ? eHiB : eLoB, t.dir == -1 ? eHi : eLo)
+            label.set_xy(t.lb, t.dir == -1 ? eHiB : eLoB, t.dir == -1 ? eHi + lblOff : eLo - lblOff)
     t.st
 
 f_trCheck(Trd t) =>
@@ -1153,10 +1156,49 @@ var string nmL   = ""
 // כל התגיות, מהישנה לחדשה — נשארות רק keepN האחרונות
 var array<label> hist = array.new<label>()
 string alTxt = ""
-// אחת השבירות של האישור מתה (נלקחה או שהמיכל שלה נגמר) — האישור נכשל:
-// התגית מקבלת ✕ ונשארת דהויה, ובאותו חלון לא יוצא אישור נוסף בכיוון הזה
-// תגית שנכשלה הופכת ל-✕ אפור וקטן, עם הרצף והמחזור; שאר ההסבר ב-tooltip
-if keyS != "" and not f_alive(keyS, liveS)
+// ── מתי אישור נכשל (✕) ──
+// מצב "הקיצון של ה-QS נלקח" (ברירת מחדל): כל עוד החלון חי, לקיחה של רמות היא
+// חלק מהסטאפ — ה-QS עושה את הקיצון, והתגית זזה איתו. אחרי סוף החלון הקיצון
+// נשמר, ו-✕ רק אם המחיר עובר אותו בתוך המחזור שמעל החלון.
+// מצב "אחת השבירות מתה": ✕ ברגע שבאחת המסגרות של האישור כבר אין שבירה חיה.
+exMode = failMode == "הקיצון של ה-QS נלקח"
+f_parMs(int k) => k == 4 ? 1350000 : k == 3 ? 5400000 : k == 2 ? 21600000 : 86400000
+var bool  xOnS  = false
+var bool  xOnL  = false
+var float xS    = na
+var float xL    = na
+var int   xEndS = 0
+var int   xEndL = 0
+var int   xKS   = 4
+var int   xKL   = 4
+bool brS = false
+bool brL = false
+if exMode and xOnS
+    if qsOn and doneS == qsId
+        xS := wHi
+    else
+        if xEndS == 0
+            xEndS := time + f_parMs(xKS)
+        if time >= xEndS
+            xOnS := false
+        else if high > xS
+            brS  := true
+            xOnS := false
+if exMode and xOnL
+    if qsOn and doneL == qsId
+        xL := wLo
+    else
+        if xEndL == 0
+            xEndL := time + f_parMs(xKL)
+        if time >= xEndL
+            xOnL := false
+        else if low < xL
+            brL  := true
+            xOnL := false
+bool fNowS = exMode ? brS : (keyS != "" and not f_alive(keyS, liveS))
+bool fNowL = exMode ? brL : (keyL != "" and not f_alive(keyL, liveL))
+// תגית שנכשלה הופכת ל-✕ אפור וקטן, עם הרצף, המחזור והשבירות
+if fNowS
     if not showX
         label.delete(lbS)
     label.set_text(lbS, "✕ " + nmS)
@@ -1166,8 +1208,9 @@ if keyS != "" and not f_alive(keyS, liveS)
     keyS  := ""
     txS   := ""
     failS := true
-    f_trCancel(tS)
-if keyL != "" and not f_alive(keyL, liveL)
+    if not exMode
+        f_trCancel(tS)
+if fNowL
     if not showX
         label.delete(lbL)
     label.set_text(lbL, "✕ " + nmL)
@@ -1177,7 +1220,8 @@ if keyL != "" and not f_alive(keyL, liveL)
     keyL  := ""
     txL   := ""
     failL := true
-    f_trCancel(tL)
+    if not exMode
+        f_trCancel(tL)
 // החלון נגמר (או התחלף) — האישור נגמר, התגית נשארת דהויה. השבירות שלה
 // ממשיכות להיבדק: אם אחת מהן מתה אחר כך, התגית עדיין מקבלת ✕.
 // החלון נגמר והאישור עדיין חי — התגית מתכווצת: חץ, הרצף והמחזור, בצבע שלה
@@ -1201,9 +1245,13 @@ if entS != "" and doneS != qsId
     txS   := entS
     keyS  := keyNS
     failS := false
-    nmS   := qsShow + " · " + f_kLen(qsK)
+    nmS   := qsShow + " · " + f_kLen(qsK) + (not useFresh and f_hasFresh(freshS, keyNS) ? " ★" : "") + (showBrk ? "\n" + array.get(str.split(entS, "\n"), 0) : "")
+    xOnS  := true
+    xS    := wHi
+    xEndS := 0
+    xKS   := qsK
     usedS := str.length(usedS) > 3000 ? "#" + keyNS + "#" : usedS + keyNS + "#"
-    lbS   := label.new(wHiB, wHi, "▼ QS " + qsShow + " · " + f_kLen(qsK), yloc = yloc.price, style = label.style_label_down, color = colBear, textcolor = color.white, size = size.small, tooltip = "SHORT · QS " + qsShow + " (" + f_kName(qsK) + ")\nכל התנאים התקיימו בנר של " + str.format_time(time, "HH:mm", TZ) + "\n" + entS)
+    lbS   := label.new(wHiB, wHi + lblOff, "▼ QS " + nmS, yloc = yloc.price, style = label.style_label_down, color = colBear, textcolor = color.white, size = size.small, tooltip = "SHORT · QS " + qsShow + " (" + f_kName(qsK) + ")\nכל התנאים התקיימו בנר של " + str.format_time(time, "HH:mm", TZ) + "\n" + entS)
     array.push(hist, lbS)
     f_trArm(tS, lbS, entPxS)
     alTxt := "▼ SHORT · QS " + qsPat + " " + f_kLen(qsK) + " · " + str.replace_all(entS, "\n", " · ")
@@ -1212,9 +1260,13 @@ if entL != "" and doneL != qsId
     txL   := entL
     keyL  := keyNL
     failL := false
-    nmL   := qsShow + " · " + f_kLen(qsK)
+    nmL   := qsShow + " · " + f_kLen(qsK) + (not useFresh and f_hasFresh(freshL, keyNL) ? " ★" : "") + (showBrk ? "\n" + array.get(str.split(entL, "\n"), 0) : "")
+    xOnL  := true
+    xL    := wLo
+    xEndL := 0
+    xKL   := qsK
     usedL := str.length(usedL) > 3000 ? "#" + keyNL + "#" : usedL + keyNL + "#"
-    lbL   := label.new(wLoB, wLo, "▲ QS " + qsShow + " · " + f_kLen(qsK), yloc = yloc.price, style = label.style_label_up, color = colBull, textcolor = color.white, size = size.small, tooltip = "LONG · QS " + qsShow + " (" + f_kName(qsK) + ")\nכל התנאים התקיימו בנר של " + str.format_time(time, "HH:mm", TZ) + "\n" + entL)
+    lbL   := label.new(wLoB, wLo - lblOff, "▲ QS " + nmL, yloc = yloc.price, style = label.style_label_up, color = colBull, textcolor = color.white, size = size.small, tooltip = "LONG · QS " + qsShow + " (" + f_kName(qsK) + ")\nכל התנאים התקיימו בנר של " + str.format_time(time, "HH:mm", TZ) + "\n" + entL)
     array.push(hist, lbL)
     f_trArm(tL, lbL, entPxL)
     alTxt := alTxt + (alTxt == "" ? "" : "\n") + "▲ LONG · QS " + qsPat + " " + f_kLen(qsK) + " · " + str.replace_all(entL, "\n", " · ")
@@ -1224,9 +1276,9 @@ while array.size(hist) > keepN
 // המיקום של ה-QS: כל עוד החלון חי, התגית יושבת על הנר שעשה את הקיצון של
 // החלון עד עכשיו — הגבוה בשורט, הנמוך בלונג. כשהחלון נגמר היא נשארת שם.
 if qsOn and doneS == qsId
-    label.set_xy(lbS, wHiB, wHi)
+    label.set_xy(lbS, wHiB, wHi + lblOff)
 if qsOn and doneL == qsId
-    label.set_xy(lbL, wLoB, wLo)
+    label.set_xy(lbL, wLoB, wLo - lblOff)
 
 bgcolor(showBg and qsOn ? color.new(colQS, 90) : na, title = "QS window")
 
