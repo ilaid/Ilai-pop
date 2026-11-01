@@ -370,6 +370,13 @@ type Eng
     string       uStr = ""
     bool         bQs  = false
     bool         uQs  = false
+    // הנר של המסגרת שעוד לא נסגר: הגבוה והנמוך של NQ ו-ES מאז הנר האחרון
+    // שהמנוע ראה — כדי ש-PSP שנלקח עכשיו לא ייחשב חי עד הסגירה
+    int          rSt  = 0
+    float        rNh  = na
+    float        rNl  = na
+    float        rEh  = na
+    float        rEl  = na
 
 f_newEng(int cls) =>
     Eng.new(cls, nHiA = array.new_float(), nLoA = array.new_float(), nHcA = array.new_float(), nLcA = array.new_float(), eHiA = array.new_float(), eLoA = array.new_float(), eHcA = array.new_float(), eLcA = array.new_float(), yHiA = array.new_float(), yLoA = array.new_float(), yHcA = array.new_float(), yLcA = array.new_float(), cv = array.new_float(36, na), ct = array.new_int(3, 0), pDir = array.new_int(), pNq = array.new_float(), pEs = array.new_float(), pCont = array.new_int(), pSeq = array.new_int(), pBorn = array.new_int())
@@ -672,6 +679,9 @@ l1  = lo1  ? "1"  : "12M"
 l5  = lo5  ? "5"  : "12M"
 l15 = lo15 ? "15" : "12M"
 lkh = barmerge.lookahead_off
+// הנר הנוכחי של הגרף, ב-NQ וב-ES (לא [1]) — רק כדי לבדוק אם PSP כבר נלקח עכשיו
+[cNh, cNl] = request.security(sNQ, timeframe.period, [high, low], lookahead = lkh)
+[cEh, cEl] = request.security(sES, timeframe.period, [high, low], lookahead = lkh)
 
 [aSt, aSno, aSnh, aSnl, aSnc] = request.security(sNQ, hS, [time[1], open[1], high[1], low[1], close[1]], lookahead = lkh)
 [aSeo, aSeh, aSel, aSec]      = request.security(sES, hS, [open[1], high[1], low[1], close[1]], lookahead = lkh)
@@ -803,14 +813,45 @@ else
 // כשנסגר נר שלו, ולכן שבירה שהמיכל שלה נגמר נחתכת כאן מול השעון של הגרף.
 // ═══════════════════════════════════════════════════════════════════
 
+// מנוע שמעל הגרף או שווה לו רואה רק נרות סגורים שלו, נר אחד מאחור. לכן
+// צוברים כאן את הגבוה והנמוך של NQ ו-ES מאז הנר האחרון שהוא ראה, כולל הנר
+// החי של הגרף. מנוע שמתחת לגרף כבר רואה את כל תת-הנרות הסגורים, ולא צריך.
+f_upEng(Eng e) => chSec * 1000 <= f_clsMs(e.cls)
+f_run(Eng e) =>
+    if f_upEng(e) and e.lastT != 0
+        int st = e.lastT + f_clsMs(e.cls)
+        if st != e.rSt
+            e.rSt := st
+            e.rNh := cNh
+            e.rNl := cNl
+            e.rEh := cEh
+            e.rEl := cEl
+        else
+            e.rNh := na(e.rNh) or cNh > e.rNh ? cNh : e.rNh
+            e.rNl := na(e.rNl) or cNl < e.rNl ? cNl : e.rNl
+            e.rEh := na(e.rEh) or cEh > e.rEh ? cEh : e.rEh
+            e.rEl := na(e.rEl) or cEl < e.rEl ? cEl : e.rEl
+    e.rSt
+f_run(e1)
+f_run(e5)
+f_run(e15)
+
+// ה-PSP החדש ביותר בכיוון d שעדיין חי. PSP מת כש-NQ וגם ES לקחו את הקצה של
+// נר הסווינג (פתיל) — כולל לקיחה בנר שעוד לא נסגר.
 f_pspSeq(Eng e, int d) =>
-    int sq = -1
-    int bn = 0
+    int  sq = -1
+    int  bn = 0
+    bool up = f_upEng(e) and e.rSt != 0
     if array.size(e.pDir) > 0
         for i = 0 to array.size(e.pDir) - 1
             if sq == -1 and array.get(e.pDir, i) == d
-                sq := array.get(e.pSeq, i)
-                bn := array.get(e.pBorn, i)
+                float lq   = array.get(e.pNq, i)
+                float ls   = array.get(e.pEs, i)
+                bool  tq   = na(lq) or (up and (d == -1 ? e.rNh > lq : e.rNl < lq))
+                bool  ts   = na(ls) or (up and (d == -1 ? e.rEh > ls : e.rEl < ls))
+                if not (tq and ts)
+                    sq := array.get(e.pSeq, i)
+                    bn := array.get(e.pBorn, i)
     [sq, bn]
 
 // השבירות של המסגרת בכיוון d: [סוג ה-SSMT (0 / 1 = SSMT / 2 = HSSMT), האם יש PSP,
