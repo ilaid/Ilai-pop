@@ -698,9 +698,9 @@ l5  = lo5  ? "5"  : "12M"
 l15 = lo15 ? "15" : "12M"
 lkh = barmerge.lookahead_off
 // הנר הנוכחי של הגרף, ב-NQ וב-ES (לא [1]) — רק כדי לבדוק אם PSP כבר נלקח עכשיו
-[cNh, cNl] = request.security(sNQ, timeframe.period, [high, low], lookahead = lkh)
-[cEh, cEl] = request.security(sES, timeframe.period, [high, low], lookahead = lkh)
-[cYh, cYl] = request.security(sYM, timeframe.period, [high, low], lookahead = lkh)
+[cNh, cNl, cNc] = request.security(sNQ, timeframe.period, [high, low, close], lookahead = lkh)
+[cEh, cEl, cEc] = request.security(sES, timeframe.period, [high, low, close], lookahead = lkh)
+[cYh, cYl, cYc] = request.security(sYM, timeframe.period, [high, low, close], lookahead = lkh)
 
 [aSt, aSno, aSnh, aSnl, aSnc] = request.security(sNQ, hS, [time[1], open[1], high[1], low[1], close[1]], lookahead = lkh)
 [aSeo, aSeh, aSel, aSec]      = request.security(sES, hS, [open[1], high[1], low[1], close[1]], lookahead = lkh)
@@ -855,6 +855,7 @@ f_run(Eng e) =>
             e.rYh := na(e.rYh) or cYh > e.rYh ? cYh : e.rYh
             e.rYl := na(e.rYl) or cYl < e.rYl ? cYl : e.rYl
     e.rSt
+f_run(eS)
 f_run(e1)
 f_run(e5)
 f_run(e15)
@@ -888,6 +889,18 @@ f_leg(Eng e, int d, string nm) =>
     bool fresh = e.started and e.lifeId == lN
     int  sB  = fresh and e.bTy != 0 ? e.bSeq : -1
     int  sU  = fresh and e.uTy != 0 ? e.uSeq : -1
+    // בדיקה חיה של SSMT: המנוע ראה רק נרות סגורים, נר אחד מאחור. כאן מריצים
+    // את אותו זיהוי בדיוק (f_findBear / f_findBull) עם הנר שעוד לא נסגר — אם
+    // הסטייה כבר לא קיימת עכשיו (הנכס השני לקח גם הוא), השבירה לא חיה
+    if useSsmt and f_upEng(e) and e.rSt != 0 and fresh and rN == e.refId and array.size(e.nHiA) > 0 and not na(e.nH) and not na(e.eH) and not na(e.yH)
+        if sB >= 0
+            [zbT, zbI, zbS] = f_findBear(e.nHiA, e.eHiA, e.yHiA, e.nHcA, e.eHcA, e.yHcA, math.max(e.nH, e.rNh), math.max(e.eH, e.rEh), math.max(e.yH, e.rYh), math.max(e.nHC, cNc), math.max(e.eHC, cEc), math.max(e.yHC, cYc))
+            if zbT == 0
+                sB := -1
+        if sU >= 0
+            [zuT, zuI, zuS] = f_findBull(e.nLoA, e.eLoA, e.yLoA, e.nLcA, e.eLcA, e.yLcA, math.min(e.nL, e.rNl), math.min(e.eL, e.rEl), math.min(e.yL, e.rYl), math.min(e.nLC, cNc), math.min(e.eLC, cEc), math.min(e.yLC, cYc))
+            if zuT == 0
+                sU := -1
     int  pc  = psShort ? rN : lN
     [pB0, nB, wB] = f_pspSeq(e, -1, pc)
     [pU0, nU, wU] = f_pspSeq(e, 1, pc)
