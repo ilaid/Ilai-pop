@@ -359,6 +359,7 @@ type Eng
     array<int>   pDir
     array<float> pNq
     array<float> pEs
+    array<float> pYm
     array<int>   pCont
     array<int>   pSeq
     array<int>   pBorn
@@ -377,9 +378,11 @@ type Eng
     float        rNl  = na
     float        rEh  = na
     float        rEl  = na
+    float        rYh  = na
+    float        rYl  = na
 
 f_newEng(int cls) =>
-    Eng.new(cls, nHiA = array.new_float(), nLoA = array.new_float(), nHcA = array.new_float(), nLcA = array.new_float(), eHiA = array.new_float(), eLoA = array.new_float(), eHcA = array.new_float(), eLcA = array.new_float(), yHiA = array.new_float(), yLoA = array.new_float(), yHcA = array.new_float(), yLcA = array.new_float(), cv = array.new_float(36, na), ct = array.new_int(3, 0), pDir = array.new_int(), pNq = array.new_float(), pEs = array.new_float(), pCont = array.new_int(), pSeq = array.new_int(), pBorn = array.new_int())
+    Eng.new(cls, nHiA = array.new_float(), nLoA = array.new_float(), nHcA = array.new_float(), nLcA = array.new_float(), eHiA = array.new_float(), eLoA = array.new_float(), eHcA = array.new_float(), eLcA = array.new_float(), yHiA = array.new_float(), yLoA = array.new_float(), yHcA = array.new_float(), yLcA = array.new_float(), cv = array.new_float(36, na), ct = array.new_int(3, 0), pDir = array.new_int(), pNq = array.new_float(), pEs = array.new_float(), pYm = array.new_float(), pCont = array.new_int(), pSeq = array.new_int(), pBorn = array.new_int())
 
 f_cv(Eng e, int j, int a, int f) => array.get(e.cv, j * 12 + a * 4 + f)
 // אורך נר של המסגרת — שבירה "נולדת" בסגירת הנר שיצר אותה
@@ -523,20 +526,26 @@ f_step(Eng e, int t, float no, float nh, float nl, float nc, float eo, float eh,
             e.uTy   := 0
             e.uRefI := -1
 
-        // ── PSP: קודם הנר הזה לוקח רמות (פתיל), NQ ו-ES מכריעים, YM לא ──
+        // ── PSP: קודם הנר הזה לוקח רמות (פתיל) — כל נכס מגן על הקצה של נר הסווינג אצלו ──
         if array.size(e.pDir) > 0
             for i = array.size(e.pDir) - 1 to 0
                 int   pd = array.get(e.pDir, i)
                 float lq = array.get(e.pNq, i)
                 float ls = array.get(e.pEs, i)
+                float ly = array.get(e.pYm, i)
                 if not na(lq) and (pd == -1 ? nh > lq : nl < lq)
                     array.set(e.pNq, i, na)
                 if not na(ls) and (pd == -1 ? eh > ls : el < ls)
                     array.set(e.pEs, i, na)
-                if (na(array.get(e.pNq, i)) and na(array.get(e.pEs, i))) or array.get(e.pCont, i) != lId
+                if not na(ly) and (pd == -1 ? yh > ly : yl < ly)
+                    array.set(e.pYm, i, na)
+                // PSP מת כשהוא כבר לא סווינג באף נכס — NQ, ES ו-YM כולם לקחו את
+                // הקצה של נר הסווינג אצלם — או כשהמיכל שלו נגמר
+                if (na(array.get(e.pNq, i)) and na(array.get(e.pEs, i)) and na(array.get(e.pYm, i))) or array.get(e.pCont, i) != lId
                     array.remove(e.pDir, i)
                     array.remove(e.pNq, i)
                     array.remove(e.pEs, i)
+                    array.remove(e.pYm, i)
                     array.remove(e.pCont, i)
                     array.remove(e.pSeq, i)
                     array.remove(e.pBorn, i)
@@ -594,6 +603,7 @@ f_step(Eng e, int t, float no, float nh, float nl, float nc, float eo, float eh,
                         array.unshift(e.pDir, bear ? -1 : 1)
                         array.unshift(e.pNq, bear ? f_cv(e, 1, 0, 1) : f_cv(e, 1, 0, 2))
                         array.unshift(e.pEs, bear ? f_cv(e, 1, 1, 1) : f_cv(e, 1, 1, 2))
+                        array.unshift(e.pYm, bear ? f_cv(e, 1, 2, 1) : f_cv(e, 1, 2, 2))
                         array.unshift(e.pCont, lM)
                         array.unshift(e.pSeq, e.seqC)
                         array.unshift(e.pBorn, t + f_clsMs(e.cls))
@@ -601,6 +611,7 @@ f_step(Eng e, int t, float no, float nh, float nl, float nc, float eo, float eh,
                             array.pop(e.pDir)
                             array.pop(e.pNq)
                             array.pop(e.pEs)
+                            array.pop(e.pYm)
                             array.pop(e.pCont)
                             array.pop(e.pSeq)
                             array.pop(e.pBorn)
@@ -682,6 +693,7 @@ lkh = barmerge.lookahead_off
 // הנר הנוכחי של הגרף, ב-NQ וב-ES (לא [1]) — רק כדי לבדוק אם PSP כבר נלקח עכשיו
 [cNh, cNl] = request.security(sNQ, timeframe.period, [high, low], lookahead = lkh)
 [cEh, cEl] = request.security(sES, timeframe.period, [high, low], lookahead = lkh)
+[cYh, cYl] = request.security(sYM, timeframe.period, [high, low], lookahead = lkh)
 
 [aSt, aSno, aSnh, aSnl, aSnc] = request.security(sNQ, hS, [time[1], open[1], high[1], low[1], close[1]], lookahead = lkh)
 [aSeo, aSeh, aSel, aSec]      = request.security(sES, hS, [open[1], high[1], low[1], close[1]], lookahead = lkh)
@@ -826,18 +838,22 @@ f_run(Eng e) =>
             e.rNl := cNl
             e.rEh := cEh
             e.rEl := cEl
+            e.rYh := cYh
+            e.rYl := cYl
         else
             e.rNh := na(e.rNh) or cNh > e.rNh ? cNh : e.rNh
             e.rNl := na(e.rNl) or cNl < e.rNl ? cNl : e.rNl
             e.rEh := na(e.rEh) or cEh > e.rEh ? cEh : e.rEh
             e.rEl := na(e.rEl) or cEl < e.rEl ? cEl : e.rEl
+            e.rYh := na(e.rYh) or cYh > e.rYh ? cYh : e.rYh
+            e.rYl := na(e.rYl) or cYl < e.rYl ? cYl : e.rYl
     e.rSt
 f_run(e1)
 f_run(e5)
 f_run(e15)
 
-// ה-PSP החדש ביותר בכיוון d שעדיין חי. PSP מת כש-NQ וגם ES לקחו את הקצה של
-// נר הסווינג (פתיל) — כולל לקיחה בנר שעוד לא נסגר.
+// ה-PSP החדש ביותר בכיוון d שעדיין חי. PSP מת כשכל שלושת הנכסים (NQ, ES, YM)
+// לקחו את הקצה של נר הסווינג אצלם (פתיל) — כולל לקיחה בנר שעוד לא נסגר.
 f_pspSeq(Eng e, int d) =>
     int  sq = -1
     int  bn = 0
@@ -849,7 +865,9 @@ f_pspSeq(Eng e, int d) =>
                 float ls   = array.get(e.pEs, i)
                 bool  tq   = na(lq) or (up and (d == -1 ? e.rNh > lq : e.rNl < lq))
                 bool  ts   = na(ls) or (up and (d == -1 ? e.rEh > ls : e.rEl < ls))
-                if not (tq and ts)
+                float ly   = array.get(e.pYm, i)
+                bool  ty   = na(ly) or (up and (d == -1 ? e.rYh > ly : e.rYl < ly))
+                if not (tq and ts and ty)
                     sq := array.get(e.pSeq, i)
                     bn := array.get(e.pBorn, i)
     [sq, bn]
