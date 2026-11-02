@@ -543,10 +543,10 @@ f_group(int kind, array<float> LB, array<float> LT, array<bool> LF, array<bool> 
     int  sa   = kind == 0 ? 0 : 2
     int  sb   = kind == 0 ? 1 : 3
     bool hasC = kind == 0 and use3
-    bool on   = kind == 0 or use4
+    bool act  = kind == 0 or use4
     int  cU   = (na(array.get(LT, sa * 2)) ? 0 : 1) + (na(array.get(LT, sb * 2)) ? 0 : 1) + ((hasC and not na(array.get(LT, 4))) ? 1 : 0)
     int  cD   = (na(array.get(LT, sa * 2 + 1)) ? 0 : 1) + (na(array.get(LT, sb * 2 + 1)) ? 0 : 1) + ((hasC and not na(array.get(LT, 5))) ? 1 : 0)
-    int  d    = not on ? 0 : cU >= 2 ? 1 : cD >= 2 ? -1 : 0
+    int  d    = not act ? 0 : cU >= 2 ? 1 : cD >= 2 ? -1 : 0
     int  di   = d == 1 ? 0 : 1
     float ab  = array.get(LB, sa * 2 + di)
     float at  = array.get(LT, sa * 2 + di)
@@ -773,7 +773,8 @@ f_lifeId(int c, int t) =>
 // רגל של נכס מתוך המערך שלו
 f_legA(int d, array<float> q, float tk, bool edge, bool use) =>
     bool ok = use and not na(array.get(q, 6)) and not na(array.get(q, 4)) and not na(array.get(q, 3))
-    f_leg(d, ok, array.get(q, 0), array.get(q, 1), array.get(q, 2), array.get(q, 3), array.get(q, 4), array.get(q, 5), array.get(q, 6), array.get(q, 7), array.get(q, 8), array.get(q, 9), tk, edge)
+    [lb, lt, lf, lm, lv] = f_leg(d, ok, array.get(q, 0), array.get(q, 1), array.get(q, 2), array.get(q, 3), array.get(q, 4), array.get(q, 5), array.get(q, 6), array.get(q, 7), array.get(q, 8), array.get(q, 9), tk, edge)
+    [lb, lt, lf, lm, lv]
 
 // צעד אחד של המנוע
 f_step(Engine e, int tOpen, array<float> q1, array<float> q2, array<float> q3, array<float> q4) =>
@@ -1105,23 +1106,17 @@ useL3 = lowerLevels >= 3 and tfClass >= 4
 
 // מדרגה שלא תיצעד מקבלת את מסגרת הגרף (כבר טעונה) למעלה, ו-"12M" (לא חוקי,
 // נזרק בלי למשוך נתון) למטה.
-f_tfs(bool use, int c) =>
-    not use ? timeframe.period : c == 2 ? "5" : c == 3 ? "15" : c == 4 ? "60" : c == 5 ? "240" : c == 6 ? "D" : c == 7 ? "W" : "M"
-f_tfl(bool use, int c) =>
-    not use ? "12M" : c == 1 ? "1" : c == 2 ? "5" : c == 3 ? "15" : c == 4 ? "60" : c == 5 ? "240" : c == 6 ? "D" : "W"
-
-tfs1 = f_tfs(useH1, c1)
-tfs2 = f_tfs(useH2, c2)
-tfs3 = f_tfs(useH3, c3)
-tfs4 = f_tfs(useH4, c4)
-tfs5 = f_tfs(useH5, c5)
-tfs6 = f_tfs(useH6, c6)
-tfl1 = f_tfl(useL1, cL1)
-tfl2 = f_tfl(useL2, cL2)
-tfl3 = f_tfl(useL3, cL3)
+tfs1 = not useH1 ? timeframe.period : c1 == 2 ? "5" : c1 == 3 ? "15" : c1 == 4 ? "60" : c1 == 5 ? "240" : c1 == 6 ? "D" : c1 == 7 ? "W" : "M"
+tfs2 = not useH2 ? timeframe.period : c2 == 2 ? "5" : c2 == 3 ? "15" : c2 == 4 ? "60" : c2 == 5 ? "240" : c2 == 6 ? "D" : c2 == 7 ? "W" : "M"
+tfs3 = not useH3 ? timeframe.period : c3 == 2 ? "5" : c3 == 3 ? "15" : c3 == 4 ? "60" : c3 == 5 ? "240" : c3 == 6 ? "D" : c3 == 7 ? "W" : "M"
+tfs4 = not useH4 ? timeframe.period : c4 == 2 ? "5" : c4 == 3 ? "15" : c4 == 4 ? "60" : c4 == 5 ? "240" : c4 == 6 ? "D" : c4 == 7 ? "W" : "M"
+tfs5 = not useH5 ? timeframe.period : c5 == 2 ? "5" : c5 == 3 ? "15" : c5 == 4 ? "60" : c5 == 5 ? "240" : c5 == 6 ? "D" : c5 == 7 ? "W" : "M"
+tfs6 = not useH6 ? timeframe.period : c6 == 2 ? "5" : c6 == 3 ? "15" : c6 == 4 ? "60" : c6 == 5 ? "240" : c6 == 6 ? "D" : c6 == 7 ? "W" : "M"
+tfl1 = not useL1 ? "12M" : cL1 == 1 ? "1" : cL1 == 2 ? "5" : cL1 == 3 ? "15" : cL1 == 4 ? "60" : cL1 == 5 ? "240" : cL1 == 6 ? "D" : "W"
+tfl2 = not useL2 ? "12M" : cL2 == 1 ? "1" : cL2 == 2 ? "5" : cL2 == 3 ? "15" : cL2 == 4 ? "60" : cL2 == 5 ? "240" : cL2 == 6 ? "D" : "W"
+tfl3 = not useL3 ? "12M" : cL3 == 1 ? "1" : cL3 == 2 ? "5" : cL3 == 3 ? "15" : cL3 == 4 ? "60" : cL3 == 5 ? "240" : cL3 == 6 ? "D" : "W"
 
 // עשרה ערכים לכל נכס ומסגרת. הזמן נלקח רק מנכס 1.
-f_bars() => [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]]
 
 [t1, n1o0, n1h0, n1l0, n1c0, n1o1, n1c1, n1h2, n1l2, n1c2, n1o2] = request.security(s1, tfs1, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
 [t2, n2o0, n2h0, n2l0, n2c0, n2o1, n2c1, n2h2, n2l2, n2c2, n2o2] = request.security(s1, tfs2, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
@@ -1130,26 +1125,26 @@ f_bars() => [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low
 [t5, n5o0, n5h0, n5l0, n5c0, n5o1, n5c1, n5h2, n5l2, n5c2, n5o2] = request.security(s1, tfs5, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
 [t6, n6o0, n6h0, n6l0, n6c0, n6o1, n6c1, n6h2, n6l2, n6c2, n6o2] = request.security(s1, tfs6, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
 
-[s1o0, s1h0, s1l0, s1c0, s1o1, s1c1, s1h2, s1l2, s1c2, s1o2] = request.security(s2, tfs1, f_bars(), lookahead = barmerge.lookahead_off)
-[s2o0, s2h0, s2l0, s2c0, s2o1, s2c1, s2h2, s2l2, s2c2, s2o2] = request.security(s2, tfs2, f_bars(), lookahead = barmerge.lookahead_off)
-[s3o0, s3h0, s3l0, s3c0, s3o1, s3c1, s3h2, s3l2, s3c2, s3o2] = request.security(s2, tfs3, f_bars(), lookahead = barmerge.lookahead_off)
-[s4o0, s4h0, s4l0, s4c0, s4o1, s4c1, s4h2, s4l2, s4c2, s4o2] = request.security(s2, tfs4, f_bars(), lookahead = barmerge.lookahead_off)
-[s5o0, s5h0, s5l0, s5c0, s5o1, s5c1, s5h2, s5l2, s5c2, s5o2] = request.security(s2, tfs5, f_bars(), lookahead = barmerge.lookahead_off)
-[s6o0, s6h0, s6l0, s6c0, s6o1, s6c1, s6h2, s6l2, s6c2, s6o2] = request.security(s2, tfs6, f_bars(), lookahead = barmerge.lookahead_off)
+[s1o0, s1h0, s1l0, s1c0, s1o1, s1c1, s1h2, s1l2, s1c2, s1o2] = request.security(s2, tfs1, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[s2o0, s2h0, s2l0, s2c0, s2o1, s2c1, s2h2, s2l2, s2c2, s2o2] = request.security(s2, tfs2, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[s3o0, s3h0, s3l0, s3c0, s3o1, s3c1, s3h2, s3l2, s3c2, s3o2] = request.security(s2, tfs3, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[s4o0, s4h0, s4l0, s4c0, s4o1, s4c1, s4h2, s4l2, s4c2, s4o2] = request.security(s2, tfs4, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[s5o0, s5h0, s5l0, s5c0, s5o1, s5c1, s5h2, s5l2, s5c2, s5o2] = request.security(s2, tfs5, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[s6o0, s6h0, s6l0, s6c0, s6o1, s6c1, s6h2, s6l2, s6c2, s6o2] = request.security(s2, tfs6, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
 
-[y1o0, y1h0, y1l0, y1c0, y1o1, y1c1, y1h2, y1l2, y1c2, y1o2] = request.security(s3, tfs1, f_bars(), lookahead = barmerge.lookahead_off)
-[y2o0, y2h0, y2l0, y2c0, y2o1, y2c1, y2h2, y2l2, y2c2, y2o2] = request.security(s3, tfs2, f_bars(), lookahead = barmerge.lookahead_off)
-[y3o0, y3h0, y3l0, y3c0, y3o1, y3c1, y3h2, y3l2, y3c2, y3o2] = request.security(s3, tfs3, f_bars(), lookahead = barmerge.lookahead_off)
-[y4o0, y4h0, y4l0, y4c0, y4o1, y4c1, y4h2, y4l2, y4c2, y4o2] = request.security(s3, tfs4, f_bars(), lookahead = barmerge.lookahead_off)
-[y5o0, y5h0, y5l0, y5c0, y5o1, y5c1, y5h2, y5l2, y5c2, y5o2] = request.security(s3, tfs5, f_bars(), lookahead = barmerge.lookahead_off)
-[y6o0, y6h0, y6l0, y6c0, y6o1, y6c1, y6h2, y6l2, y6c2, y6o2] = request.security(s3, tfs6, f_bars(), lookahead = barmerge.lookahead_off)
+[y1o0, y1h0, y1l0, y1c0, y1o1, y1c1, y1h2, y1l2, y1c2, y1o2] = request.security(s3, tfs1, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[y2o0, y2h0, y2l0, y2c0, y2o1, y2c1, y2h2, y2l2, y2c2, y2o2] = request.security(s3, tfs2, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[y3o0, y3h0, y3l0, y3c0, y3o1, y3c1, y3h2, y3l2, y3c2, y3o2] = request.security(s3, tfs3, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[y4o0, y4h0, y4l0, y4c0, y4o1, y4c1, y4h2, y4l2, y4c2, y4o2] = request.security(s3, tfs4, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[y5o0, y5h0, y5l0, y5c0, y5o1, y5c1, y5h2, y5l2, y5c2, y5o2] = request.security(s3, tfs5, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[y6o0, y6h0, y6l0, y6c0, y6o1, y6c1, y6h2, y6l2, y6c2, y6o2] = request.security(s3, tfs6, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
 
-[r1o0, r1h0, r1l0, r1c0, r1o1, r1c1, r1h2, r1l2, r1c2, r1o2] = request.security(s4, tfs1, f_bars(), lookahead = barmerge.lookahead_off)
-[r2o0, r2h0, r2l0, r2c0, r2o1, r2c1, r2h2, r2l2, r2c2, r2o2] = request.security(s4, tfs2, f_bars(), lookahead = barmerge.lookahead_off)
-[r3o0, r3h0, r3l0, r3c0, r3o1, r3c1, r3h2, r3l2, r3c2, r3o2] = request.security(s4, tfs3, f_bars(), lookahead = barmerge.lookahead_off)
-[r4o0, r4h0, r4l0, r4c0, r4o1, r4c1, r4h2, r4l2, r4c2, r4o2] = request.security(s4, tfs4, f_bars(), lookahead = barmerge.lookahead_off)
-[r5o0, r5h0, r5l0, r5c0, r5o1, r5c1, r5h2, r5l2, r5c2, r5o2] = request.security(s4, tfs5, f_bars(), lookahead = barmerge.lookahead_off)
-[r6o0, r6h0, r6l0, r6c0, r6o1, r6c1, r6h2, r6l2, r6c2, r6o2] = request.security(s4, tfs6, f_bars(), lookahead = barmerge.lookahead_off)
+[r1o0, r1h0, r1l0, r1c0, r1o1, r1c1, r1h2, r1l2, r1c2, r1o2] = request.security(s4, tfs1, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[r2o0, r2h0, r2l0, r2c0, r2o1, r2c1, r2h2, r2l2, r2c2, r2o2] = request.security(s4, tfs2, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[r3o0, r3h0, r3l0, r3c0, r3o1, r3c1, r3h2, r3l2, r3c2, r3o2] = request.security(s4, tfs3, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[r4o0, r4h0, r4l0, r4c0, r4o1, r4c1, r4h2, r4l2, r4c2, r4o2] = request.security(s4, tfs4, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[r5o0, r5h0, r5l0, r5c0, r5o1, r5c1, r5h2, r5l2, r5c2, r5o2] = request.security(s4, tfs5, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[r6o0, r6h0, r6l0, r6c0, r6o1, r6c1, r6h2, r6l2, r6c2, r6o2] = request.security(s4, tfs6, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
 
 // ignore_invalid_timeframe מחזיר na כשהמדרגה לא באמת מתחת לגרף
 [q1t, q1ao, q1ah, q1al, q1ac] = request.security_lower_tf(s1, tfl1, [time, open, high, low, close], ignore_invalid_timeframe = true)
@@ -1179,7 +1174,17 @@ var Engine el2 = f_newEng(cL2)
 var Engine el3 = f_newEng(cL3)
 
 // כל המנועים ברשימה אחת, באותו סדר של useH1..useL3
-var array<Engine> allEng = array.from(eg1, eg2, eg3, eg4, eg5, eg6, el1, el2, el3)
+var array<Engine> allEng = array.new<Engine>()
+if barstate.isfirst
+    array.push(allEng, eg1)
+    array.push(allEng, eg2)
+    array.push(allEng, eg3)
+    array.push(allEng, eg4)
+    array.push(allEng, eg5)
+    array.push(allEng, eg6)
+    array.push(allEng, el1)
+    array.push(allEng, el2)
+    array.push(allEng, el3)
 
 f_useSlot(int k) =>
     k == 0 ? useH1 : k == 1 ? useH2 : k == 2 ? useH3 : k == 3 ? useH4 : k == 4 ? useH5 : k == 5 ? useH6 : k == 6 ? useL1 : k == 7 ? useL2 : useL3
