@@ -131,6 +131,10 @@ flashTagCol  = input.color(color.gray, "צבע התווית", group = grpMtf)
 mtfAlert     = input.bool(true, "כלול שבירות ממסגרות אחרות בהתראה", group = grpMtf)
 // כל מסגרת עליונה = הרבה סדרות נתונים, והתקציב משותף לכל האינדיקטורים בגרף.
 // בגרף 4H ומעלה הסריקה ממשיכה עד החודשי.
+// המסגרות האחרות מחושבות רק על הנרות האחרונים שלהן. 2000 מכסה בכל מסגרת יותר
+// מהמיכל הנוכחי והקודם (הארוך ביותר: 4H — חודש ≈ 140 נרות, 1W — שנת QT ≈ 52),
+// ולכן השבירות בזמן אמת זהות לגמרי. חוסך זיכרון, בעיקר בנרות הקטנים שמתחת לגרף.
+calcBars     = input.int(2000, "נרות לחישוב המסגרות האחרות", minval = 500, maxval = 20000, step = 500, group = grpMtf, tooltip = "לא משנה את השבירות של היום — רק כמה רחוק אחורה שורת הפינה וההתראות מחושבות. נמוך יותר = פחות זיכרון.")
 maxHtf       = input.string("4H", "מסגרת עליונה לסריקה (בגרף מתחת ל-4H)", options = ["4H", "1D", "1W", "Mo"], group = grpMtf, tooltip = "גבוה יותר = יותר זיכרון. אם מופיעה שגיאת Memory limits — להשאיר על 4H.")
 
 // ═══════════════════════════════════════════════════════════════════
@@ -652,7 +656,8 @@ f_sel(array<Gap> a) =>
 // ═══════════════════════════════════════════════════════════════════
 // מנוע עצמאי למסגרת זמן אחרת — אותם חוקים בדיוק כמו הגרף הראשי
 //
-// כל נכס מגיע כמערך של עשרה מספרים משלושת הנרות האחרונים שנסגרו:
+// כל נר שנסגר במסגרת שלו מוזן אחד-אחד (f_pushLtf), והמנוע מחזיק בעצמו את
+// שני הנרות הקודמים. לצעד כל נכס מגיע כמערך של עשרה מספרים:
 //   [0]=open0 [1]=high0 [2]=low0 [3]=close0 [4]=open1 [5]=close1
 //   [6]=high2 [7]=low2  [8]=close2 [9]=open2
 // ═══════════════════════════════════════════════════════════════════
@@ -887,7 +892,7 @@ f_step(Engine e, int tOpen, array<float> q1, array<float> q2, array<float> q3, a
             e.fKind := gd.kind
     e.fDeg
 
-// מסגרת נמוכה מהגרף: המנוע מחזיק בעצמו את שני הנרות הקודמים של כל נכס.
+// המנוע מחזיק בעצמו את שני הנרות הקודמים של כל נכס — מעל הגרף ומתחתיו.
 f_hist(array<float> h, float o, float hi, float lo, float c) =>
     array.from(o, hi, lo, c, array.get(h, 0), array.get(h, 3), array.get(h, 5), array.get(h, 6), array.get(h, 7), array.get(h, 4))
 
@@ -1116,49 +1121,51 @@ tfl1 = not useL1 ? "12M" : cL1 == 1 ? "1" : cL1 == 2 ? "5" : cL1 == 3 ? "15" : c
 tfl2 = not useL2 ? "12M" : cL2 == 1 ? "1" : cL2 == 2 ? "5" : cL2 == 3 ? "15" : cL2 == 4 ? "60" : cL2 == 5 ? "240" : cL2 == 6 ? "D" : "W"
 tfl3 = not useL3 ? "12M" : cL3 == 1 ? "1" : cL3 == 2 ? "5" : cL3 == 3 ? "15" : cL3 == 4 ? "60" : cL3 == 5 ? "240" : cL3 == 6 ? "D" : "W"
 
-// עשרה ערכים לכל נכס ומסגרת. הזמן נלקח רק מנכס 1.
+// רק הנר האחרון שנסגר בכל מסגרת — ארבעה ערכים במקום עשרה. שני הנרות הקודמים
+// נשמרים בתוך המנוע (h1..h4), בדיוק כמו במסגרות שמתחת לגרף, ולכן התוצאה זהה
+// ובזיכרון יש פחות מחצי מהסדרות. הזמן נלקח רק מנכס 1.
 
-[t1, n1o0, n1h0, n1l0, n1c0, n1o1, n1c1, n1h2, n1l2, n1c2, n1o2] = request.security(s1, tfs1, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
-[t2, n2o0, n2h0, n2l0, n2c0, n2o1, n2c1, n2h2, n2l2, n2c2, n2o2] = request.security(s1, tfs2, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
-[t3, n3o0, n3h0, n3l0, n3c0, n3o1, n3c1, n3h2, n3l2, n3c2, n3o2] = request.security(s1, tfs3, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
-[t4, n4o0, n4h0, n4l0, n4c0, n4o1, n4c1, n4h2, n4l2, n4c2, n4o2] = request.security(s1, tfs4, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
-[t5, n5o0, n5h0, n5l0, n5c0, n5o1, n5c1, n5h2, n5l2, n5c2, n5o2] = request.security(s1, tfs5, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
-[t6, n6o0, n6h0, n6l0, n6c0, n6o1, n6c1, n6h2, n6l2, n6c2, n6o2] = request.security(s1, tfs6, [time[1], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[t1, n1o, n1h, n1l, n1c] = request.security(s1, tfs1, [time[1], open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_off, calc_bars_count = calcBars)
+[t2, n2o, n2h, n2l, n2c] = request.security(s1, tfs2, [time[1], open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_off, calc_bars_count = calcBars)
+[t3, n3o, n3h, n3l, n3c] = request.security(s1, tfs3, [time[1], open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_off, calc_bars_count = calcBars)
+[t4, n4o, n4h, n4l, n4c] = request.security(s1, tfs4, [time[1], open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_off, calc_bars_count = calcBars)
+[t5, n5o, n5h, n5l, n5c] = request.security(s1, tfs5, [time[1], open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_off, calc_bars_count = calcBars)
+[t6, n6o, n6h, n6l, n6c] = request.security(s1, tfs6, [time[1], open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_off, calc_bars_count = calcBars)
 
-[s1o0, s1h0, s1l0, s1c0, s1o1, s1c1, s1h2, s1l2, s1c2, s1o2] = request.security(s2, tfs1, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
-[s2o0, s2h0, s2l0, s2c0, s2o1, s2c1, s2h2, s2l2, s2c2, s2o2] = request.security(s2, tfs2, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
-[s3o0, s3h0, s3l0, s3c0, s3o1, s3c1, s3h2, s3l2, s3c2, s3o2] = request.security(s2, tfs3, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
-[s4o0, s4h0, s4l0, s4c0, s4o1, s4c1, s4h2, s4l2, s4c2, s4o2] = request.security(s2, tfs4, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
-[s5o0, s5h0, s5l0, s5c0, s5o1, s5c1, s5h2, s5l2, s5c2, s5o2] = request.security(s2, tfs5, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
-[s6o0, s6h0, s6l0, s6c0, s6o1, s6c1, s6h2, s6l2, s6c2, s6o2] = request.security(s2, tfs6, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[s1o, s1h, s1l, s1c] = request.security(s2, tfs1, [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_off, calc_bars_count = calcBars)
+[s2o, s2h, s2l, s2c] = request.security(s2, tfs2, [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_off, calc_bars_count = calcBars)
+[s3o, s3h, s3l, s3c] = request.security(s2, tfs3, [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_off, calc_bars_count = calcBars)
+[s4o, s4h, s4l, s4c] = request.security(s2, tfs4, [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_off, calc_bars_count = calcBars)
+[s5o, s5h, s5l, s5c] = request.security(s2, tfs5, [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_off, calc_bars_count = calcBars)
+[s6o, s6h, s6l, s6c] = request.security(s2, tfs6, [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_off, calc_bars_count = calcBars)
 
-[y1o0, y1h0, y1l0, y1c0, y1o1, y1c1, y1h2, y1l2, y1c2, y1o2] = request.security(s3, tfs1, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
-[y2o0, y2h0, y2l0, y2c0, y2o1, y2c1, y2h2, y2l2, y2c2, y2o2] = request.security(s3, tfs2, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
-[y3o0, y3h0, y3l0, y3c0, y3o1, y3c1, y3h2, y3l2, y3c2, y3o2] = request.security(s3, tfs3, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
-[y4o0, y4h0, y4l0, y4c0, y4o1, y4c1, y4h2, y4l2, y4c2, y4o2] = request.security(s3, tfs4, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
-[y5o0, y5h0, y5l0, y5c0, y5o1, y5c1, y5h2, y5l2, y5c2, y5o2] = request.security(s3, tfs5, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
-[y6o0, y6h0, y6l0, y6c0, y6o1, y6c1, y6h2, y6l2, y6c2, y6o2] = request.security(s3, tfs6, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[y1o, y1h, y1l, y1c] = request.security(s3, tfs1, [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_off, calc_bars_count = calcBars)
+[y2o, y2h, y2l, y2c] = request.security(s3, tfs2, [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_off, calc_bars_count = calcBars)
+[y3o, y3h, y3l, y3c] = request.security(s3, tfs3, [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_off, calc_bars_count = calcBars)
+[y4o, y4h, y4l, y4c] = request.security(s3, tfs4, [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_off, calc_bars_count = calcBars)
+[y5o, y5h, y5l, y5c] = request.security(s3, tfs5, [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_off, calc_bars_count = calcBars)
+[y6o, y6h, y6l, y6c] = request.security(s3, tfs6, [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_off, calc_bars_count = calcBars)
 
-[r1o0, r1h0, r1l0, r1c0, r1o1, r1c1, r1h2, r1l2, r1c2, r1o2] = request.security(s4, tfs1, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
-[r2o0, r2h0, r2l0, r2c0, r2o1, r2c1, r2h2, r2l2, r2c2, r2o2] = request.security(s4, tfs2, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
-[r3o0, r3h0, r3l0, r3c0, r3o1, r3c1, r3h2, r3l2, r3c2, r3o2] = request.security(s4, tfs3, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
-[r4o0, r4h0, r4l0, r4c0, r4o1, r4c1, r4h2, r4l2, r4c2, r4o2] = request.security(s4, tfs4, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
-[r5o0, r5h0, r5l0, r5c0, r5o1, r5c1, r5h2, r5l2, r5c2, r5o2] = request.security(s4, tfs5, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
-[r6o0, r6h0, r6l0, r6c0, r6o1, r6c1, r6h2, r6l2, r6c2, r6o2] = request.security(s4, tfs6, [open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]], lookahead = barmerge.lookahead_off)
+[r1o, r1h, r1l, r1c] = request.security(s4, tfs1, [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_off, calc_bars_count = calcBars)
+[r2o, r2h, r2l, r2c] = request.security(s4, tfs2, [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_off, calc_bars_count = calcBars)
+[r3o, r3h, r3l, r3c] = request.security(s4, tfs3, [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_off, calc_bars_count = calcBars)
+[r4o, r4h, r4l, r4c] = request.security(s4, tfs4, [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_off, calc_bars_count = calcBars)
+[r5o, r5h, r5l, r5c] = request.security(s4, tfs5, [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_off, calc_bars_count = calcBars)
+[r6o, r6h, r6l, r6c] = request.security(s4, tfs6, [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_off, calc_bars_count = calcBars)
 
 // ignore_invalid_timeframe מחזיר na כשהמדרגה לא באמת מתחת לגרף
-[q1t, q1ao, q1ah, q1al, q1ac] = request.security_lower_tf(s1, tfl1, [time, open, high, low, close], ignore_invalid_timeframe = true)
-[q2t, q2ao, q2ah, q2al, q2ac] = request.security_lower_tf(s1, tfl2, [time, open, high, low, close], ignore_invalid_timeframe = true)
-[q3t, q3ao, q3ah, q3al, q3ac] = request.security_lower_tf(s1, tfl3, [time, open, high, low, close], ignore_invalid_timeframe = true)
-[q1bo, q1bh, q1bl, q1bc] = request.security_lower_tf(s2, tfl1, [open, high, low, close], ignore_invalid_timeframe = true)
-[q2bo, q2bh, q2bl, q2bc] = request.security_lower_tf(s2, tfl2, [open, high, low, close], ignore_invalid_timeframe = true)
-[q3bo, q3bh, q3bl, q3bc] = request.security_lower_tf(s2, tfl3, [open, high, low, close], ignore_invalid_timeframe = true)
-[q1co, q1ch, q1cl, q1cc] = request.security_lower_tf(s3, tfl1, [open, high, low, close], ignore_invalid_timeframe = true)
-[q2co, q2ch, q2cl, q2cc] = request.security_lower_tf(s3, tfl2, [open, high, low, close], ignore_invalid_timeframe = true)
-[q3co, q3ch, q3cl, q3cc] = request.security_lower_tf(s3, tfl3, [open, high, low, close], ignore_invalid_timeframe = true)
-[q1do, q1dh, q1dl, q1dc] = request.security_lower_tf(s4, tfl1, [open, high, low, close], ignore_invalid_timeframe = true)
-[q2do, q2dh, q2dl, q2dc] = request.security_lower_tf(s4, tfl2, [open, high, low, close], ignore_invalid_timeframe = true)
-[q3do, q3dh, q3dl, q3dc] = request.security_lower_tf(s4, tfl3, [open, high, low, close], ignore_invalid_timeframe = true)
+[q1t, q1ao, q1ah, q1al, q1ac] = request.security_lower_tf(s1, tfl1, [time, open, high, low, close], ignore_invalid_timeframe = true, calc_bars_count = calcBars)
+[q2t, q2ao, q2ah, q2al, q2ac] = request.security_lower_tf(s1, tfl2, [time, open, high, low, close], ignore_invalid_timeframe = true, calc_bars_count = calcBars)
+[q3t, q3ao, q3ah, q3al, q3ac] = request.security_lower_tf(s1, tfl3, [time, open, high, low, close], ignore_invalid_timeframe = true, calc_bars_count = calcBars)
+[q1bo, q1bh, q1bl, q1bc] = request.security_lower_tf(s2, tfl1, [open, high, low, close], ignore_invalid_timeframe = true, calc_bars_count = calcBars)
+[q2bo, q2bh, q2bl, q2bc] = request.security_lower_tf(s2, tfl2, [open, high, low, close], ignore_invalid_timeframe = true, calc_bars_count = calcBars)
+[q3bo, q3bh, q3bl, q3bc] = request.security_lower_tf(s2, tfl3, [open, high, low, close], ignore_invalid_timeframe = true, calc_bars_count = calcBars)
+[q1co, q1ch, q1cl, q1cc] = request.security_lower_tf(s3, tfl1, [open, high, low, close], ignore_invalid_timeframe = true, calc_bars_count = calcBars)
+[q2co, q2ch, q2cl, q2cc] = request.security_lower_tf(s3, tfl2, [open, high, low, close], ignore_invalid_timeframe = true, calc_bars_count = calcBars)
+[q3co, q3ch, q3cl, q3cc] = request.security_lower_tf(s3, tfl3, [open, high, low, close], ignore_invalid_timeframe = true, calc_bars_count = calcBars)
+[q1do, q1dh, q1dl, q1dc] = request.security_lower_tf(s4, tfl1, [open, high, low, close], ignore_invalid_timeframe = true, calc_bars_count = calcBars)
+[q2do, q2dh, q2dl, q2dc] = request.security_lower_tf(s4, tfl2, [open, high, low, close], ignore_invalid_timeframe = true, calc_bars_count = calcBars)
+[q3do, q3dh, q3dl, q3dc] = request.security_lower_tf(s4, tfl3, [open, high, low, close], ignore_invalid_timeframe = true, calc_bars_count = calcBars)
 
 f_newEng(int c) =>
     Engine.new(cls = c, gaps = array.new<Gap>(), h1 = array.new_float(8, na), h2 = array.new_float(8, na), h3 = array.new_float(8, na), h4 = array.new_float(8, na))
@@ -1231,17 +1238,17 @@ if mtfOn and barstate.isconfirmed
         Engine er = array.get(allEng, k)
         er.justFired := false
     if useH1
-        f_step(eg1, t1, array.from(n1o0, n1h0, n1l0, n1c0, n1o1, n1c1, n1h2, n1l2, n1c2, n1o2), array.from(s1o0, s1h0, s1l0, s1c0, s1o1, s1c1, s1h2, s1l2, s1c2, s1o2), array.from(y1o0, y1h0, y1l0, y1c0, y1o1, y1c1, y1h2, y1l2, y1c2, y1o2), array.from(r1o0, r1h0, r1l0, r1c0, r1o1, r1c1, r1h2, r1l2, r1c2, r1o2))
+        f_pushLtf(eg1, t1, n1o, n1h, n1l, n1c, s1o, s1h, s1l, s1c, y1o, y1h, y1l, y1c, r1o, r1h, r1l, r1c)
     if useH2
-        f_step(eg2, t2, array.from(n2o0, n2h0, n2l0, n2c0, n2o1, n2c1, n2h2, n2l2, n2c2, n2o2), array.from(s2o0, s2h0, s2l0, s2c0, s2o1, s2c1, s2h2, s2l2, s2c2, s2o2), array.from(y2o0, y2h0, y2l0, y2c0, y2o1, y2c1, y2h2, y2l2, y2c2, y2o2), array.from(r2o0, r2h0, r2l0, r2c0, r2o1, r2c1, r2h2, r2l2, r2c2, r2o2))
+        f_pushLtf(eg2, t2, n2o, n2h, n2l, n2c, s2o, s2h, s2l, s2c, y2o, y2h, y2l, y2c, r2o, r2h, r2l, r2c)
     if useH3
-        f_step(eg3, t3, array.from(n3o0, n3h0, n3l0, n3c0, n3o1, n3c1, n3h2, n3l2, n3c2, n3o2), array.from(s3o0, s3h0, s3l0, s3c0, s3o1, s3c1, s3h2, s3l2, s3c2, s3o2), array.from(y3o0, y3h0, y3l0, y3c0, y3o1, y3c1, y3h2, y3l2, y3c2, y3o2), array.from(r3o0, r3h0, r3l0, r3c0, r3o1, r3c1, r3h2, r3l2, r3c2, r3o2))
+        f_pushLtf(eg3, t3, n3o, n3h, n3l, n3c, s3o, s3h, s3l, s3c, y3o, y3h, y3l, y3c, r3o, r3h, r3l, r3c)
     if useH4
-        f_step(eg4, t4, array.from(n4o0, n4h0, n4l0, n4c0, n4o1, n4c1, n4h2, n4l2, n4c2, n4o2), array.from(s4o0, s4h0, s4l0, s4c0, s4o1, s4c1, s4h2, s4l2, s4c2, s4o2), array.from(y4o0, y4h0, y4l0, y4c0, y4o1, y4c1, y4h2, y4l2, y4c2, y4o2), array.from(r4o0, r4h0, r4l0, r4c0, r4o1, r4c1, r4h2, r4l2, r4c2, r4o2))
+        f_pushLtf(eg4, t4, n4o, n4h, n4l, n4c, s4o, s4h, s4l, s4c, y4o, y4h, y4l, y4c, r4o, r4h, r4l, r4c)
     if useH5
-        f_step(eg5, t5, array.from(n5o0, n5h0, n5l0, n5c0, n5o1, n5c1, n5h2, n5l2, n5c2, n5o2), array.from(s5o0, s5h0, s5l0, s5c0, s5o1, s5c1, s5h2, s5l2, s5c2, s5o2), array.from(y5o0, y5h0, y5l0, y5c0, y5o1, y5c1, y5h2, y5l2, y5c2, y5o2), array.from(r5o0, r5h0, r5l0, r5c0, r5o1, r5c1, r5h2, r5l2, r5c2, r5o2))
+        f_pushLtf(eg5, t5, n5o, n5h, n5l, n5c, s5o, s5h, s5l, s5c, y5o, y5h, y5l, y5c, r5o, r5h, r5l, r5c)
     if useH6
-        f_step(eg6, t6, array.from(n6o0, n6h0, n6l0, n6c0, n6o1, n6c1, n6h2, n6l2, n6c2, n6o2), array.from(s6o0, s6h0, s6l0, s6c0, s6o1, s6c1, s6h2, s6l2, s6c2, s6o2), array.from(y6o0, y6h0, y6l0, y6c0, y6o1, y6c1, y6h2, y6l2, y6c2, y6o2), array.from(r6o0, r6h0, r6l0, r6c0, r6o1, r6c1, r6h2, r6l2, r6c2, r6o2))
+        f_pushLtf(eg6, t6, n6o, n6h, n6l, n6c, s6o, s6h, s6l, s6c, y6o, y6h, y6l, y6c, r6o, r6h, r6l, r6c)
     if useL1
         f_feedLtf(el1, q1t, q1ao, q1ah, q1al, q1ac, q1bo, q1bh, q1bl, q1bc, q1co, q1ch, q1cl, q1cc, q1do, q1dh, q1dl, q1dc)
     if useL2
