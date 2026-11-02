@@ -3,8 +3,11 @@
 Two unrelated things live here:
 
 - `index.html` — a single file trade journal (Supabase backed).
-- `pine/SavFX_Quarterly_Cycles.pine` — a TradingView Pine v5 indicator drawing
-  the Quarterly Theory cycle ladder as rows of boxes in its own pane.
+- `pine/SavFX_Quarterly_Cycles.pine` — one TradingView Pine v5 indicator in
+  three parts: the Quarterly Theory cycle ladder as rows of boxes in its own
+  pane, the True Opens as lines on the candles, and the Devil Marks. The second
+  and third parts reach the price chart with `force_overlay` while the script
+  itself is `overlay = false`, which is the only way to have both at once.
 
 ## Working on the indicator
 
@@ -41,8 +44,11 @@ comes in, so no chart stacks more than four rows.
 
 ### Decisions already settled — do not revisit without being asked
 
-- The trading day opens at 18:00 on the script's own scale (`time + 1h`,
-  exchange time). This matches the script this one replaced; do not "fix" it.
+- One shared clock for everything: the trading day opens at 18:00 on the zone
+  picked in "Time Base", New York by default, plus a shift in hours. The rows
+  and the true opens must never run on different clocks — that is what put them
+  an hour apart when Israel and the US changed to winter time a week apart.
+  Every container and boundary the true opens use is taken from the row grid.
 - Quarters are plain calendar quarters. April is not a year boundary.
 - The four year cycle is 2023, 2024, 2025, 2026, written `(year + 1) % 4 + 1`.
 - A week belongs to the month holding its **Tuesday**; a week whose Tuesday and
