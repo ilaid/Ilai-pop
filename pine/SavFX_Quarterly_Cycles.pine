@@ -602,7 +602,6 @@ useT4YO = input.bool(true, "T4YO - 2nd year in the four year cycle", group = g_t
 g_zn = "Zone Box"
 showZoneBox  = input.bool(true, "Show", group = g_zn, tooltip = "Premium or discount for the cycle this chart measures, off the chart's own open and the two above it. Hidden above the 4 hour chart. It sits in this script's pane, not on the candles, because a table cannot be forced onto the chart.")
 zonePosition = input.string("bottom_right", "Position", options = ["top_right", "top_left", "bottom_right", "bottom_left", "middle_right", "middle_left"], group = g_zn)
-showBias     = input.bool(true, "Directional bias label", group = g_zn, tooltip = "Reads bullish or bearish off the T90O through the AM session, and N/A outside it.")
 
 toStyle = toStyleIn == "Solid" ? line.style_solid : toStyleIn == "Dotted" ? line.style_dotted : line.style_dashed
 
@@ -780,14 +779,6 @@ if barstate.islast
     finish(lnTMO,  lbTMO,  showTMO  and not na(pTMO))
     finish(lnTYO,  lbTYO,  showTYO  and not na(pTYO))
     finish(lnT4YO, lbT4YO, showT4YO and not na(pT4YO))
-
-// ---------- directional bias, through the AM session ----------
-bias = iSess == 3 and not na(pT90O) ? (open > pT90O ? "Bullish" : "Bearish") : "N/A"
-
-var label biasLb = label.new(na, na, text = "Directional Bias: N/A", color = #00000000, textcolor = toCol, size = size.normal, style = label.style_label_left, force_overlay = true)
-if barstate.islast
-    label.set_xy(biasLb, showBias ? bar_index + lookahead : na, showBias ? close : na)
-    label.set_text(biasLb, "Directional Bias: " + bias)
 
 
 // ───────────────────────────── zone box ───────────────────────────────────────
