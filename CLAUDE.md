@@ -38,17 +38,28 @@ slowest at the bottom of the pane:
 | 22.5 Minute | 22.5 min | four per 90 min |
 | 5.625 Minute | 5.625 min | four per 22.5 min |
 
+On 5m the chart reads day, session, 90 min, 22.5 min — the 5.625 min row only
+comes in below 5m, and the daily row steps aside for it there.
+
 A cell is labelled with the chain of quarters leading to it, highest level
 first, three links by default. Each row drops off its own end as a finer one
 comes in, so no chart stacks more than four rows.
 
 ### Decisions already settled — do not revisit without being asked
 
-- One shared clock for everything: the trading day opens at 18:00 on the zone
-  picked in "Time Base", New York by default, plus a shift in hours. The rows
-  and the true opens must never run on different clocks — that is what put them
-  an hour apart when Israel and the US changed to winter time a week apart.
-  Every container and boundary the true opens use is taken from the row grid.
+- One shared clock for everything: the trading day opens at 18:00 on the **New
+  York wall clock**, full stop. The rows and the true opens must never run on
+  different clocks, and every container and boundary the true opens use is
+  taken from the row grid.
+- The time of day is read off the clock face — `hour()`/`minute()`/`second()`
+  in New York, plus `time % 1000` for the milliseconds — never as the time
+  elapsed since local midnight. Counting from midnight makes the changeover
+  Sunday 25 hours long, which slid the whole ladder an hour and left the
+  trading day that opened that evening numbered as Sunday, so it lost its day
+  number and fell back to week 4 of the month before.
+- There is no "Exchange" clock option and no need for one. The only knob is
+  "Shift From New York (hours)", which belongs on 0 and is there for moving the
+  ladder on purpose, not for putting daylight saving right.
 - Quarters are plain calendar quarters. April is not a year boundary.
 - The four year cycle is 2023, 2024, 2025, 2026, written `(year + 1) % 4 + 1`.
 - A week belongs to the month holding its **Tuesday**; a week whose Tuesday and

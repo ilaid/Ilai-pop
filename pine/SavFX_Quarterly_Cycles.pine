@@ -63,9 +63,11 @@ indicator("Sav FX - Cycles, True Opens & Devil Marks", shorttitle="Sav FX", over
 //  quarters, the daily chart the current year, its quarters and their splits, and
 //  the week row starts on 12H and below. Lower down a row drops off its own end
 //  as a finer one comes in, so the pane never stacks more than four of them: the
-//  week row ends below 30m, the daily row below 10m, and the 5.625 min row comes
-//  in at 5m. A cell a bar or two wide has no room for a three link chain, so
-//  drop "Levels Per Label" on the fastest charts.
+//  week row ends below 30m, and the daily row holds on down to 5m, where the
+//  chart reads day - session - 90 min - 22.5 min. The 5.625 min row only comes
+//  in below 5m, and the daily row steps aside for it there. A cell a bar or two
+//  wide has no room for a three link chain, so drop "Levels Per Label" on the
+//  fastest charts.
 //
 //  Levels that carry no quarter number are drawn without colour and without a
 //  number, and they contribute no link to the chain:
@@ -75,14 +77,13 @@ indicator("Sav FX - Cycles, True Opens & Devil Marks", shorttitle="Sav FX", over
 //
 //  TIME BASE, shared by everything in this script
 //
-//  The trading day opens at 18:00 on one clock, picked in "Time Base". New York
-//  is the model's own clock and the default; Exchange is whatever the symbol
-//  trades on. The shift is added on top and is what to reach for when the grid
-//  sits an hour out: the two zones do not change over to winter time on the same
-//  date, so for a week or two a year a fixed offset is wrong by an hour. On New
-//  York with a shift of 0 that cannot happen, because the DST is TradingView's
-//  to work out. A shift of 1 reproduces the exchange + 1h scale this script used
-//  before the merge.
+//  The trading day opens at 18:00 on the New York wall clock, and nothing else:
+//  the rows, the cell edges and the true opens all read the same clock, so none
+//  of them can sit an hour from another. It holds through both daylight saving
+//  changeovers, and it does not care what zone the chart or the exchange is on,
+//  so there is nothing to put right by hand when a country moves its clocks a
+//  week before or after New York does. The shift is left in the settings for
+//  moving the ladder on purpose, and belongs on 0.
 //
 //  TRUE OPENS, drawn on the candles rather than in this pane
 //
@@ -101,10 +102,11 @@ indicator("Sav FX - Cycles, True Opens & Devil Marks", shorttitle="Sav FX", over
 
 // ───────────────────────────────── inputs ─────────────────────────────────────
 g_tz = "Time Base"
-tzMode = input.string("New York", "Clock", options = ["New York", "Exchange"], group = g_tz, tooltip = "The clock the 18:00 day open is read on, for the rows and for the true opens alike. New York is the model's own and handles both daylight saving changes by itself. Exchange follows the symbol, which drifts by an hour whenever its zone and New York change over on different dates.")
-shiftH = input.float(0, "Shift (hours)", minval = -12, maxval = 12, step = 0.25, group = g_tz, tooltip = "Added on top of the clock above. Reach for this when the whole grid sits an hour out: a quarter of an hour at a time, either way. A shift of 1 on the Exchange clock is the scale this script ran on before the true opens were merged in.")
+shiftH = input.float(0, "Shift From New York (hours)", minval = -12, maxval = 12, step = 0.25, group = g_tz, tooltip = "Leave this on 0. The whole script runs on the New York wall clock, so the trading day opens at 18:00 and London at 00:00 New York on every day of the year, the two daylight saving changeovers included, and whatever clock your own country or the chart is on. This is only here in case you ever want the ladder deliberately moved: a quarter of an hour at a time, either way.")
 
-gridTZ  = tzMode == "New York" ? "America/New_York" : syminfo.timezone
+// The model's own clock. Everything reads off it: the rows, the cell edges and
+// the true opens alike, so none of them can ever sit an hour from another.
+gridTZ  = "America/New_York"
 shiftMs = int(shiftH * 3600000)
 
 g_cyc = "Time Cycles"
@@ -166,11 +168,11 @@ en1 = showCyc4   and tfs >= 21600 and tfs <= 10368000   // cell = 1 year
 en2 = showQtYear and tfs >= 21600 and tfs <= 10368000   // cell = 1 quarter
 en3 = showSplit  and isDay1                             // cell = a quarter of a quarter
 en4 = showWeekly and tfs >= 1800  and tfs <= 43200      // cell = 1 week, off on 1D and up
-en5 = showDaily  and tfs >= 600   and tfs <= 43200      // cell = 1 trading day, off below 10m
+en5 = showDaily  and tfs >= 300   and tfs <= 43200      // cell = 1 trading day, down to 5m
 en6 = show6H     and tfs >= 60    and tfs <= 21600      // cell = 1 session
 en7 = show90     and tfs <= 2700                        // cell = 90 min
 en8 = show225    and tfs <= 540                         // cell = 22.5 min, down to 9m
-en9 = show5625   and tfs <= 300                         // cell = 5.625 min, down to 5m
+en9 = show5625   and tfs <  300                         // cell = 5.625 min, below 5m only
 
 // each row owns one unit of vertical space; the slowest cycle sits at the bottom
 y1 = 1
@@ -194,11 +196,23 @@ MS_5625 = 337500
 // the shared clock: real time pushed by the shift, read in gridTZ
 adj = time + shiftMs
 
-// milliseconds elapsed since the 18:00 open of the current trading day.
-// tod is measured against midnight rather than built from hour()/minute()/
-// second(), so it stays exact on sub-minute charts: a 5.625 min boundary falls
-// on a half second, which whole-second components would round into the wrong cell
-tod = adj - timestamp(gridTZ, year(adj, gridTZ), month(adj, gridTZ), dayofmonth(adj, gridTZ), 0, 0, 0)
+// The time of day on the WALL CLOCK, down to the millisecond, and from it the
+// milliseconds since the 18:00 open of the current trading day.
+//
+// It used to be counted as the time elapsed since local midnight, and that is
+// the hour the script was out by on the changeover: the Sunday the clocks go
+// back is 25 hours long, so 18:00 on the wall is 19 hours after midnight and
+// the whole ladder slid an hour. Worse, the trading day that opened that
+// evening then came out one calendar day short - Sunday rather than Monday -
+// so it lost its day number altogether and took the week back to the 4th of
+// the month before, which is what printed "Asia 4-F-1" instead of "Asia 1-1-1".
+//
+// Read off the clock face there is no such thing: the day opens at 18:00 and
+// London at 00:00 New York on every day of the year. The milliseconds inside
+// the second are taken from the raw timestamp, since no zone is offset by a
+// fraction of a minute, and they are what keeps a 5.625 min boundary - which
+// falls on a half second - in the right cell on a seconds chart.
+tod = (hour(adj, gridTZ) * 3600 + minute(adj, gridTZ) * 60 + second(adj, gridTZ)) * 1000 + adj % 1000
 md  = (tod - 18 * 3600000 + MS_DAY) % MS_DAY
 
 // offset inside each cell -> exact cell boundaries, free of rounding
@@ -435,7 +449,7 @@ fillFor(int lvl, int i) =>
 // quarter split is left out: it is a daily chart row and is not drawn ahead.
 idxAt(int t) =>
     int adjT  = t + shiftMs
-    int todT  = adjT - timestamp(gridTZ, year(adjT, gridTZ), month(adjT, gridTZ), dayofmonth(adjT, gridTZ), 0, 0, 0)
+    int todT  = (hour(adjT, gridTZ) * 3600 + minute(adjT, gridTZ) * 60 + second(adjT, gridTZ)) * 1000 + adjT % 1000
     int mdT   = (todT - 18 * 3600000 + MS_DAY) % MS_DAY
     int tdT   = adjT + MS_6H
     int dwT   = dayofweek(tdT, gridTZ)
