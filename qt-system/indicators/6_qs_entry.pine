@@ -55,6 +55,7 @@ grpTr   = "סימון ובדיקה אחורה"
 trOn    = input.bool(false, "בדוק כל אישור כעסקה", group = grpTr, tooltip = "סטופ תמיד מעבר לקיצון של חלון ה-QS (הגבוה בשורט, הנמוך בלונג) — שם הנכס שלא הצליח לקחת את הרמה. יעד: R לפי גודל החלון. מחליפים מצב כניסה ומשווים את הסטטיסטיקה.")
 trMode  = input.string("נר האישור", "מתי לסמן", options = ["נר האישור", "טריגר PCP + SSMT", "סוף חלון ה-QS"], group = grpTr, tooltip = "טריגר PCP + SSMT: נר של 5m או 15m שהוא PCP ונוצר עליו גם SSMT / HSSMT — כניסה בסגירתו.\nנר האישור: הנר שבו כל התנאים התקיימו.\nסוף חלון ה-QS: סגירת הנר האחרון של החלון.")
 trg1m   = input.bool(false, "טריגר גם מנר של 1m", group = grpTr)
+stopMode = input.string("קיצון החלון", "סטופ", options = ["קיצון החלון", "סווינג קרוב"], group = grpTr, tooltip = "קיצון החלון: טיק מעבר לגבוה (שורט) או לנמוך (לונג) של חלון ה-QS.\nסווינג קרוב: טיק מעבר לסווינג הקרוב (סווינג של 3 נרות בגרף) שנמצא מעבר לקיצון של החלון — למשל בלונג, הסווינג-לו האחרון שמתחת לנמוך של ה-QS. חריג: אם נר הקיצון של החלון הוא PSP (נר הסווינג של PSP חי באותו כיוון), הסטופ נשאר מעבר לנר הזה.")
 rr56    = input.float(1.3, "יעד בחלון 5.6 דק' (R)", minval = 0.5, step = 0.1, group = grpTr)
 rr225   = input.float(2.0, "יעד בחלון 22.5 דק' (R)", minval = 0.5, step = 0.1, group = grpTr)
 rr90    = input.float(3.0, "יעד בחלון 90 דק' (R)", minval = 0.5, step = 0.1, group = grpTr)
@@ -1028,6 +1029,8 @@ var float  eHi   = na    // החלון שנגמר עכשיו
 var float  eLo   = na
 var int    eHiB  = 0
 var int    eLoB  = 0
+var int    eHiT  = 0
+var int    eLoT  = 0
 var string eId   = ""
 bool wEnded = false
 if qsId != wId
@@ -1036,6 +1039,8 @@ if qsId != wId
         eLo    := wLo
         eHiB   := wHiB
         eLoB   := wLoB
+        eHiT   := wHiT
+        eLoT   := wLoT
         eId    := wId
         wEnded := true
     wId := qsId
@@ -1166,7 +1171,7 @@ f_bump(int i, bool win, float rr, float mfe) =>
 f_rr(int k) => k == 4 ? rr56 : k == 3 ? rr225 : k == 2 ? rr90 : rrBig
 
 // כניסה מיידית (טריגר / נר האישור): סטופ מעבר לקיצון של החלון עד עכשיו
-f_trArm(Trd t, label lb, float px, int nf) =>
+f_trArm(Trd t, label lb, float px, int nf, float stpIn) =>
     if trOn and t.st == 0
         t.win := qsId
         t.k   := qsK
@@ -1176,7 +1181,7 @@ f_trArm(Trd t, label lb, float px, int nf) =>
         if trMode == "סוף חלון ה-QS"
             t.st := 1
         else
-            float stp  = t.dir == -1 ? wHi + syminfo.mintick : wLo - syminfo.mintick
+            float stp  = stpIn
             float risk = t.dir == -1 ? stp - px : px - stp
             if not na(risk) and risk > 0
                 t.ent := px
@@ -1194,10 +1199,10 @@ f_trCancel(Trd t) =>
 prevClose = close[1]
 
 // החלון של העסקה נגמר — נכנסים, והתגית עוברת לנר שעשה את הקיצון של החלון
-f_trOpen(Trd t) =>
+f_trOpen(Trd t, float stpIn) =>
     if t.st == 1 and wEnded and t.win == eId
         float ent  = prevClose
-        float stp  = t.dir == -1 ? eHi : eLo
+        float stp  = stpIn
         float risk = t.dir == -1 ? stp - ent : ent - stp
         if na(risk) or risk <= 0
             t.st := 0
@@ -1260,6 +1265,50 @@ f_brkTxt(int d, string key) =>
         if p != ""
             o := o + (o == "" ? "" : " + ") + f_part(d, p)
     o
+
+// ── סטופ ──
+// סווינגים של 3 נרות בגרף (נאשרים נר אחד אחרי), האחרונים קודם
+var array<float> pvH = array.new_float()
+var array<float> pvL = array.new_float()
+pvHi = ta.pivothigh(high, 1, 1)
+pvLo = ta.pivotlow(low, 1, 1)
+if not na(pvHi)
+    array.unshift(pvH, pvHi)
+    if array.size(pvH) > 200
+        array.pop(pvH)
+if not na(pvLo)
+    array.unshift(pvL, pvLo)
+    if array.size(pvL) > 200
+        array.pop(pvL)
+// הסווינג הקרוב שמעבר לקיצון: לונג — הסווינג-לו האחרון שמתחת ל-ext · שורט — הסווינג-היי האחרון שמעל
+f_swing(int d, float ext) =>
+    float r = na
+    array<float> a = d == -1 ? pvH : pvL
+    if array.size(a) > 0 and not na(ext)
+        for i = 0 to array.size(a) - 1
+            float v = array.get(a, i)
+            if na(r) and (d == -1 ? v > ext : v < ext)
+                r := v
+    r
+// האם נר הקיצון הוא PSP: נר הסווינג של PSP חי באותו כיוון (1m / 5m / 15m) חופף לנר הקיצון
+f_pspAt(int d, int extT) =>
+    bool hit = false
+    for k in array.from(d == -1 ? kPB1 : kPU1, d == -1 ? kPB5 : kPU5, d == -1 ? kPB15 : kPU15)
+        if k != ""
+            int t0 = f_ptT(d, k)
+            int ms = f_ptMs(f_ptTf(k))
+            if t0 < extT + durMs and t0 + ms > extT
+                hit := true
+    hit
+f_stopAt(int d, float ext, int extT) =>
+    float tk = syminfo.mintick
+    float sw = stopMode == "סווינג קרוב" and not f_pspAt(d, extT) ? f_swing(d, ext) : na
+    float lv = na(sw) ? ext : sw
+    na(lv) ? na : (d == -1 ? lv + tk : lv - tk)
+stpNS = f_stopAt(-1, wHi, wHiT)
+stpNL = f_stopAt(1, wLo, wLoT)
+stpES = f_stopAt(-1, eHi, eHiT)
+stpEL = f_stopAt(1, eLo, eLoT)
 
 // זוגות שכבר נתנו אישור, לכל כיוון — אישור חדש רק עם שבירה חדשה
 var string usedS = "#"
@@ -1443,7 +1492,7 @@ if entS != "" and doneS != qsId
     usedS := str.length(usedS) > 3000 ? "#" + keyNS + "#" : usedS + keyNS + "#"
     lbS   := label.new(wHiB, wHi + lblOff, "▼ QS " + nmS, yloc = yloc.price, style = label.style_label_down, color = colBear, textcolor = color.white, size = size.small, tooltip = "SHORT · QS " + qsShow + " (" + f_kName(qsK) + ")\nכל התנאים התקיימו בנר של " + str.format_time(time, "HH:mm", TZ) + "\n" + entS + "\nהשבירות: " + f_brkTxt(-1, keyNS))
     array.push(hist, lbS)
-    f_trArm(tS, lbS, entPxS, f_nFresh(freshS, keyNS))
+    f_trArm(tS, lbS, entPxS, f_nFresh(freshS, keyNS), stpNS)
     alTxt := "▼ SHORT · QS " + qsPat + " " + f_kLen(qsK) + " · " + str.replace_all(entS, "\n", " · ")
 if entL != "" and doneL != qsId
     doneL := qsId
@@ -1461,7 +1510,7 @@ if entL != "" and doneL != qsId
     usedL := str.length(usedL) > 3000 ? "#" + keyNL + "#" : usedL + keyNL + "#"
     lbL   := label.new(wLoB, wLo - lblOff, "▲ QS " + nmL, yloc = yloc.price, style = label.style_label_up, color = colBull, textcolor = color.white, size = size.small, tooltip = "LONG · QS " + qsShow + " (" + f_kName(qsK) + ")\nכל התנאים התקיימו בנר של " + str.format_time(time, "HH:mm", TZ) + "\n" + entL + "\nהשבירות: " + f_brkTxt(1, keyNL))
     array.push(hist, lbL)
-    f_trArm(tL, lbL, entPxL, f_nFresh(freshL, keyNL))
+    f_trArm(tL, lbL, entPxL, f_nFresh(freshL, keyNL), stpNL)
     alTxt := alTxt + (alTxt == "" ? "" : "\n") + "▲ LONG · QS " + qsPat + " " + f_kLen(qsK) + " · " + str.replace_all(entL, "\n", " · ")
 while array.size(hist) > keepN
     label.delete(array.shift(hist))
@@ -1475,8 +1524,8 @@ if qsOn and doneL == qsId
 
 bgcolor(showBg and qsOn ? color.new(colQS, 90) : na, title = "QS window")
 
-f_trOpen(tS)
-f_trOpen(tL)
+f_trOpen(tS, stpES)
+f_trOpen(tL, stpEL)
 f_trCheck(tS)
 f_trCheck(tL)
 
