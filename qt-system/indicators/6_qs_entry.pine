@@ -1161,11 +1161,14 @@ var array<int>   stN = array.new_int(8, 0)
 var array<int>   stW = array.new_int(8, 0)
 var array<float> stR = array.new_float(8, 0.0)
 var array<float> stM = array.new_float(8, 0.0)
+// כמה עסקאות הגיעו לפחות ל-1R לטובתן לפני שנסגרו (אפשר היה להזיז לנקודת איזון)
+var array<int>   stB = array.new_int(8, 0)
 f_bump(int i, bool win, float rr, float mfe) =>
     array.set(stN, i, array.get(stN, i) + 1)
     array.set(stW, i, array.get(stW, i) + (win ? 1 : 0))
     array.set(stR, i, array.get(stR, i) + (win ? rr : -1.0))
     array.set(stM, i, array.get(stM, i) + math.min(mfe, 20.0))
+    array.set(stB, i, array.get(stB, i) + (mfe >= 1.0 ? 1 : 0))
     i
 
 f_rr(int k) => k == 4 ? rr56 : k == 3 ? rr225 : k == 2 ? rr90 : rrBig
@@ -1543,7 +1546,7 @@ var table tb = table.new(posT, 2, 13, border_width = 1)
 f_tfTxt(int gB, int gU, int sB, bool pB, int sU, bool pU) => gB > 0 ? "▼ " + f_legName(gB) + (sB > 0 and pB ? " + PSP" : "") : gU > 0 ? "▲ " + f_legName(gU) + (sU > 0 and pU ? " + PSP" : "") : "—"
 f_tfCol(int gB, int gU) => gB > 0 ? color.new(colBear, 75) : gU > 0 ? color.new(colBull, 75) : color.new(color.gray, 85)
 // "12 עסקאות · 58% · +6.4R"
-f_stTxt(int n, int w, float r, float m) => str.tostring(n) + " trades · " + (n > 0 ? str.tostring(math.round(w * 100.0 / n)) : "0") + "% · " + (r >= 0 ? "+" : "") + str.tostring(r, "#.#") + "R · max " + (n > 0 ? str.tostring(m / n, "#.#") : "0") + "R"
+f_stTxt(int n, int w, float r, float m, int b) => str.tostring(n) + " trades · " + (n > 0 ? str.tostring(math.round(w * 100.0 / n)) : "0") + "% · " + (r >= 0 ? "+" : "") + str.tostring(r, "#.#") + "R · max " + (n > 0 ? str.tostring(m / n, "#.#") : "0") + "R · 1R+ " + (n > 0 ? str.tostring(math.round(b * 100.0 / n)) : "0") + "%"
 f_toTxt(string nm, float v) => nm + (na(v) ? " —" : close > v ? " ↑" : " ↓")
 
 if showTbl and barstate.islast
@@ -1569,13 +1572,15 @@ if showTbl and barstate.islast
         int   wA = 0
         float rA = 0.0
         float mA = 0.0
+        int   bA = 0
         for k = 0 to 4
             nA += array.get(stN, k)
             wA += array.get(stW, k)
             rA += array.get(stR, k)
             mA += array.get(stM, k)
+            bA += array.get(stB, k)
         table.cell(tb, 0, 7, "TEST", bgcolor = hd, text_color = color.white, text_size = szT)
-        table.cell(tb, 1, 7, f_stTxt(nA, wA, rA, mA), bgcolor = color.new(rA >= 0 ? colBull : colBear, 70), text_color = color.white, text_size = szT)
+        table.cell(tb, 1, 7, f_stTxt(nA, wA, rA, mA, bA), bgcolor = color.new(rA >= 0 ? colBull : colBear, 70), text_color = color.white, text_size = szT)
         int row = 8
         bool byK = stBy == "לפי חלון"
         for j = 0 to 4
@@ -1583,5 +1588,5 @@ if showTbl and barstate.islast
             if (byK or j <= 2) and array.get(stN, k) > 0
                 string nmK = byK ? f_kLen(k) : k == 5 ? "2 in QS" : k == 6 ? "1+1" : "2 before"
                 table.cell(tb, 0, row, nmK, bgcolor = hd, text_color = color.white, text_size = szT)
-                table.cell(tb, 1, row, f_stTxt(array.get(stN, k), array.get(stW, k), array.get(stR, k), array.get(stM, k)), bgcolor = color.new(color.gray, 85), text_color = color.white, text_size = szT)
+                table.cell(tb, 1, row, f_stTxt(array.get(stN, k), array.get(stW, k), array.get(stR, k), array.get(stM, k), array.get(stB, k)), bgcolor = color.new(color.gray, 85), text_color = color.white, text_size = szT)
                 row += 1
