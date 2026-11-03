@@ -36,7 +36,7 @@ hotList = input.string("111,114,141,144,411,414,441,444,222,333", "רצפים ח
 // שלם או של סשן שלם לא רלוונטי להן, ולכן שני הגדולים כבויים כברירת מחדל.
 useK0   = input.bool(false, "חודש · שבוע · יום (יום שלם)", group = grpQS, tooltip = "כבוי כברירת מחדל: חלון של יום שלם לא רלוונטי לשבירות של 15m / 5m / 1m.")
 useK1   = input.bool(false, "שבוע · יום · סשן (6 שעות)", group = grpQS, tooltip = "כבוי כברירת מחדל: חלון של סשן שלם לא רלוונטי לשבירות של 15m / 5m / 1m.")
-useK2   = input.bool(true, "יום · סשן · 90 דק'", group = grpQS)
+useK2   = input.bool(false, "יום · סשן · 90 דק'", group = grpQS, tooltip = "כבוי כברירת מחדל: שבירות של 15m ומטה לא מכוונות את החלון של 90 דק'.")
 useK3   = input.bool(true, "סשן · 90 · 22.5 דק'", group = grpQS)
 useK4   = input.bool(true, "90 · 22.5 · 5.6 דק'", group = grpQS)
 
@@ -55,7 +55,7 @@ grpTr   = "סימון ובדיקה אחורה"
 trOn    = input.bool(false, "בדוק כל אישור כעסקה", group = grpTr, tooltip = "סטופ תמיד מעבר לקיצון של חלון ה-QS (הגבוה בשורט, הנמוך בלונג) — שם הנכס שלא הצליח לקחת את הרמה. יעד: R לפי גודל החלון. מחליפים מצב כניסה ומשווים את הסטטיסטיקה.")
 trMode  = input.string("נר האישור", "מתי לסמן", options = ["נר האישור", "טריגר PCP + SSMT", "סוף חלון ה-QS"], group = grpTr, tooltip = "טריגר PCP + SSMT: נר של 5m או 15m שהוא PCP ונוצר עליו גם SSMT / HSSMT — כניסה בסגירתו.\nנר האישור: הנר שבו כל התנאים התקיימו.\nסוף חלון ה-QS: סגירת הנר האחרון של החלון.")
 trg1m   = input.bool(false, "טריגר גם מנר של 1m", group = grpTr)
-stopMode = input.string("קיצון החלון", "סטופ", options = ["קיצון החלון", "סווינג קרוב"], group = grpTr, tooltip = "קיצון החלון: טיק מעבר לגבוה (שורט) או לנמוך (לונג) של חלון ה-QS.\nסווינג קרוב: טיק מעבר לסווינג הקרוב (סווינג של 3 נרות בגרף) שנמצא מעבר לקיצון של החלון — למשל בלונג, הסווינג-לו האחרון שמתחת לנמוך של ה-QS. חריג: אם נר הקיצון של החלון הוא PSP (נר הסווינג של PSP חי באותו כיוון), הסטופ נשאר מעבר לנר הזה.")
+stopMode = input.string("קיצון המחזור", "סטופ", options = ["קיצון המחזור", "קיצון החלון"], group = grpTr, tooltip = "קיצון המחזור: טיק מעבר לקיצון של המחזור שמכיל את החלון, מתחילתו ועד עכשיו (חלון 5.6 → רבע 22.5 · חלון 22.5 → מיקרו 90). אם ה-QS עשה את הקיצון — זה הקיצון של ה-QS. אם לפני ה-QS יש פתיל שהוא הקיצון — הסטופ מעבר לו.\nקיצון החלון: טיק מעבר לגבוה / הנמוך של חלון ה-QS בלבד.")
 rr56    = input.float(1.3, "יעד בחלון 5.6 דק' (R)", minval = 0.5, step = 0.1, group = grpTr)
 rr225   = input.float(2.0, "יעד בחלון 22.5 דק' (R)", minval = 0.5, step = 0.1, group = grpTr)
 rr90    = input.float(3.0, "יעד בחלון 90 דק' (R)", minval = 0.5, step = 0.1, group = grpTr)
@@ -1270,48 +1270,43 @@ f_brkTxt(int d, string key) =>
     o
 
 // ── סטופ ──
-// סווינגים של 3 נרות בגרף (נאשרים נר אחד אחרי), האחרונים קודם
-var array<float> pvH = array.new_float()
-var array<float> pvL = array.new_float()
-pvHi = ta.pivothigh(high, 1, 1)
-pvLo = ta.pivotlow(low, 1, 1)
-if not na(pvHi)
-    array.unshift(pvH, pvHi)
-    if array.size(pvH) > 200
-        array.pop(pvH)
-if not na(pvLo)
-    array.unshift(pvL, pvLo)
-    if array.size(pvL) > 200
-        array.pop(pvL)
-// הסווינג הקרוב שמעבר לקיצון: לונג — הסווינג-לו האחרון שמתחת ל-ext · שורט — הסווינג-היי האחרון שמעל
-f_swing(int d, float ext) =>
-    float r = na
-    array<float> a = d == -1 ? pvH : pvL
-    if array.size(a) > 0 and not na(ext)
-        for i = 0 to array.size(a) - 1
-            float v = array.get(a, i)
-            if na(r) and (d == -1 ? v > ext : v < ext)
-                r := v
-    r
-// האם נר הקיצון הוא PSP: נר הסווינג של PSP חי באותו כיוון (1m / 5m / 15m) חופף לנר הקיצון
-f_pspAt(int d, int extT) =>
-    bool hit = false
-    for k in array.from(d == -1 ? kPB1 : kPU1, d == -1 ? kPB5 : kPU5, d == -1 ? kPB15 : kPU15)
-        if k != ""
-            int t0 = f_ptT(d, k)
-            int ms = f_ptMs(f_ptTf(k))
-            if t0 < extT + durMs and t0 + ms > extT
-                hit := true
-    hit
-f_stopAt(int d, float ext, int extT) =>
-    float tk = syminfo.mintick
-    float sw = stopMode == "סווינג קרוב" and not f_pspAt(d, extT) ? f_swing(d, ext) : na
-    float lv = na(sw) ? ext : sw
-    na(lv) ? na : (d == -1 ? lv + tk : lv - tk)
-stpNS = f_stopAt(-1, wHi, wHiT)
-stpNL = f_stopAt(1, wLo, wLoT)
-stpES = f_stopAt(-1, eHi, eHiT)
-stpEL = f_stopAt(1, eLo, eLoT)
+// הקיצון של המחזור שמכיל את החלון, מתחילתו ועד עכשיו: רבע 22.5 (לחלון 5.6)
+// ומיקרו 90 (לחלון 22.5). ה-P = המצב עד הנר הקודם (בשביל כניסה בסוף החלון).
+[cqR, cqL] = f_cyc(2, time)
+[cmR, cmL] = f_cyc(3, time)
+var int   cqId = 0
+var int   cmId = 0
+var float cqHi = na
+var float cqLo = na
+var float cmHi = na
+var float cmLo = na
+cqHiP = cqHi
+cqLoP = cqLo
+cmHiP = cmHi
+cmLoP = cmLo
+if cqR != cqId
+    cqId := cqR
+    cqHi := high
+    cqLo := low
+else
+    cqHi := math.max(cqHi, high)
+    cqLo := math.min(cqLo, low)
+if cmR != cmId
+    cmId := cmR
+    cmHi := high
+    cmLo := low
+else
+    cmHi := math.max(cmHi, high)
+    cmLo := math.min(cmLo, low)
+f_stopAt(int d, int k, float ext, float qh, float ql, float mh, float ml) =>
+    float lv = ext
+    if stopMode == "קיצון המחזור"
+        float c = k == 4 ? (d == -1 ? qh : ql) : k == 3 ? (d == -1 ? mh : ml) : na
+        if not na(c) and not na(ext)
+            lv := d == -1 ? math.max(c, ext) : math.min(c, ext)
+    na(lv) ? na : (d == -1 ? lv + syminfo.mintick : lv - syminfo.mintick)
+stpNS = f_stopAt(-1, qsK, wHi, cqHi, cqLo, cmHi, cmLo)
+stpNL = f_stopAt(1, qsK, wLo, cqHi, cqLo, cmHi, cmLo)
 
 // זוגות שכבר נתנו אישור, לכל כיוון — אישור חדש רק עם שבירה חדשה
 var string usedS = "#"
@@ -1527,8 +1522,8 @@ if qsOn and doneL == qsId
 
 bgcolor(showBg and qsOn ? color.new(colQS, 90) : na, title = "QS window")
 
-f_trOpen(tS, stpES)
-f_trOpen(tL, stpEL)
+f_trOpen(tS, f_stopAt(-1, tS.k, eHi, cqHiP, cqLoP, cmHiP, cmLoP))
+f_trOpen(tL, f_stopAt(1, tL.k, eLo, cqHiP, cqLoP, cmHiP, cmLoP))
 f_trCheck(tS)
 f_trCheck(tL)
 
