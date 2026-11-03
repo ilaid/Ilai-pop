@@ -46,6 +46,7 @@ usePsp  = input.bool(true, "PSP", group = grpBrk)
 psLife  = input.string("המחזור הקטן", "תוקף PSP", options = ["המחזור הקטן", "המיכל"], group = grpBrk, tooltip = "המחזור הקטן (ברירת מחדל): PSP חי רק בתוך המחזור שבו הוא נוצר — 1m: ‏22.5 דק' · 5m: ‏90 דק' · 15m: סשן.\nהמיכל: 1m: ‏90 דק' · 5m: סשן · 15m: יום.")
 psKill  = input.string("NQ ו-ES", "PSP מתבטל כשלקחו את נר הסווינג", options = ["NQ ו-ES", "כל שלושת הנכסים", "נכס אחד"], group = grpBrk, tooltip = "NQ ו-ES (כמו ADI): מת כששניהם לקחו את הקצה של נר הסווינג אצלם; YM לא מכריע.\nכל שלושת הנכסים: חי כל עוד אחד מ-NQ / ES / YM עדיין מחזיק.\nנכס אחד: מת ברגע שנכס אחד לקח.\nבתגית, ליד ה-PSP, כתוב מי עדיין מחזיק.")
 useFresh = input.bool(true, "פילטר: לפחות שבירה אחת נוצרה בתוך ה-QS", group = grpBrk, tooltip = "דלוק: אחת השבירות חייבת להיווצר בתוך החלון; השנייה יכולה להיות מלפני, כל עוד היא חיה.\nכבוי: גם שתי שבירות שנוצרו לפני ה-QS (ועדיין חיות) נותנות סימון. אז סטאפ שאחת השבירות שלו נוצרה בתוך ה-QS מסומן ★.")
+atExt   = input.bool(false, "דיוק: רק כשאחת השבירות נוצרה על נר הקיצון", group = grpBrk, tooltip = "התגית יוצאת רק כשלפחות אחת משתי השבירות נוצרה על הנר שעשה את הגבוה (שורט) או הנמוך (לונג) של החלון עד עכשיו, או על הנר שאחריו. כך התגית יושבת על נר הקיצון עצמו ולא מתחילת החלון. אם הקיצון זז, צריך שבירה על הקיצון החדש.")
 failMode = input.string("הקיצון של ה-QS נלקח", "מתי אישור נכשל (✕)", options = ["הקיצון של ה-QS נלקח", "אחת השבירות מתה"], group = grpBrk, tooltip = "הקיצון של ה-QS נלקח: בזמן החלון לקיחה של רמות היא חלק מהסטאפ (ה-QS עושה את הקיצון). ✕ רק אם אחרי סוף החלון המחיר עובר את הקיצון שלו, בתוך המחזור שמעליו (5.6 → 22.5 דק' · 22.5 → 90 דק' · 90 → 6 שעות).\nאחת השבירות מתה: כמו קודם — ✕ ברגע שאחת משתי השבירות כבר לא חיה.")
 use15s  = input.bool(true, "SSMT / HSSMT של 15 שניות (מחזור 5.6 דק')", group = grpBrk, tooltip = "שבירות בין תתי-המחזורים של 5.625 דק' בתוך רבע 22.5 — למשל בדיוק על הקיצון של ה-QS. רק SSMT / HSSMT, בלי PSP. זוגות: 1m + 15s (TMcO + TNcP) · 5m + 15s (T90O + TNcP).")
 real15s = input.bool(false, "15s מנתוני שניות אמיתיים (דורש Plus ומעלה)", group = grpBrk, tooltip = "כבוי = מחזור ה-15s מחושב מנרות דקה, כמו באינדיקטור SSMT + HSSMT — בלי צורך במנוי.")
@@ -1021,6 +1022,8 @@ var float  wHi   = na
 var float  wLo   = na
 var int    wHiB  = 0
 var int    wLoB  = 0
+var int    wHiT  = 0
+var int    wLoT  = 0
 var float  eHi   = na    // החלון שנגמר עכשיו
 var float  eLo   = na
 var int    eHiB  = 0
@@ -1042,13 +1045,17 @@ if qsId != wId
         wLo    := low
         wHiB   := bar_index
         wLoB   := bar_index
+        wHiT   := time
+        wLoT   := time
 else if qsOn
     if high > wHi
         wHi  := high
         wHiB := bar_index
+        wHiT := time
     if low < wLo
         wLo  := low
         wLoB := bar_index
+        wLoT := time
 
 // שבירות טריות — נולדו בתוך החלון הנוכחי
 f_fr(string k, int t) => k != "" and t > wStart ? k : ""
@@ -1220,14 +1227,33 @@ f_trCheck(Trd t) =>
 // השבירות של האישור, כל אחת עם השעה של הנר שלה (לפי זמן הפתיחה, כמו בגרף):
 // SSMT — הנר שעשה את השבירה · PSP — נר הסווינג עצמו. ככה אפשר ללכת לנר
 // ולראות אותו גם באינדיקטורים האחרים.
+f_ptTf(string p) => str.startswith(p, "15m") ? "15m" : str.startswith(p, "15s") ? "15s" : str.startswith(p, "5m") ? "5m" : "1m"
+f_ptMs(string tf) => tf == "15m" ? 900000 : tf == "5m" ? 300000 : tf == "15s" ? (real15s ? 15000 : 60000) : 60000
+// זמן הפתיחה של הנר של השבירה: SSMT — הנר שעשה אותה · PSP — נר הסווינג
+f_ptT(int d, string p) =>
+    bool   isP = str.contains(p, "P")
+    string tf  = f_ptTf(p)
+    int    ms  = f_ptMs(tf)
+    int    bt  = isP ? (tf == "15m" ? (d == -1 ? tPB15 : tPU15) : tf == "5m" ? (d == -1 ? tPB5 : tPU5) : (d == -1 ? tPB1 : tPU1)) : (tf == "15m" ? (d == -1 ? tSB15 : tSU15) : tf == "5m" ? (d == -1 ? tSB5 : tSU5) : tf == "1m" ? (d == -1 ? tSB1 : tSU1) : (d == -1 ? tSBs : tSUs))
+    bt - (isP ? 2 : 1) * ms
 f_part(int d, string p) =>
     bool   isP = str.contains(p, "P")
-    string tf  = str.startswith(p, "15m") ? "15m" : str.startswith(p, "15s") ? "15s" : str.startswith(p, "5m") ? "5m" : "1m"
-    int    ms  = tf == "15m" ? 900000 : tf == "5m" ? 300000 : tf == "15s" ? (real15s ? 15000 : 60000) : 60000
+    string tf  = f_ptTf(p)
     int    ty  = tf == "15m" ? (d == -1 ? sB15 : sU15) : tf == "5m" ? (d == -1 ? sB5 : sU5) : tf == "1m" ? (d == -1 ? sB1 : sU1) : (d == -1 ? sBs : sUs)
-    int    bt  = isP ? (tf == "15m" ? (d == -1 ? tPB15 : tPU15) : tf == "5m" ? (d == -1 ? tPB5 : tPU5) : (d == -1 ? tPB1 : tPU1)) : (tf == "15m" ? (d == -1 ? tSB15 : tSU15) : tf == "5m" ? (d == -1 ? tSB5 : tSU5) : tf == "1m" ? (d == -1 ? tSB1 : tSU1) : (d == -1 ? tSBs : tSUs))
     string wh  = tf == "15m" ? (d == -1 ? hPB15 : hPU15) : tf == "5m" ? (d == -1 ? hPB5 : hPU5) : (d == -1 ? hPB1 : hPU1)
-    tf + " " + (isP ? "PSP" : f_legName(ty)) + " " + str.format_time(bt - (isP ? 2 : 1) * ms, "HH:mm", TZ) + (isP and wh != "" ? " (" + wh + ")" : "")
+    tf + " " + (isP ? "PSP" : f_legName(ty)) + " " + str.format_time(f_ptT(d, p), "HH:mm", TZ) + (isP and wh != "" ? " (" + wh + ")" : "")
+// האם לפחות אחת השבירות נוצרה על נר הקיצון של החלון (או על הנר שאחריו):
+// הנר של השבירה חופף ל-[נר הקיצון, שני נרות גרף אחריו)
+f_atExtK(int d, string key) =>
+    bool hit = false
+    int  ext = d == -1 ? wHiT : wLoT
+    for p in str.split(key, "+")
+        if p != ""
+            int t0 = f_ptT(d, p)
+            int ms = f_ptMs(f_ptTf(p))
+            if t0 < ext + 2 * durMs and t0 + ms > ext
+                hit := true
+    hit
 f_brkTxt(int d, string key) =>
     string o = ""
     for p in str.split(key, "+")
@@ -1240,6 +1266,12 @@ var string usedS = "#"
 var string usedL = "#"
 [entS, keyNS] = f_entry(-1, lgB15, lgB5, lgB1, lgBs, sB15, pB15, sB5, pB5, sB1, pB1, kSB15, kPB15, kSB5, kPB5, kSB1, kPB1, kSBs, usedS, freshS)
 [entL, keyNL] = f_entry(1, lgU15, lgU5, lgU1, lgUs, sU15, pU15, sU5, pU5, sU1, pU1, kSU15, kPU15, kSU5, kPU5, kSU1, kPU1, kSUs, usedL, freshL)
+// מחליף: אותה בדיקה בלי "זוג שכבר שימש" — אם שבירה של אישור קיים נעלמה, זה הזוג שמחליף אותה
+[rpS, rkS] = f_entry(-1, lgB15, lgB5, lgB1, lgBs, sB15, pB15, sB5, pB5, sB1, pB1, kSB15, kPB15, kSB5, kPB5, kSB1, kPB1, kSBs, "#", freshS)
+[rpL, rkL] = f_entry(1, lgU15, lgU5, lgU1, lgUs, sU15, pU15, sU5, pU5, sU1, pU1, kSU15, kPU15, kSU5, kPU5, kSU1, kPU1, kSUs, "#", freshL)
+// דיוק: רק כשאחת השבירות נוצרה על נר הקיצון
+entS := entS != "" and atExt and not f_atExtK(-1, keyNS) ? "" : entS
+entL := entL != "" and atExt and not f_atExtK(1, keyNL) ? "" : entL
 
 // במצב טריגר — צריך גם נר PCP + SSMT בכיוון, שנסגר בנר הזה של הגרף
 isTrg = trMode == "טריגר PCP + SSMT"
@@ -1272,6 +1304,45 @@ var string nmL   = ""
 // כל התגיות, מהישנה לחדשה — נשארות רק keepN האחרונות
 var array<label> hist = array.new<label>()
 string alTxt = ""
+// ── שבירות קבועות על התגית ──
+// התגית שומרת את שתי השבירות שאישרו אותה. רק אם אחת מהן נעלמה (אין יותר שבירה
+// חיה מאותו סוג באותה מסגרת) והחלון עדיין חי: אם יש זוג אחר שעומד בכל התנאים
+// — הוא מחליף אותה והתגית מתעדכנת. אם אין מחליף — מסומן ⚠ ליד השבירות.
+var string n1S  = ""
+var string n1L  = ""
+var string bkS  = ""
+var string bkL  = ""
+var bool   lsS  = false
+var bool   lsL  = false
+if keyS != "" and qsOn and doneS == qsId and not f_alive(keyS, liveS)
+    if rpS != "" and rkS != keyS
+        keyS  := rkS
+        txS   := rpS
+        lsS   := false
+        bkS   := f_brkTxt(-1, rkS)
+        usedS := usedS + rkS + "#"
+        nmS   := n1S + (showBrk ? "\n" + bkS : "")
+        label.set_text(lbS, "▼ QS " + nmS)
+        label.set_tooltip(lbS, "SHORT · QS " + n1S + "\nהוחלפה שבירה ב-" + str.format_time(time, "HH:mm", TZ) + "\n" + rpS + "\nהשבירות: " + bkS)
+    else if exMode and not lsS
+        lsS := true
+        nmS := n1S + (showBrk ? "\n" + bkS + " ⚠" : " ⚠")
+        label.set_text(lbS, "▼ QS " + nmS)
+if keyL != "" and qsOn and doneL == qsId and not f_alive(keyL, liveL)
+    if rpL != "" and rkL != keyL
+        keyL  := rkL
+        txL   := rpL
+        lsL   := false
+        bkL   := f_brkTxt(1, rkL)
+        usedL := usedL + rkL + "#"
+        nmL   := n1L + (showBrk ? "\n" + bkL : "")
+        label.set_text(lbL, "▲ QS " + nmL)
+        label.set_tooltip(lbL, "LONG · QS " + n1L + "\nהוחלפה שבירה ב-" + str.format_time(time, "HH:mm", TZ) + "\n" + rpL + "\nהשבירות: " + bkL)
+    else if exMode and not lsL
+        lsL := true
+        nmL := n1L + (showBrk ? "\n" + bkL + " ⚠" : " ⚠")
+        label.set_text(lbL, "▲ QS " + nmL)
+
 // ── מתי אישור נכשל (✕) ──
 // מצב "הקיצון של ה-QS נלקח" (ברירת מחדל): כל עוד החלון חי, לקיחה של רמות היא
 // חלק מהסטאפ — ה-QS עושה את הקיצון, והתגית זזה איתו. אחרי סוף החלון הקיצון
@@ -1361,7 +1432,10 @@ if entS != "" and doneS != qsId
     txS   := entS
     keyS  := keyNS
     failS := false
-    nmS   := qsShow + " · " + f_kLen(qsK) + (not useFresh and f_hasFresh(freshS, keyNS) ? " ★" : "") + (showBrk ? "\n" + f_brkTxt(-1, keyNS) : "")
+    n1S   := qsShow + " · " + f_kLen(qsK) + (not useFresh and f_hasFresh(freshS, keyNS) ? " ★" : "")
+    bkS   := f_brkTxt(-1, keyNS)
+    lsS   := false
+    nmS   := n1S + (showBrk ? "\n" + bkS : "")
     xOnS  := true
     xS    := wHi
     xEndS := 0
@@ -1376,7 +1450,10 @@ if entL != "" and doneL != qsId
     txL   := entL
     keyL  := keyNL
     failL := false
-    nmL   := qsShow + " · " + f_kLen(qsK) + (not useFresh and f_hasFresh(freshL, keyNL) ? " ★" : "") + (showBrk ? "\n" + f_brkTxt(1, keyNL) : "")
+    n1L   := qsShow + " · " + f_kLen(qsK) + (not useFresh and f_hasFresh(freshL, keyNL) ? " ★" : "")
+    bkL   := f_brkTxt(1, keyNL)
+    lsL   := false
+    nmL   := n1L + (showBrk ? "\n" + bkL : "")
     xOnL  := true
     xL    := wLo
     xEndL := 0
