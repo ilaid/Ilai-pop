@@ -40,11 +40,13 @@ useSsmt = input.bool(true, "SSMT / HSSMT", group = grpBrk)
 usePsp  = input.bool(true, "PSP", group = grpBrk, tooltip = "PSP חי בתוך המחזור שבו נוצר (1m: ‏22.5 דק' · 5m: ‏90 דק' · 15m: סשן), עד ש-NQ וגם ES לקחו את הקצה של נר הסווינג.")
 use15s  = input.bool(true, "SSMT / HSSMT של 15 שניות", group = grpBrk, tooltip = "בין תתי-המחזורים של 5.625 דק' בתוך רבע 22.5, מחושב מנרות דקה. בלי PSP.")
 useFresh = input.bool(true, "לפחות שבירה אחת נוצרה בתוך ה-QS", group = grpBrk, tooltip = "כבוי: גם שתי שבירות שנוצרו לפני ה-QS (ועדיין חיות) נותנות סימון. אז סטאפ שאחת השבירות שלו נוצרה בתוך ה-QS מסומן ★.")
+useCh   = input.bool(false, "True CHoCH על השבירה של המסגרת הנמוכה", group = grpBrk, tooltip = "אחרי SSMT / HSSMT: לונג — נר נסגר מעל הגבוה של הנר היורד האחרון (הקרוב ביותר לנר של השבירה, כולל אותו); שורט — נר נסגר מתחת לנמוך של הנר העולה האחרון. נבדק על המסגרת הנמוכה מבין השבירות של הזוג (למשל 15m + 1m → ה-CHoCH ב-1m; 15s נבדק על נרות דקה). זוג בלי SSMT לא עובר. נמדד על הנכס של הגרף.")
 atExt   = input.bool(false, "רק כשאחת השבירות נוצרה על נר הקיצון", group = grpBrk, tooltip = "התגית יוצאת רק כשלפחות אחת משתי השבירות נוצרה על הנר שעשה את הקיצון של החלון, או על הנר שאחריו.")
 
 grpTr   = "סטופ ובדיקה"
 stopMode = input.string("קיצון המחזור", "סטופ", options = ["קיצון המחזור", "קיצון החלון"], group = grpTr, tooltip = "קיצון המחזור: טיק מעבר לקיצון של המחזור שמכיל את החלון, מתחילתו ועד עכשיו (חלון 5.6 → רבע 22.5 · חלון 22.5 → מיקרו 90). אם ה-QS עשה את הקיצון — מעבר ל-QS; אם לפניו יש פתיל שהוא הקיצון — מעבר לפתיל.\nקיצון החלון: טיק מעבר לחלון ה-QS בלבד.")
 showStp = input.bool(true, "קו סטופ לסטאפ הפעיל", group = grpTr)
+trMode  = input.string("נר האישור", "כניסה בבדיקה", options = ["נר האישור", "סוף חלון ה-QS"], group = grpTr, tooltip = "נר האישור: כניסה בסגירת הנר שבו כל התנאים התקיימו, סטופ לפי הגדרת הסטופ.\nסוף חלון ה-QS: כניסה בנר הראשון שאחרי ה-QS (למשל כש-333 מתחלף ל-334), סטופ מעבר לקיצון של החלון (הנר הכי נמוך בלונג / הכי גבוה בשורט), יעד לפי ה-R הרגיל.")
 trOn    = input.bool(false, "בדיקה אחורה (שורת TEST)", group = grpTr, tooltip = "כל אישור נבדק כעסקה: כניסה בסגירת נר האישור, הסטופ למעלה, יעד לפי גודל החלון.")
 rr56    = input.float(1.3, "יעד בחלון 5.6 (R)", minval = 0.5, step = 0.1, group = grpTr)
 rr225   = input.float(2.0, "יעד בחלון 22.5 (R)", minval = 0.5, step = 0.1, group = grpTr)
@@ -68,7 +70,6 @@ psLife   = "המחזור הקטן"
 psKill   = "NQ ו-ES"
 failMode = "הקיצון של ה-QS נלקח"
 real15s  = false
-trMode   = "נר האישור"
 trg1m    = false
 rr90     = 3.0
 rrBig    = 4.0
@@ -377,6 +378,13 @@ type Eng
     string       uStr = ""
     bool         bQs  = false
     bool         uQs  = false
+    // True CHoCH: הנר הנגדי האחרון (בנכס של הגרף) והאם נסגר מעברו אחרי השבירה
+    float        lUpL = na
+    float        lDnH = na
+    float        bChR = na
+    float        uChR = na
+    bool         bCh  = false
+    bool         uCh  = false
     // הנר של המסגרת שעוד לא נסגר: הגבוה והנמוך של NQ ו-ES מאז הנר האחרון
     // שהמנוע ראה — כדי ש-PSP שנלקח עכשיו לא ייחשב חי עד הסגירה
     int          rSt  = 0
@@ -505,6 +513,20 @@ f_step(Eng e, int t, float no, float nh, float nl, float nc, float eo, float eh,
             nuI := xuI
             nbS := xbS
             nuS := xuS
+        // ── True CHoCH: קודם בודקים את הנר הזה מול השבירות הקיימות, ואז מעדכנים
+        //    את הנר הנגדי האחרון (כולל הנר הזה) ──
+        float ao = cA == 0 ? no : cA == 1 ? eo : yo
+        float ah = cA == 0 ? nh : cA == 1 ? eh : yh
+        float al = cA == 0 ? nl : cA == 1 ? el : yl
+        float ac = cA == 0 ? nc : cA == 1 ? ec : yc
+        if e.bTy != 0 and not e.bCh and not na(e.bChR) and ac < e.bChR
+            e.bCh := true
+        if e.uTy != 0 and not e.uCh and not na(e.uChR) and ac > e.uChR
+            e.uCh := true
+        if ac > ao
+            e.lUpL := al
+        if ac < ao
+            e.lDnH := ah
         int oBS = e.bSeq
         int oUS = e.uSeq
         int oBT = e.bTy
@@ -516,6 +538,8 @@ f_step(Eng e, int t, float no, float nh, float nl, float nc, float eo, float eh,
                 e.bBorn := t + f_clsMs(e.cls)
                 [qb, pb] = f_qsAt(e.cls, t, f_clsMs(e.cls))
                 e.bQs := qb
+                e.bChR := e.lUpL
+                e.bCh  := false
             e.bRefI := nbI
             e.bTy   := nbT
             e.bStr  := nbS
@@ -529,6 +553,8 @@ f_step(Eng e, int t, float no, float nh, float nl, float nc, float eo, float eh,
                 e.uBorn := t + f_clsMs(e.cls)
                 [qu, pu] = f_qsAt(e.cls, t, f_clsMs(e.cls))
                 e.uQs := qu
+                e.uChR := e.lDnH
+                e.uCh  := false
             e.uRefI := nuI
             e.uTy   := nuT
             e.uStr  := nuS
@@ -908,6 +934,7 @@ f_leg(Eng e, int d, string nm) =>
     int    tSb  = 0
     int    tPb  = 0
     string hP   = ""
+    bool   ch   = false
     if dom == d
         int ss = d == -1 ? sB : sU
         int pq = d == -1 ? pB : pU
@@ -918,20 +945,23 @@ f_leg(Eng e, int d, string nm) =>
         tSb  := d == -1 ? e.bBorn : e.uBorn
         tPb  := d == -1 ? nB : nU
         hP   := d == -1 ? wB : wU
-    [ssT, psp, kS, kP, tSb, tPb, hP]
+        float cAc = cA == 0 ? cNc : cA == 1 ? cEc : cYc
+        bool  liv = chSec * 1000 == f_clsMs(e.cls) and e.rSt != 0
+        ch   := d == -1 ? (e.bCh or (liv and not na(e.bChR) and cAc < e.bChR)) : (e.uCh or (liv and not na(e.uChR) and cAc > e.uChR))
+    [ssT, psp, kS, kP, tSb, tPb, hP, ch]
 
 // רגל אחת של המסגרת (לזוג בין מסגרות): SSMT קודם, אחרת PSP
 f_one(int ss, bool ps) => ss > 0 ? ss : ps ? 3 : 0
 f_legName(int g) => g == 2 ? "HSSMT" : g == 1 ? "SSMT" : g == 3 ? "PSP" : "—"
 
-[sBs, pBs, kSBs, kPBs, tSBs, tPBs, hPBs]         = f_leg(eS, -1, "15s")
-[sUs, pUs, kSUs, kPUs, tSUs, tPUs, hPUs]         = f_leg(eS, 1, "15s")
-[sB1, pB1, kSB1, kPB1, tSB1, tPB1, hPB1]         = f_leg(e1, -1, "1m")
-[sU1, pU1, kSU1, kPU1, tSU1, tPU1, hPU1]         = f_leg(e1, 1, "1m")
-[sB5, pB5, kSB5, kPB5, tSB5, tPB5, hPB5]         = f_leg(e5, -1, "5m")
-[sU5, pU5, kSU5, kPU5, tSU5, tPU5, hPU5]         = f_leg(e5, 1, "5m")
-[sB15, pB15, kSB15, kPB15, tSB15, tPB15, hPB15]   = f_leg(e15, -1, "15m")
-[sU15, pU15, kSU15, kPU15, tSU15, tPU15, hPU15]   = f_leg(e15, 1, "15m")
+[sBs, pBs, kSBs, kPBs, tSBs, tPBs, hPBs, cBs]         = f_leg(eS, -1, "15s")
+[sUs, pUs, kSUs, kPUs, tSUs, tPUs, hPUs, cUs]         = f_leg(eS, 1, "15s")
+[sB1, pB1, kSB1, kPB1, tSB1, tPB1, hPB1, cB1]         = f_leg(e1, -1, "1m")
+[sU1, pU1, kSU1, kPU1, tSU1, tPU1, hPU1, cU1]         = f_leg(e1, 1, "1m")
+[sB5, pB5, kSB5, kPB5, tSB5, tPB5, hPB5, cB5]         = f_leg(e5, -1, "5m")
+[sU5, pU5, kSU5, kPU5, tSU5, tPU5, hPU5, cU5]         = f_leg(e5, 1, "5m")
+[sB15, pB15, kSB15, kPB15, tSB15, tPB15, hPB15, cB15]   = f_leg(e15, -1, "15m")
+[sU15, pU15, kSU15, kPU15, tSU15, tPU15, hPU15, cU15]   = f_leg(e15, 1, "15m")
 
 // מזהה הרגל לזוג בין מסגרות (SSMT קודם), ומזהה לזוג באותה מסגרת
 f_k1(string kS, string kP) => kS != "" ? kS : kP
@@ -1307,6 +1337,20 @@ var string usedL = "#"
 // דיוק: רק כשאחת השבירות נוצרה על נר הקיצון
 entS := entS != "" and atExt and not f_atExtK(-1, keyNS) ? "" : entS
 entL := entL != "" and atExt and not f_atExtK(1, keyNL) ? "" : entL
+// True CHoCH: על ה-SSMT של המסגרת הנמוכה ביותר בזוג (15s → 1m → 5m → 15m)
+f_chOk(int d, string key) =>
+    int  rk = 9
+    bool ok = false
+    for p in str.split(key, "+")
+        if p != "" and not str.contains(p, "P")
+            string tf = f_ptTf(p)
+            int    r  = tf == "15s" ? 0 : tf == "1m" ? 1 : tf == "5m" ? 2 : 3
+            if r < rk
+                rk := r
+                ok := tf == "15s" ? (d == -1 ? cBs : cUs) : tf == "1m" ? (d == -1 ? cB1 : cU1) : tf == "5m" ? (d == -1 ? cB5 : cU5) : (d == -1 ? cB15 : cU15)
+    ok
+entS := entS != "" and useCh and not f_chOk(-1, keyNS) ? "" : entS
+entL := entL != "" and useCh and not f_chOk(1, keyNL) ? "" : entL
 
 entS := qsOn ? entS : ""
 entL := qsOn ? entL : ""
@@ -1515,8 +1559,9 @@ if qsOn and doneL == qsId
 
 bgcolor(showBg and qsOn ? color.new(colQS, 93) : na, title = "QS window")
 
-f_trOpen(tS, f_stopAt(-1, tS.k, eHi, cqHiP, cqLoP, cmHiP, cmLoP))
-f_trOpen(tL, f_stopAt(1, tL.k, eLo, cqHiP, cqLoP, cmHiP, cmLoP))
+// כניסה בסוף ה-QS: הסטופ מעבר לקיצון של החלון עצמו (הנר הכי גבוה / הכי נמוך שלו)
+f_trOpen(tS, eHi + syminfo.mintick)
+f_trOpen(tL, eLo - syminfo.mintick)
 f_trCheck(tS)
 f_trCheck(tL)
 
