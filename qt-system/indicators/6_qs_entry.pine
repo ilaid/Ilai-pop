@@ -39,12 +39,12 @@ grpBrk  = "שבירות"
 useSsmt = input.bool(true, "SSMT / HSSMT", group = grpBrk)
 usePsp  = input.bool(true, "PSP", group = grpBrk, tooltip = "PSP חי בתוך המחזור שבו נוצר (1m: ‏22.5 דק' · 5m: ‏90 דק' · 15m: סשן), עד ש-NQ וגם ES לקחו את הקצה של נר הסווינג.")
 use15s  = input.bool(true, "SSMT / HSSMT של 15 שניות", group = grpBrk, tooltip = "בין תתי-המחזורים של 5.625 דק' בתוך רבע 22.5, מחושב מנרות דקה. בלי PSP.")
-useFresh = input.bool(true, "לפחות שבירה אחת נוצרה בתוך ה-QS", group = grpBrk, tooltip = "כבוי: גם שתי שבירות שנוצרו לפני ה-QS (ועדיין חיות) נותנות סימון. אז סטאפ שאחת השבירות שלו נוצרה בתוך ה-QS מסומן ★.")
+useFresh = input.bool(false, "לפחות שבירה אחת נוצרה בתוך ה-QS", group = grpBrk, tooltip = "כבוי: גם שתי שבירות שנוצרו לפני ה-QS (ועדיין חיות) נותנות סימון. אז סטאפ שאחת השבירות שלו נוצרה בתוך ה-QS מסומן ★.")
 useCh   = input.bool(false, "True CHoCH על השבירה של המסגרת הנמוכה", group = grpBrk, tooltip = "אחרי SSMT / HSSMT: לונג — נר נסגר מעל הגבוה של הנר היורד האחרון (הקרוב ביותר לנר של השבירה, כולל אותו); שורט — נר נסגר מתחת לנמוך של הנר העולה האחרון. נבדק על המסגרת הנמוכה מבין השבירות של הזוג (למשל 15m + 1m → ה-CHoCH ב-1m; 15s נבדק על נרות דקה). זוג בלי SSMT לא עובר. נמדד על הנכס של הגרף.")
 atExt   = input.bool(false, "רק כשאחת השבירות נוצרה על נר הקיצון", group = grpBrk, tooltip = "התגית יוצאת רק כשלפחות אחת משתי השבירות נוצרה על הנר שעשה את הקיצון של החלון, או על הנר שאחריו.")
 
 grpTr   = "סטופ ובדיקה"
-stopMode = input.string("קיצון המחזור", "סטופ", options = ["קיצון המחזור", "קיצון החלון"], group = grpTr, tooltip = "קיצון המחזור: טיק מעבר לקיצון של המחזור שמכיל את החלון, מתחילתו ועד עכשיו (חלון 5.6 → רבע 22.5 · חלון 22.5 → מיקרו 90). אם ה-QS עשה את הקיצון — מעבר ל-QS; אם לפניו יש פתיל שהוא הקיצון — מעבר לפתיל.\nקיצון החלון: טיק מעבר לחלון ה-QS בלבד.")
+stopMode = input.string("קיצון החלון", "סטופ", options = ["קיצון החלון", "קיצון המחזור"], group = grpTr, tooltip = "קיצון המחזור: טיק מעבר לקיצון של המחזור שמכיל את החלון, מתחילתו ועד עכשיו (חלון 5.6 → רבע 22.5 · חלון 22.5 → מיקרו 90). אם ה-QS עשה את הקיצון — מעבר ל-QS; אם לפניו יש פתיל שהוא הקיצון — מעבר לפתיל.\nקיצון החלון: טיק מעבר לחלון ה-QS בלבד.")
 showStp = input.bool(true, "קו סטופ לסטאפ הפעיל", group = grpTr)
 trMode  = input.string("נר האישור", "כניסה בבדיקה", options = ["נר האישור", "סוף חלון ה-QS"], group = grpTr, tooltip = "נר האישור: כניסה בסגירת הנר שבו כל התנאים התקיימו, סטופ לפי הגדרת הסטופ.\nסוף חלון ה-QS: כניסה בנר הראשון שאחרי ה-QS (למשל כש-333 מתחלף ל-334), סטופ מעבר לקיצון של החלון (הנר הכי נמוך בלונג / הכי גבוה בשורט), יעד לפי ה-R הרגיל.")
 trOn    = input.bool(false, "בדיקה אחורה (שורת TEST)", group = grpTr, tooltip = "כל אישור נבדק כעסקה: כניסה בסגירת נר האישור, הסטופ למעלה, יעד לפי גודל החלון.")
@@ -1050,6 +1050,7 @@ var int    eLoB  = 0
 var int    eHiT  = 0
 var int    eLoT  = 0
 var string eId   = ""
+var int    eStart = 0
 bool wEnded = false
 if qsId != wId
     if wId != ""
@@ -1060,6 +1061,7 @@ if qsId != wId
         eHiT   := wHiT
         eLoT   := wLoT
         eId    := wId
+        eStart := wStart
         wEnded := true
     wId := qsId
     if qsOn
@@ -1431,6 +1433,20 @@ var int   xEndS = 0
 var int   xEndL = 0
 var int   xKS   = 4
 var int   xKL   = 4
+// ── איפה בתוך ה-QS נוצר הקיצון שהחזיק ──
+// לכל סטאפ: ברבע של החלון שבו נוצר הקיצון (Q1–Q4), או "אחרי" אם המחיר עבר
+// אותו אחרי סוף החלון. נספר כשהבדיקה של הסטאפ נגמרת. מערך לכל חלון:
+// 0–3 = Q1–Q4 · 4 = אחרי ה-QS.
+var array<int> ex225 = array.new_int(5, 0)
+var array<int> ex56  = array.new_int(5, 0)
+var int xQS = 0
+var int xQL = 0
+f_winMs(int k) => k == 4 ? 337500 : k == 3 ? 1350000 : 5400000
+f_qtr(int extT, int st, int k) => math.max(0, math.min(3, int(math.floor((extT - st) * 4.0 / f_winMs(k)))))
+f_exBump(int k, int b) =>
+    array<int> a = k == 4 ? ex56 : ex225
+    array.set(a, b, array.get(a, b) + 1)
+    b
 bool brS = false
 bool brL = false
 if exMode and xOnS
@@ -1439,22 +1455,28 @@ if exMode and xOnS
     else
         if xEndS == 0
             xEndS := time + f_parMs(xKS)
+            xQS   := f_qtr(eHiT, eStart, xKS)
         if time >= xEndS
             xOnS := false
+            f_exBump(xKS, xQS)
         else if high > xS
             brS  := true
             xOnS := false
+            f_exBump(xKS, 4)
 if exMode and xOnL
     if qsOn and doneL == qsId
         xL := wLo
     else
         if xEndL == 0
             xEndL := time + f_parMs(xKL)
+            xQL   := f_qtr(eLoT, eStart, xKL)
         if time >= xEndL
             xOnL := false
+            f_exBump(xKL, xQL)
         else if low < xL
             brL  := true
             xOnL := false
+            f_exBump(xKL, 4)
 bool fNowS = exMode ? brS : (keyS != "" and not f_alive(keyS, liveS))
 bool fNowL = exMode ? brL : (keyL != "" and not f_alive(keyL, liveL))
 // תגית שנכשלה הופכת ל-✕ אפור וקטן, עם הרצף, המחזור והשבירות
@@ -1574,7 +1596,7 @@ if alertOn and alTxt != ""
 
 posT = posIn == "ימין למעלה" ? position.top_right : posIn == "ימין באמצע" ? position.middle_right : posIn == "ימין למטה" ? position.bottom_right : posIn == "מרכז למעלה" ? position.top_center : posIn == "מרכז באמצע" ? position.middle_center : posIn == "מרכז למטה" ? position.bottom_center : posIn == "שמאל למעלה" ? position.top_left : posIn == "שמאל באמצע" ? position.middle_left : position.bottom_left
 szT  = szIn == "זעיר" ? size.tiny : szIn == "רגיל" ? size.normal : szIn == "גדול" ? size.large : szIn == "ענק" ? size.huge : size.small
-var table tb = table.new(posT, 1, 2, border_width = 1)
+var table tb = table.new(posT, 1, 4, border_width = 1)
 
 f_stTxt(int n, int w, float r, float m, int b) => str.tostring(n) + " trades · " + (n > 0 ? str.tostring(math.round(w * 100.0 / n)) : "0") + "% · " + (r >= 0 ? "+" : "") + str.tostring(r, "#.#") + "R · max " + (n > 0 ? str.tostring(m / n, "#.#") : "0") + "R · 1R+ " + (n > 0 ? str.tostring(math.round(b * 100.0 / n)) : "0") + "%"
 
@@ -1600,3 +1622,13 @@ if barstate.islast and (showTbl or trOn)
             mA += array.get(stM, k)
             bA += array.get(stB, k)
         table.cell(tb, 0, row, "TEST  " + f_stTxt(nA, wA, rA, mA, bA), bgcolor = color.new(rA >= 0 ? colBull : colBear, 70), text_color = color.white, text_size = szT)
+        // איפה נוצר הקיצון שהחזיק: Q1–Q4 של החלון, או אחרי ה-QS
+        for w = 0 to 1
+            array<int> a = w == 0 ? ex225 : ex56
+            int n = array.sum(a)
+            if n > 0
+                row += 1
+                string t = "EXT " + (w == 0 ? "22.5m" : "5.6m") + " (" + str.tostring(n) + ")  "
+                for b = 0 to 4
+                    t := t + (b == 0 ? "" : " · ") + (b == 4 ? "after " : "Q" + str.tostring(b + 1) + " ") + str.tostring(math.round(array.get(a, b) * 100.0 / n)) + "%"
+                table.cell(tb, 0, row, t, bgcolor = color.new(colQS, 60), text_color = color.white, text_size = szT)
