@@ -47,7 +47,8 @@ atExt   = input.bool(false, "רק כשאחת השבירות נוצרה על נר
 grpTr   = "סטופ ובדיקה"
 stopMode = input.string("קיצון החלון", "סטופ", options = ["קיצון החלון", "קיצון המחזור"], group = grpTr, tooltip = "קיצון המחזור: טיק מעבר לקיצון של המחזור שמכיל את החלון, מתחילתו ועד עכשיו (חלון 5.6 → רבע 22.5 · חלון 22.5 → מיקרו 90). אם ה-QS עשה את הקיצון — מעבר ל-QS; אם לפניו יש פתיל שהוא הקיצון — מעבר לפתיל.\nקיצון החלון: טיק מעבר לחלון ה-QS בלבד.")
 showStp = input.bool(true, "קו סטופ לסטאפ הפעיל", group = grpTr)
-trMode  = input.string("נר האישור", "כניסה בבדיקה", options = ["נר האישור", "סוף חלון ה-QS"], group = grpTr, tooltip = "נר האישור: כניסה בסגירת הנר שבו כל התנאים התקיימו, סטופ לפי הגדרת הסטופ.\nסוף חלון ה-QS: כניסה בנר הראשון שאחרי ה-QS (למשל כש-333 מתחלף ל-334), סטופ מעבר לקיצון של החלון (הנר הכי נמוך בלונג / הכי גבוה בשורט), יעד לפי ה-R הרגיל.")
+trMode  = input.string("נר האישור", "כניסה בבדיקה", options = ["נר האישור", "סוף חלון ה-QS", "מעורב: 22.5 בסוף, 5.6 בנר האישור"], group = grpTr, tooltip = "מעורב: בחלון 22.5 — כניסה בסוף החלון; בחלון 5.6 — בנר האישור.\nנר האישור: כניסה בסגירת הנר שבו כל התנאים התקיימו, סטופ לפי הגדרת הסטופ.\nסוף חלון ה-QS: כניסה בנר הראשון שאחרי ה-QS (למשל כש-333 מתחלף ל-334), סטופ מעבר לקיצון של החלון (הנר הכי נמוך בלונג / הכי גבוה בשורט), יעד לפי ה-R הרגיל.")
+beOn    = input.bool(false, "בבדיקה: סטופ לנקודת איזון אחרי 1R", group = grpTr, tooltip = "אחרי שהמחיר הגיע ל-1R לטובת העסקה, הסטופ עובר למחיר הכניסה. עסקה שחוזרת לכניסה נסגרת ב-0R (לא ניצחון ולא הפסד).")
 trOn    = input.bool(false, "בדיקה אחורה (שורת TEST)", group = grpTr, tooltip = "כל אישור נבדק כעסקה: כניסה בסגירת נר האישור, הסטופ למעלה, יעד לפי גודל החלון.")
 rr56    = input.float(1.3, "יעד בחלון 5.6 (R)", minval = 0.5, step = 0.1, group = grpTr)
 rr225   = input.float(2.0, "יעד בחלון 22.5 (R)", minval = 0.5, step = 0.1, group = grpTr)
@@ -1184,10 +1185,11 @@ var array<float> stR = array.new_float(8, 0.0)
 var array<float> stM = array.new_float(8, 0.0)
 // כמה עסקאות הגיעו לפחות ל-1R לטובתן לפני שנסגרו (אפשר היה להזיז לנקודת איזון)
 var array<int>   stB = array.new_int(8, 0)
-f_bump(int i, bool win, float rr, float mfe) =>
+// res: 1 = יעד · 0 = נקודת איזון · -1 = סטופ
+f_bump(int i, int res, float rr, float mfe) =>
     array.set(stN, i, array.get(stN, i) + 1)
-    array.set(stW, i, array.get(stW, i) + (win ? 1 : 0))
-    array.set(stR, i, array.get(stR, i) + (win ? rr : -1.0))
+    array.set(stW, i, array.get(stW, i) + (res == 1 ? 1 : 0))
+    array.set(stR, i, array.get(stR, i) + (res == 1 ? rr : res == 0 ? 0.0 : -1.0))
     array.set(stM, i, array.get(stM, i) + math.min(mfe, 20.0))
     array.set(stB, i, array.get(stB, i) + (mfe >= 1.0 ? 1 : 0))
     i
@@ -1202,7 +1204,7 @@ f_trArm(Trd t, label lb, float px, int nf, float stpIn) =>
         t.nf  := nf
         t.lb  := lb
         t.mfe := 0.0
-        if trMode == "סוף חלון ה-QS"
+        if trMode == "סוף חלון ה-QS" or (str.startswith(trMode, "מעורב") and qsK == 3)
             t.st := 1
         else
             float stp  = stpIn
@@ -1243,13 +1245,17 @@ f_trOpen(Trd t, float stpIn) =>
 f_trCheck(Trd t) =>
     if t.st == 2
         float risk = math.abs(t.stp - t.ent)
+        // נקודת איזון: רק אם 1R הושג כבר בנר קודם (לא מנחשים מה קרה קודם בתוך הנר)
+        bool  be   = beOn and t.mfe >= 1.0
+        float sl   = be ? t.ent : t.stp
+        bool  loss = t.dir == -1 ? high >= sl : low <= sl
+        bool  win  = not loss and (t.dir == -1 ? low <= t.tgt : high >= t.tgt)
         if risk > 0
             t.mfe := math.max(t.mfe, (t.dir == -1 ? t.ent - low : high - t.ent) / risk)
-        bool loss = t.dir == -1 ? high >= t.stp : low <= t.stp
-        bool win  = not loss and (t.dir == -1 ? low <= t.tgt : high >= t.tgt)
         if loss or win
-            f_bump(t.k, win, t.rr, t.mfe)
-            f_bump(7 - t.nf, win, t.rr, t.mfe)
+            int res = win ? 1 : be ? 0 : -1
+            f_bump(t.k, res, t.rr, t.mfe)
+            f_bump(7 - t.nf, res, t.rr, t.mfe)
             t.st := 0
     t.st
 
