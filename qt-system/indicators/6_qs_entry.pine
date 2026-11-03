@@ -41,6 +41,7 @@ usePsp  = input.bool(true, "PSP", group = grpBrk, tooltip = "PSP חי בתוך �
 use15s  = input.bool(true, "SSMT / HSSMT של 15 שניות", group = grpBrk, tooltip = "בין תתי-המחזורים של 5.625 דק' בתוך רבע 22.5, מחושב מנרות דקה. בלי PSP.")
 useFresh = input.bool(false, "לפחות שבירה אחת נוצרה בתוך ה-QS", group = grpBrk, tooltip = "כבוי: גם שתי שבירות שנוצרו לפני ה-QS (ועדיין חיות) נותנות סימון. אז סטאפ שאחת השבירות שלו נוצרה בתוך ה-QS מסומן ★.")
 useCh   = input.bool(false, "True CHoCH על השבירה של המסגרת הנמוכה", group = grpBrk, tooltip = "אחרי SSMT / HSSMT: לונג — נר נסגר מעל הגבוה של הנר היורד האחרון (הקרוב ביותר לנר של השבירה, כולל אותו); שורט — נר נסגר מתחת לנמוך של הנר העולה האחרון. נבדק על המסגרת הנמוכה מבין השבירות של הזוג (למשל 15m + 1m → ה-CHoCH ב-1m; 15s נבדק על נרות דקה). זוג בלי SSMT לא עובר. נמדד על הנכס של הגרף.")
+noQ1    = input.bool(false, "לא לסמן ברבע הראשון של ה-QS", group = grpBrk, tooltip = "התגית יוצאת רק אחרי שעבר הרבע הראשון של החלון (בחלון 22.5 — אחרי 5.6 הדקות הראשונות; בחלון 5.6 — אחרי כ-1.4 דקות). לפי שורות EXT: אם הקיצון כמעט אף פעם לא ב-Q1, זה מונע כניסה מוקדמת מדי.")
 atExt   = input.bool(false, "רק כשאחת השבירות נוצרה על נר הקיצון", group = grpBrk, tooltip = "התגית יוצאת רק כשלפחות אחת משתי השבירות נוצרה על הנר שעשה את הקיצון של החלון, או על הנר שאחריו.")
 
 grpTr   = "סטופ ובדיקה"
@@ -1354,6 +1355,11 @@ f_chOk(int d, string key) =>
 entS := entS != "" and useCh and not f_chOk(-1, keyNS) ? "" : entS
 entL := entL != "" and useCh and not f_chOk(1, keyNL) ? "" : entL
 
+// לא ברבע הראשון: הנר הזה כבר אחרי רבע מאורך החלון (מתחילת החלון בגרף)
+f_winLen(int k) => k == 4 ? 337500 : k == 3 ? 1350000 : 5400000
+q1Over = not noQ1 or (qsOn and time - wStart >= f_winLen(qsK) / 4)
+entS := entS != "" and not q1Over ? "" : entS
+entL := entL != "" and not q1Over ? "" : entL
 entS := qsOn ? entS : ""
 entL := qsOn ? entL : ""
 entPxS = close
@@ -1440,6 +1446,10 @@ var int   xKL   = 4
 var array<int> ex225 = array.new_int(5, 0)
 var array<int> ex56  = array.new_int(5, 0)
 var int xQS = 0
+var float xEnS = na
+var float xEnL = na
+var bool  x1S  = false
+var bool  x1L  = false
 var int xQL = 0
 f_winMs(int k) => k == 4 ? 337500 : k == 3 ? 1350000 : 5400000
 f_qtr(int extT, int st, int k) => math.max(0, math.min(3, int(math.floor((extT - st) * 4.0 / f_winMs(k)))))
@@ -1449,6 +1459,11 @@ f_exBump(int k, int b) =>
     b
 bool brS = false
 bool brL = false
+// הגיע ל-1R לטובתו מאז האישור (הסיכון = מהכניסה עד הקיצון של החלון)
+if xOnS and not x1S and not na(xEnS) and xS - xEnS > 0 and xEnS - low >= xS - xEnS
+    x1S := true
+if xOnL and not x1L and not na(xEnL) and xEnL - xL > 0 and high - xEnL >= xEnL - xL
+    x1L := true
 if exMode and xOnS
     if qsOn and doneS == qsId
         xS := wHi
@@ -1462,7 +1477,8 @@ if exMode and xOnS
         else if high > xS
             brS  := true
             xOnS := false
-            f_exBump(xKS, 4)
+            // after = הקיצון נלקח לפני שהמחיר הגיע ל-1R (הסטופ שהיה קורה לפני המהלך)
+            f_exBump(xKS, x1S ? xQS : 4)
 if exMode and xOnL
     if qsOn and doneL == qsId
         xL := wLo
@@ -1476,7 +1492,7 @@ if exMode and xOnL
         else if low < xL
             brL  := true
             xOnL := false
-            f_exBump(xKL, 4)
+            f_exBump(xKL, x1L ? xQL : 4)
 bool fNowS = exMode ? brS : (keyS != "" and not f_alive(keyS, liveS))
 bool fNowL = exMode ? brL : (keyL != "" and not f_alive(keyL, liveL))
 // תגית שנכשלה הופכת ל-✕ אפור וקטן, עם הרצף, המחזור והשבירות
@@ -1534,6 +1550,8 @@ if entS != "" and doneS != qsId
     lsS   := false
     nmS   := n1S + (showBrk ? "\n" + bkS : "")
     xOnS  := true
+    xEnS  := close
+    x1S   := false
     xS    := wHi
     xEndS := 0
     xKS   := qsK
@@ -1554,6 +1572,8 @@ if entL != "" and doneL != qsId
     lsL   := false
     nmL   := n1L + (showBrk ? "\n" + bkL : "")
     xOnL  := true
+    xEnL  := close
+    x1L   := false
     xL    := wLo
     xEndL := 0
     xKL   := qsK
