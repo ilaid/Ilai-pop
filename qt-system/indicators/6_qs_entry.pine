@@ -47,7 +47,9 @@ atExt   = input.bool(false, "רק כשאחת השבירות נוצרה על נר
 
 grpTr   = "סטופ ובדיקה"
 stopMode = input.string("קיצון החלון", "סטופ", options = ["קיצון החלון", "קיצון המחזור"], group = grpTr, tooltip = "קיצון המחזור: טיק מעבר לקיצון של המחזור שמכיל את החלון, מתחילתו ועד עכשיו (חלון 5.6 → רבע 22.5 · חלון 22.5 → מיקרו 90). אם ה-QS עשה את הקיצון — מעבר ל-QS; אם לפניו יש פתיל שהוא הקיצון — מעבר לפתיל.\nקיצון החלון: טיק מעבר לחלון ה-QS בלבד.")
-showStp = input.bool(true, "קו סטופ לסטאפ הפעיל", group = grpTr)
+posView = input.string("קו סטופ", "תצוגת העסקה", options = ["כבוי", "קו סטופ", "סטופ + יעד", "פוזיציה"], group = grpTr, tooltip = "לסטאפ הפעיל, מהכניסה (סגירת נר האישור) ו-20 נרות קדימה.\nקו סטופ: קו מקווקו דק.\nסטופ + יעד: קו סטופ אדום וקו יעד ירוק, עבים.\nפוזיציה: כמו כלי ה-Long / Short של TradingView — אזור אדום עד הסטופ ואזור ירוק עד היעד.\nכשהקיצון של החלון זז (ניסיון חדש), הציור עובר לכניסה החדשה.")
+reOn    = input.bool(false, "בבדיקה: כניסה חוזרת אחרי סטופ בתוך החלון", group = grpTr, tooltip = "אם הקיצון של החלון זז וסגר את העסקה בסטופ, וה-QS עדיין חי — נכנסים שוב בסגירת אותו נר, עם סטופ מעבר לקיצון החדש. כל ניסיון נספר כעסקה. על התגית: כל ניסיון והסה״כ.")
+maxAtt  = input.int(3, "מקסימום ניסיונות בחלון", minval = 1, maxval = 10, group = grpTr)
 trMode  = input.string("נר האישור", "כניסה בבדיקה", options = ["נר האישור", "סוף חלון ה-QS", "מעורב: 22.5 בסוף, 5.6 בנר האישור"], group = grpTr, tooltip = "מעורב: בחלון 22.5 — כניסה בסוף החלון; בחלון 5.6 — בנר האישור.\nנר האישור: כניסה בסגירת הנר שבו כל התנאים התקיימו, סטופ לפי הגדרת הסטופ.\nסוף חלון ה-QS: כניסה בנר הראשון שאחרי ה-QS (למשל כש-333 מתחלף ל-334), סטופ מעבר לקיצון של החלון (הנר הכי נמוך בלונג / הכי גבוה בשורט), יעד לפי ה-R הרגיל.")
 beOn    = input.bool(false, "בבדיקה: סטופ לנקודת איזון", group = grpTr, tooltip = "אחרי שהמחיר הגיע ל-X R לטובת העסקה (בנר קודם), הסטופ עובר למחיר הכניסה. עסקה שחוזרת לכניסה נסגרת ב-0R.")
 beAt    = input.float(1.0, "נקודת איזון אחרי (R)", minval = 0.3, step = 0.1, group = grpTr)
@@ -1251,6 +1253,8 @@ type Trd
     float  mfe = 0.0
     bool   run = false   // עבר את היעד והסטופ נגרר
     float  tsl = na      // הסטופ הנגרר
+    int    att = 1       // מספר הניסיון בחלון
+    float  acc = 0.0     // סכום ה-R של הניסיונות הקודמים בחלון
     label  lb
 
 var Trd tS = Trd.new(-1)
@@ -1279,6 +1283,8 @@ f_trArm(Trd t, label lb, float px, float stpIn) =>
         t.win := qsId
         t.k   := qsK
         t.run := false
+        t.att := 1
+        t.acc := 0.0
         t.lb  := lb
         t.mfe := 0.0
         if trMode == "סוף חלון ה-QS" or (str.startswith(trMode, "מעורב") and qsK == 3)
@@ -1314,7 +1320,7 @@ f_trOpen(Trd t, float stpIn) =>
             label.set_xy(t.lb, t.dir == -1 ? eHiB : eLoB, t.dir == -1 ? eHi + lblOff : eLo - lblOff)
     t.st
 
-f_trCheck(Trd t) =>
+f_trCheck(Trd t, float reStp) =>
     string rs = ""
     if t.st == 2
         float risk = math.abs(t.stp - t.ent)
@@ -1328,9 +1334,23 @@ f_trCheck(Trd t) =>
         if hit
             float rv = risk > 0 ? (t.dir == -1 ? t.ent - sl : sl - t.ent) / risk : -1.0
             f_bump(t.k, rv > 0, rv, t.mfe)
-            rs := (t.run ? "נגרר " : be and rv >= 0 ? "איזון " : "סטופ ") + (rv >= 0 ? "+" : "") + str.tostring(rv, "#.#") + "R"
-            t.st  := 0
-            t.run := false
+            string r1 = (t.run ? "נגרר " : be and rv >= 0 ? "איזון " : "סטופ ") + (rv >= 0 ? "+" : "") + str.tostring(rv, "#.#") + "R"
+            float  r2 = reStp
+            float  rk = t.dir == -1 ? r2 - close : close - r2
+            bool   again = reOn and rv < 0 and not t.run and t.att < maxAtt and qsOn and t.win == qsId and not na(rk) and rk > 0
+            if again
+                // ניסיון נוסף באותו חלון: כניסה בסגירת הנר הזה, סטופ מעבר לקיצון החדש
+                rs := "ניסיון " + str.tostring(t.att) + ": " + r1
+                t.acc := t.acc + rv
+                t.att := t.att + 1
+                t.ent := close
+                t.stp := r2
+                t.tgt := t.dir == -1 ? close - rk * t.rr : close + rk * t.rr
+                t.mfe := 0.0
+            else
+                rs := (t.att > 1 ? "ניסיון " + str.tostring(t.att) + ": " : "") + r1 + (t.att > 1 ? " · סה״כ " + (t.acc + rv >= 0 ? "+" : "") + str.tostring(t.acc + rv, "#.#") + "R" : "")
+                t.st  := 0
+                t.run := false
         else if tg
             if runOn
                 // הגיע ליעד — לא יוצאים: הסטופ ננעל trD מתחת ליעד וממשיך להיגרר
@@ -1338,7 +1358,7 @@ f_trCheck(Trd t) =>
                 t.tsl := t.dir == -1 ? t.tgt + trD * risk : t.tgt - trD * risk
             else
                 f_bump(t.k, true, t.rr, t.mfe)
-                rs := "יעד +" + str.tostring(t.rr, "#.#") + "R"
+                rs := (t.att > 1 ? "ניסיון " + str.tostring(t.att) + ": " : "") + "יעד +" + str.tostring(t.rr, "#.#") + "R" + (t.att > 1 ? " · סה״כ " + (t.acc + t.rr >= 0 ? "+" : "") + str.tostring(t.acc + t.rr, "#.#") + "R" : "")
                 t.st := 0
         if t.st == 2 and t.run and risk > 0
             float best = t.dir == -1 ? t.ent - t.mfe * risk : t.ent + t.mfe * risk
@@ -1464,8 +1484,29 @@ entPxL = close
 var string doneS = ""
 var string doneL = ""
 var label  lbS   = na
+// הציור של העסקה הפעילה (קו סטופ / סטופ + יעד / פוזיציה), לכל כיוון
 var line   slS   = na
 var line   slL   = na
+var line   tlS   = na
+var line   tlL   = na
+var box    bsS   = na
+var box    bsL   = na
+var box    btS   = na
+var box    btL   = na
+f_pos(int x, float en, float st, float tg) =>
+    line l1 = na
+    line l2 = na
+    box  b1 = na
+    box  b2 = na
+    if posView == "קו סטופ"
+        l1 := line.new(x, st, x + 20, st, color = color.new(#ef5350, 20), style = line.style_dashed, width = 1)
+    else if posView == "סטופ + יעד"
+        l1 := line.new(x, st, x + 20, st, color = #ef5350, width = 2)
+        l2 := line.new(x, tg, x + 20, tg, color = #26a69a, width = 2)
+    else if posView == "פוזיציה"
+        b1 := box.new(x, math.max(en, st), x + 20, math.min(en, st), border_color = color.new(#ef5350, 40), bgcolor = color.new(#ef5350, 80))
+        b2 := box.new(x, math.max(en, tg), x + 20, math.min(en, tg), border_color = color.new(#26a69a, 40), bgcolor = color.new(#26a69a, 80))
+    [l1, l2, b1, b2]
 var label  lbL   = na
 var string txS   = ""
 var string txL   = ""
@@ -1567,6 +1608,16 @@ if exMode and xOnS
         // הקיצון זז אחרי האישור = הכניסה הייתה נסגרת בסטופ, וצריך ניסיון נוסף
         if wHi > xS
             atS += 1
+            // ניסיון חדש: הציור עובר לכניסה החדשה (סגירת הנר הזה, סטופ מעבר לקיצון החדש)
+            line.delete(slS)
+            line.delete(tlS)
+            box.delete(bsS)
+            box.delete(btS)
+            [rS1, rS2, rS3, rS4] = f_pos(bar_index, close, stpNS, close - f_rr(xKS) * (stpNS - close))
+            slS := rS1
+            tlS := rS2
+            bsS := rS3
+            btS := rS4
         xS := wHi
     else
         if xEndS == 0
@@ -1587,6 +1638,15 @@ if exMode and xOnL
     if qsOn and doneL == qsId
         if wLo < xL
             atL += 1
+            line.delete(slL)
+            line.delete(tlL)
+            box.delete(bsL)
+            box.delete(btL)
+            [rL1, rL2, rL3, rL4] = f_pos(bar_index, close, stpNL, close + f_rr(xKL) * (close - stpNL))
+            slL := rL1
+            tlL := rL2
+            bsL := rL3
+            btL := rL4
         xL := wLo
     else
         if xEndL == 0
@@ -1609,6 +1669,9 @@ if fNowS
     if not showX
         label.delete(lbS)
     line.delete(slS)
+    line.delete(tlS)
+    box.delete(bsS)
+    box.delete(btS)
     label.set_text(lbS, "✕ " + nmS)
     label.set_size(lbS, size.tiny)
     label.set_color(lbS, color.new(color.gray, 45))
@@ -1620,6 +1683,9 @@ if fNowL
     if not showX
         label.delete(lbL)
     line.delete(slL)
+    line.delete(tlL)
+    box.delete(bsL)
+    box.delete(btL)
     label.set_text(lbL, "✕ " + nmL)
     label.set_size(lbL, size.tiny)
     label.set_color(lbL, color.new(color.gray, 45))
@@ -1666,7 +1732,14 @@ if entS != "" and doneS != qsId
     lbS   := label.new(wHiB, wHi + lblOff, "▼ " + nmS, yloc = yloc.price, style = label.style_label_down, color = colBear, textcolor = color.white, size = size.small, tooltip = "SHORT · QS " + qsShow + " (" + f_kName(qsK) + ")\nכל התנאים התקיימו בנר של " + str.format_time(time, "HH:mm", TZ) + "\n" + entS + "\nהשבירות: " + f_brkTxt(-1, keyNS) + "\nסטופ: " + str.tostring(stpNS, format.mintick))
     array.push(hist, lbS)
     line.delete(slS)
-    slS := showStp ? line.new(wHiB, stpNS, bar_index + 3, stpNS, color = color.new(colBear, 30), style = line.style_dashed, width = 1) : na
+    line.delete(tlS)
+    box.delete(bsS)
+    box.delete(btS)
+    [pS1, pS2, pS3, pS4] = f_pos(bar_index, close, stpNS, close - f_rr(qsK) * (stpNS - close))
+    slS := pS1
+    tlS := pS2
+    bsS := pS3
+    btS := pS4
     f_trArm(tS, lbS, entPxS, stpNS)
     alTxt := "▼ SHORT · QS " + qsPat + " " + f_kLen(qsK) + " · " + str.replace_all(entS, "\n", " · ")
 if entL != "" and doneL != qsId
@@ -1690,7 +1763,14 @@ if entL != "" and doneL != qsId
     lbL   := label.new(wLoB, wLo - lblOff, "▲ " + nmL, yloc = yloc.price, style = label.style_label_up, color = colBull, textcolor = color.white, size = size.small, tooltip = "LONG · QS " + qsShow + " (" + f_kName(qsK) + ")\nכל התנאים התקיימו בנר של " + str.format_time(time, "HH:mm", TZ) + "\n" + entL + "\nהשבירות: " + f_brkTxt(1, keyNL) + "\nסטופ: " + str.tostring(stpNL, format.mintick))
     array.push(hist, lbL)
     line.delete(slL)
-    slL := showStp ? line.new(wLoB, stpNL, bar_index + 3, stpNL, color = color.new(colBull, 30), style = line.style_dashed, width = 1) : na
+    line.delete(tlL)
+    box.delete(bsL)
+    box.delete(btL)
+    [pL1, pL2, pL3, pL4] = f_pos(bar_index, close, stpNL, close + f_rr(qsK) * (close - stpNL))
+    slL := pL1
+    tlL := pL2
+    bsL := pL3
+    btL := pL4
     f_trArm(tL, lbL, entPxL, stpNL)
     alTxt := alTxt + (alTxt == "" ? "" : "\n") + "▲ LONG · QS " + qsPat + " " + f_kLen(qsK) + " · " + str.replace_all(entL, "\n", " · ")
 while array.size(hist) > keepN
@@ -1701,12 +1781,8 @@ while array.size(hist) > keepN
 // הקו של הסטופ זז עם הקיצון כל עוד החלון חי, ונעצר כשהוא נגמר
 if qsOn and doneS == qsId
     label.set_xy(lbS, wHiB, wHi + lblOff)
-    line.set_xy1(slS, wHiB, stpNS)
-    line.set_xy2(slS, bar_index + 3, stpNS)
 if qsOn and doneL == qsId
     label.set_xy(lbL, wLoB, wLo - lblOff)
-    line.set_xy1(slL, wLoB, stpNL)
-    line.set_xy2(slL, bar_index + 3, stpNL)
 
 bgcolor(showBg and qsOn ? color.new(colQS, 93) : na, title = "QS window")
 // אף חלון לא נבדק בגרף הזה — הודעה קטנה במקום סימונים שגויים
@@ -1719,8 +1795,8 @@ if barstate.islast and noWin
 f_trOpen(tS, eHi + syminfo.mintick)
 f_trOpen(tL, eLo - syminfo.mintick)
 // התוצאה נכתבת על התגית של העסקה (ונשמרת גם אם התגית מתכווצת או מקבלת ✕)
-rsS = f_trCheck(tS)
-rsL = f_trCheck(tL)
+rsS = f_trCheck(tS, stpNS)
+rsL = f_trCheck(tL, stpNL)
 if showRes and rsS != ""
     label.set_text(tS.lb, label.get_text(tS.lb) + "\n" + rsS)
     if tS.win == wNmS
