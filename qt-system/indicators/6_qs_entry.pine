@@ -38,6 +38,7 @@ useK4   = input.bool(true, "5.6 דק' (90 · 22.5 · 5.6)", group = grpQS)
 grpBrk  = "שבירות"
 useSsmt = input.bool(true, "SSMT / HSSMT", group = grpBrk)
 usePsp  = input.bool(true, "PSP", group = grpBrk, tooltip = "PSP חי בתוך המחזור שבו נוצר (1m: ‏22.5 דק' · 5m: ‏90 דק' · 15m: סשן), עד ש-NQ וגם ES לקחו את הקצה של נר הסווינג.")
+usePair = input.bool(true, "זוג YM / RTY", group = grpBrk, tooltip = "כמו באינדיקטורים SSMT + HSSMT ו-ADI: YM ו-RTY זוג שווה. SSMT / HSSMT = רק אחד מהם לקח את הרמה; PSP = נסגרים בכיוונים הפוכים על נר שהוא סווינג באחד מהם; מת כששניהם לקחו. שבירה של הזוג היא רגל רגילה, ומתחרה על הכיוון של המסגרת לפי החוזק (ובשוויון — החדשה).")
 use15s  = input.bool(true, "SSMT / HSSMT של 15 שניות", group = grpBrk, tooltip = "בין תתי-המחזורים של 5.625 דק' בתוך רבע 22.5, מחושב מנרות דקה. בלי PSP.")
 useFresh = input.bool(false, "לפחות שבירה אחת נוצרה בתוך ה-QS", group = grpBrk, tooltip = "כבוי: גם שתי שבירות שנוצרו לפני ה-QS (ועדיין חיות) נותנות סימון. אז סטאפ שאחת השבירות שלו נוצרה בתוך ה-QS מסומן ★.")
 useCh   = input.bool(false, "True CHoCH על השבירה של המסגרת הנמוכה", group = grpBrk, tooltip = "אחרי SSMT / HSSMT: לונג — נר נסגר מעל הגבוה של הנר היורד האחרון (הקרוב ביותר לנר של השבירה, כולל אותו); שורט — נר נסגר מתחת לנמוך של הנר העולה האחרון. נבדק על המסגרת הנמוכה מבין השבירות של הזוג (למשל 15m + 1m → ה-CHoCH ב-1m; 15s נבדק על נרות דקה). זוג בלי SSMT לא עובר. נמדד על הנכס של הגרף.")
@@ -94,6 +95,8 @@ useMicro     = contractSet == "מיקרו" or (contractSet == "אוטומטי" a
 sNQ = ticker.modify(useMicro ? "CME_MINI:MNQ1!"  : "CME_MINI:NQ1!",  backadjustment = bAdj, settlement_as_close = bSet)
 sES = ticker.modify(useMicro ? "CME_MINI:MES1!"  : "CME_MINI:ES1!",  backadjustment = bAdj, settlement_as_close = bSet)
 sYM = ticker.modify(useMicro ? "CBOT_MINI:MYM1!" : "CBOT_MINI:YM1!", backadjustment = bAdj, settlement_as_close = bSet)
+// RTY — בן הזוג של YM. כשהזוג כבוי הבקשות שלו זהות לאלה של YM ולא עולות כלום
+sRT = usePair ? ticker.modify(useMicro ? "CME_MINI:M2K1!" : "CME_MINI:RTY1!", backadjustment = bAdj, settlement_as_close = bSet) : sYM
 
 // נכס הגרף: 0 = NQ, 1 = ES, 2 = YM — ממנו נלקחים ה-True Opens
 cA = str.contains(syminfo.tickerid, "NQ") ? 0 : str.contains(syminfo.tickerid, "ES") ? 1 : 2
@@ -325,6 +328,8 @@ f_dir(float o, float c) => c > o ? 1 : c < o ? -1 : 0
 
 type Eng
     int    cls
+    bool   pr      = false   // מנוע הזוג: n = YM · e = RTY · y = YM שוב (ככה אותה לוגיקה בדיוק נותנת את חוקי הזוג)
+    int    ca      = 0       // הנכס שעליו נמדד ה-CHoCH: 0 = n · 1 = e · 2 = y
     int    lastT   = 0
     int    refId   = 0
     int    lifeId  = 0
@@ -397,8 +402,8 @@ type Eng
     float        rYh  = na
     float        rYl  = na
 
-f_newEng(int cls) =>
-    Eng.new(cls, nHiA = array.new_float(), nLoA = array.new_float(), nHcA = array.new_float(), nLcA = array.new_float(), eHiA = array.new_float(), eLoA = array.new_float(), eHcA = array.new_float(), eLcA = array.new_float(), yHiA = array.new_float(), yLoA = array.new_float(), yHcA = array.new_float(), yLcA = array.new_float(), cv = array.new_float(36, na), ct = array.new_int(3, 0), pDir = array.new_int(), pNq = array.new_float(), pEs = array.new_float(), pYm = array.new_float(), pCont = array.new_int(), pSeq = array.new_int(), pBorn = array.new_int())
+f_newEng(int cls, bool pr) =>
+    Eng.new(cls, pr = pr, ca = pr ? 0 : cA, nHiA = array.new_float(), nLoA = array.new_float(), nHcA = array.new_float(), nLcA = array.new_float(), eHiA = array.new_float(), eLoA = array.new_float(), eHcA = array.new_float(), eLcA = array.new_float(), yHiA = array.new_float(), yLoA = array.new_float(), yHcA = array.new_float(), yLcA = array.new_float(), cv = array.new_float(36, na), ct = array.new_int(3, 0), pDir = array.new_int(), pNq = array.new_float(), pEs = array.new_float(), pYm = array.new_float(), pCont = array.new_int(), pSeq = array.new_int(), pBorn = array.new_int())
 
 f_cv(Eng e, int j, int a, int f) => array.get(e.cv, j * 12 + a * 4 + f)
 // אורך נר של המסגרת — שבירה "נולדת" בסגירת הנר שיצר אותה
@@ -517,10 +522,10 @@ f_step(Eng e, int t, float no, float nh, float nl, float nc, float eo, float eh,
             nuS := xuS
         // ── True CHoCH: קודם בודקים את הנר הזה מול השבירות הקיימות, ואז מעדכנים
         //    את הנר הנגדי האחרון (כולל הנר הזה) ──
-        float ao = cA == 0 ? no : cA == 1 ? eo : yo
-        float ah = cA == 0 ? nh : cA == 1 ? eh : yh
-        float al = cA == 0 ? nl : cA == 1 ? el : yl
-        float ac = cA == 0 ? nc : cA == 1 ? ec : yc
+        float ao = e.ca == 0 ? no : e.ca == 1 ? eo : yo
+        float ah = e.ca == 0 ? nh : e.ca == 1 ? eh : yh
+        float al = e.ca == 0 ? nl : e.ca == 1 ? el : yl
+        float ac = e.ca == 0 ? nc : e.ca == 1 ? ec : yc
         if e.bTy != 0 and not e.bCh and not na(e.bChR) and ac < e.bChR
             e.bCh := true
         if e.uTy != 0 and not e.uCh and not na(e.uChR) and ac > e.uChR
@@ -730,26 +735,33 @@ lkh = barmerge.lookahead_off
 [cNh, cNl, cNc] = request.security(sNQ, timeframe.period, [high, low, close], lookahead = lkh)
 [cEh, cEl, cEc] = request.security(sES, timeframe.period, [high, low, close], lookahead = lkh)
 [cYh, cYl, cYc] = request.security(sYM, timeframe.period, [high, low, close], lookahead = lkh)
+[cRh, cRl, cRc] = request.security(sRT, timeframe.period, [high, low, close], lookahead = lkh)
 
 [a1t, a1no, a1nh, a1nl, a1nc] = request.security(sNQ, h1, [time[1], open[1], high[1], low[1], close[1]], lookahead = lkh)
 [a1eo, a1eh, a1el, a1ec]      = request.security(sES, h1, [open[1], high[1], low[1], close[1]], lookahead = lkh)
 [a1yo, a1yh, a1yl, a1yc]      = request.security(sYM, h1, [open[1], high[1], low[1], close[1]], lookahead = lkh)
+[a1ro, a1rh, a1rl, a1rc]      = request.security(sRT, h1, [open[1], high[1], low[1], close[1]], lookahead = lkh)
 [a5t, a5no, a5nh, a5nl, a5nc] = request.security(sNQ, h5, [time[1], open[1], high[1], low[1], close[1]], lookahead = lkh)
 [a5eo, a5eh, a5el, a5ec]      = request.security(sES, h5, [open[1], high[1], low[1], close[1]], lookahead = lkh)
 [a5yo, a5yh, a5yl, a5yc]      = request.security(sYM, h5, [open[1], high[1], low[1], close[1]], lookahead = lkh)
+[a5ro, a5rh, a5rl, a5rc]      = request.security(sRT, h5, [open[1], high[1], low[1], close[1]], lookahead = lkh)
 [aFt, aFno, aFnh, aFnl, aFnc] = request.security(sNQ, h15, [time[1], open[1], high[1], low[1], close[1]], lookahead = lkh)
 [aFeo, aFeh, aFel, aFec]      = request.security(sES, h15, [open[1], high[1], low[1], close[1]], lookahead = lkh)
 [aFyo, aFyh, aFyl, aFyc]      = request.security(sYM, h15, [open[1], high[1], low[1], close[1]], lookahead = lkh)
+[aFro, aFrh, aFrl, aFrc]      = request.security(sRT, h15, [open[1], high[1], low[1], close[1]], lookahead = lkh)
 
 [b1nt, b1no, b1nh, b1nl, b1nc] = request.security_lower_tf(sNQ, l1, [time, open, high, low, close], ignore_invalid_timeframe = true)
 [b1et, b1eo, b1eh, b1el, b1ec] = request.security_lower_tf(sES, l1, [time, open, high, low, close], ignore_invalid_timeframe = true)
 [b1yt, b1yo, b1yh, b1yl, b1yc] = request.security_lower_tf(sYM, l1, [time, open, high, low, close], ignore_invalid_timeframe = true)
+[b1rt, b1ro, b1rh, b1rl, b1rc] = request.security_lower_tf(sRT, l1, [time, open, high, low, close], ignore_invalid_timeframe = true)
 [b5nt, b5no, b5nh, b5nl, b5nc] = request.security_lower_tf(sNQ, l5, [time, open, high, low, close], ignore_invalid_timeframe = true)
 [b5et, b5eo, b5eh, b5el, b5ec] = request.security_lower_tf(sES, l5, [time, open, high, low, close], ignore_invalid_timeframe = true)
 [b5yt, b5yo, b5yh, b5yl, b5yc] = request.security_lower_tf(sYM, l5, [time, open, high, low, close], ignore_invalid_timeframe = true)
+[b5rt, b5ro, b5rh, b5rl, b5rc] = request.security_lower_tf(sRT, l5, [time, open, high, low, close], ignore_invalid_timeframe = true)
 [bFnt, bFno, bFnh, bFnl, bFnc] = request.security_lower_tf(sNQ, l15, [time, open, high, low, close], ignore_invalid_timeframe = true)
 [bFet, bFeo, bFeh, bFel, bFec] = request.security_lower_tf(sES, l15, [time, open, high, low, close], ignore_invalid_timeframe = true)
 [bFyt, bFyo, bFyh, bFyl, bFyc] = request.security_lower_tf(sYM, l15, [time, open, high, low, close], ignore_invalid_timeframe = true)
+[bFrt, bFro, bFrh, bFrl, bFrc] = request.security_lower_tf(sRT, l15, [time, open, high, low, close], ignore_invalid_timeframe = true)
 
 // סמן רץ: מחזיר את האינדקס האחרון במערך הזמנים שזמנו <= t, החל מ-from.
 // המערכים ממוינים ולכן הסמן רק מתקדם — מעבר אחד על כל תת-הנרות.
@@ -804,10 +816,15 @@ f_feedLtf(Eng e, array<int> nt, array<float> no, array<float> nh, array<float> n
                     f_step(e, tj, array.get(no, j), array.get(nh, j), array.get(nl, j), array.get(nc, j), array.get(eo, ke), array.get(eh, ke), array.get(el, ke), array.get(ec, ke), array.get(yo, ky), array.get(yh, ky), array.get(yl, ky), array.get(yc, ky))
     e.lastT
 
-var Eng eS  = f_newEng(1)
-var Eng e1  = f_newEng(2)
-var Eng e5  = f_newEng(3)
-var Eng e15 = f_newEng(4)
+var Eng eS  = f_newEng(1, false)
+var Eng e1  = f_newEng(2, false)
+var Eng e5  = f_newEng(3, false)
+var Eng e15 = f_newEng(4, false)
+// מנועי הזוג YM / RTY — אותו מנוע בדיוק, עם YM במקום NQ ו-RTY במקום ES
+var Eng qS  = f_newEng(1, true)
+var Eng q1  = f_newEng(2, true)
+var Eng q5  = f_newEng(3, true)
+var Eng q15 = f_newEng(4, true)
 var TOs tos = TOs.new()
 
 // 15s: כברירת מחדל מנרות דקה (כמו SSMT + HSSMT), או מנתוני שניות אמיתיים
@@ -816,6 +833,24 @@ if use15s and not real15s
         f_feedLtf(eS, b1nt, b1no, b1nh, b1nl, b1nc, b1et, b1eo, b1eh, b1el, b1ec, b1yt, b1yo, b1yh, b1yl, b1yc)
     else
         f_step(eS, a1t, a1no, a1nh, a1nl, a1nc, a1eo, a1eh, a1el, a1ec, a1yo, a1yh, a1yl, a1yc)
+if usePair
+    if use15s
+        if lo1
+            f_feedLtf(qS, b1yt, b1yo, b1yh, b1yl, b1yc, b1rt, b1ro, b1rh, b1rl, b1rc, b1yt, b1yo, b1yh, b1yl, b1yc)
+        else
+            f_step(qS, a1t, a1yo, a1yh, a1yl, a1yc, a1ro, a1rh, a1rl, a1rc, a1yo, a1yh, a1yl, a1yc)
+    if lo1
+        f_feedLtf(q1, b1yt, b1yo, b1yh, b1yl, b1yc, b1rt, b1ro, b1rh, b1rl, b1rc, b1yt, b1yo, b1yh, b1yl, b1yc)
+    else
+        f_step(q1, a1t, a1yo, a1yh, a1yl, a1yc, a1ro, a1rh, a1rl, a1rc, a1yo, a1yh, a1yl, a1yc)
+    if lo5
+        f_feedLtf(q5, b5yt, b5yo, b5yh, b5yl, b5yc, b5rt, b5ro, b5rh, b5rl, b5rc, b5yt, b5yo, b5yh, b5yl, b5yc)
+    else
+        f_step(q5, a5t, a5yo, a5yh, a5yl, a5yc, a5ro, a5rh, a5rl, a5rc, a5yo, a5yh, a5yl, a5yc)
+    if lo15
+        f_feedLtf(q15, bFyt, bFyo, bFyh, bFyl, bFyc, bFrt, bFro, bFrh, bFrl, bFrc, bFyt, bFyo, bFyh, bFyl, bFyc)
+    else
+        f_step(q15, aFt, aFyo, aFyh, aFyl, aFyc, aFro, aFrh, aFrl, aFrc, aFyo, aFyh, aFyl, aFyc)
 if lo1
     f_feedLtf(e1, b1nt, b1no, b1nh, b1nl, b1nc, b1et, b1eo, b1eh, b1el, b1ec, b1yt, b1yo, b1yh, b1yl, b1yc)
 else
@@ -857,19 +892,23 @@ f_upEng(Eng e) => chSec * 1000 <= f_clsMs(e.cls)
 f_run(Eng e) =>
     if f_upEng(e) and e.lastT != 0
         int st = e.lastT + f_clsMs(e.cls)
+        float zh1 = e.pr ? cYh : cNh
+        float zl1 = e.pr ? cYl : cNl
+        float zh2 = e.pr ? cRh : cEh
+        float zl2 = e.pr ? cRl : cEl
         if st != e.rSt
             e.rSt := st
-            e.rNh := cNh
-            e.rNl := cNl
-            e.rEh := cEh
-            e.rEl := cEl
+            e.rNh := zh1
+            e.rNl := zl1
+            e.rEh := zh2
+            e.rEl := zl2
             e.rYh := cYh
             e.rYl := cYl
         else
-            e.rNh := na(e.rNh) or cNh > e.rNh ? cNh : e.rNh
-            e.rNl := na(e.rNl) or cNl < e.rNl ? cNl : e.rNl
-            e.rEh := na(e.rEh) or cEh > e.rEh ? cEh : e.rEh
-            e.rEl := na(e.rEl) or cEl < e.rEl ? cEl : e.rEl
+            e.rNh := na(e.rNh) or zh1 > e.rNh ? zh1 : e.rNh
+            e.rNl := na(e.rNl) or zl1 < e.rNl ? zl1 : e.rNl
+            e.rEh := na(e.rEh) or zh2 > e.rEh ? zh2 : e.rEh
+            e.rEl := na(e.rEl) or zl2 < e.rEl ? zl2 : e.rEl
             e.rYh := na(e.rYh) or cYh > e.rYh ? cYh : e.rYh
             e.rYl := na(e.rYl) or cYl < e.rYl ? cYl : e.rYl
     e.rSt
@@ -877,6 +916,11 @@ f_run(eS)
 f_run(e1)
 f_run(e5)
 f_run(e15)
+if usePair
+    f_run(qS)
+    f_run(q1)
+    f_run(q5)
+    f_run(q15)
 
 // ה-PSP החדש ביותר בכיוון d שעדיין חי. PSP מת כשכל שלושת הנכסים (NQ, ES, YM)
 // לקחו את הקצה של נר הסווינג אצלם (פתיל) — כולל לקיחה בנר שעוד לא נסגר.
@@ -897,7 +941,7 @@ f_pspSeq(Eng e, int d, int cur) =>
                 if not f_psGone(tq, ts, ty)
                     sq := array.get(e.pSeq, i)
                     bn := array.get(e.pBorn, i)
-                    wh := str.trim((tq ? "" : "NQ ") + (ts ? "" : "ES ") + (ty ? "" : "YM"))
+                    wh := e.pr ? str.trim((tq ? "" : "YM ") + (ts ? "" : "RTY")) : str.trim((tq ? "" : "NQ ") + (ts ? "" : "ES ") + (ty ? "" : "YM"))
     [sq, bn, wh]
 
 // השבירות של המסגרת בכיוון d: [סוג ה-SSMT (0 / 1 = SSMT / 2 = HSSMT), האם יש PSP,
@@ -910,13 +954,15 @@ f_leg(Eng e, int d, string nm) =>
     // בדיקה חיה של SSMT: המנוע ראה רק נרות סגורים, נר אחד מאחור. כאן מריצים
     // את אותו זיהוי בדיוק (f_findBear / f_findBull) עם הנר שעוד לא נסגר — אם
     // הסטייה כבר לא קיימת עכשיו (הנכס השני לקח גם הוא), השבירה לא חיה
+    float lc1 = e.pr ? cYc : cNc
+    float lc2 = e.pr ? cRc : cEc
     if useSsmt and f_upEng(e) and e.rSt != 0 and fresh and rN == e.refId and array.size(e.nHiA) > 0 and not na(e.nH) and not na(e.eH) and not na(e.yH)
         if sB >= 0
-            [zbT, zbI, zbS] = f_findBear(e.nHiA, e.eHiA, e.yHiA, e.nHcA, e.eHcA, e.yHcA, math.max(e.nH, e.rNh), math.max(e.eH, e.rEh), math.max(e.yH, e.rYh), math.max(e.nHC, cNc), math.max(e.eHC, cEc), math.max(e.yHC, cYc))
+            [zbT, zbI, zbS] = f_findBear(e.nHiA, e.eHiA, e.yHiA, e.nHcA, e.eHcA, e.yHcA, math.max(e.nH, e.rNh), math.max(e.eH, e.rEh), math.max(e.yH, e.rYh), math.max(e.nHC, lc1), math.max(e.eHC, lc2), math.max(e.yHC, cYc))
             if zbT == 0
                 sB := -1
         if sU >= 0
-            [zuT, zuI, zuS] = f_findBull(e.nLoA, e.eLoA, e.yLoA, e.nLcA, e.eLcA, e.yLcA, math.min(e.nL, e.rNl), math.min(e.eL, e.rEl), math.min(e.yL, e.rYl), math.min(e.nLC, cNc), math.min(e.eLC, cEc), math.min(e.yLC, cYc))
+            [zuT, zuI, zuS] = f_findBull(e.nLoA, e.eLoA, e.yLoA, e.nLcA, e.eLcA, e.yLcA, math.min(e.nL, e.rNl), math.min(e.eL, e.rEl), math.min(e.yL, e.rYl), math.min(e.nLC, lc1), math.min(e.eLC, lc2), math.min(e.yLC, cYc))
             if zuT == 0
                 sU := -1
     int  pc  = psShort ? rN : lN
@@ -947,23 +993,64 @@ f_leg(Eng e, int d, string nm) =>
         tSb  := d == -1 ? e.bBorn : e.uBorn
         tPb  := d == -1 ? nB : nU
         hP   := d == -1 ? wB : wU
-        float cAc = cA == 0 ? cNc : cA == 1 ? cEc : cYc
+        float cAc = e.ca == 0 ? lc1 : e.ca == 1 ? lc2 : cYc
         bool  liv = chSec * 1000 == f_clsMs(e.cls) and e.rSt != 0
         ch   := d == -1 ? (e.bCh or (liv and not na(e.bChR) and cAc < e.bChR)) : (e.uCh or (liv and not na(e.uChR) and cAc > e.uChR))
-    [ssT, psp, kS, kP, tSb, tPb, hP, ch]
+    // לבחירה בין המנוע הרגיל למנוע הזוג באותה מסגרת: הכיוון, החוזק של ה-SSMT
+    // השולט (-1 = אין), וזמן הלידה של מה שקבע את הכיוון
+    int rkD = dom == -1 ? rB : dom == 1 ? rU : -1
+    int tbD = dom == -1 ? (sB >= 0 ? e.bBorn : nB) : dom == 1 ? (sU >= 0 ? e.uBorn : nU) : 0
+    [ssT, psp, kS, kP, tSb, tPb, hP, ch, dom, rkD, tbD]
 
 // רגל אחת של המסגרת (לזוג בין מסגרות): SSMT קודם, אחרת PSP
 f_one(int ss, bool ps) => ss > 0 ? ss : ps ? 3 : 0
 f_legName(int g) => g == 2 ? "HSSMT" : g == 1 ? "SSMT" : g == 3 ? "PSP" : "—"
 
-[sBs, pBs, kSBs, kPBs, tSBs, tPBs, hPBs, cBs]         = f_leg(eS, -1, "15s")
-[sUs, pUs, kSUs, kPUs, tSUs, tPUs, hPUs, cUs]         = f_leg(eS, 1, "15s")
-[sB1, pB1, kSB1, kPB1, tSB1, tPB1, hPB1, cB1]         = f_leg(e1, -1, "1m")
-[sU1, pU1, kSU1, kPU1, tSU1, tPU1, hPU1, cU1]         = f_leg(e1, 1, "1m")
-[sB5, pB5, kSB5, kPB5, tSB5, tPB5, hPB5, cB5]         = f_leg(e5, -1, "5m")
-[sU5, pU5, kSU5, kPU5, tSU5, tPU5, hPU5, cU5]         = f_leg(e5, 1, "5m")
-[sB15, pB15, kSB15, kPB15, tSB15, tPB15, hPB15, cB15]   = f_leg(e15, -1, "15m")
-[sU15, pU15, kSU15, kPU15, tSU15, tPU15, hPU15, cU15]   = f_leg(e15, 1, "15m")
+// המנוע הרגיל (NQ / ES / YM) מול מנוע הזוג (YM / RTY) באותה מסגרת: הכיוון של
+// המסגרת נקבע כמו באינדיקטור SSMT + HSSMT — ה-SSMT החזק (HSSMT > SSMT >
+// closed, ואחר כך ★), ובשוויון החדש. בלי SSMT — ה-PSP החדש. הרגליים נלקחות
+// מהמנוע שניצח; אם לו אין PSP ולשני יש PSP באותו כיוון — הוא נלקח משם.
+f_mg(int m_dm, int m_rm, int m_tm, int m_dp, int m_rp, int m_tp, int m_s1, bool m_p1, string m_ks1, string m_kp1, int m_ts1, int m_tp1, string m_h1, bool m_c1, int m_s2, bool m_p2, string m_ks2, string m_kp2, int m_ts2, int m_tp2, string m_h2, bool m_c2) =>
+    bool   m_pw = usePair and m_dp != 0 and (m_dm == 0 or m_rp > m_rm or (m_rp == m_rm and m_tp > m_tm))
+    int    m_sO = m_pw ? m_s2 : m_s1
+    bool   m_pO = m_pw ? m_p2 : m_p1
+    string m_kS = m_pw ? m_ks2 : m_ks1
+    string m_kP = m_pw ? m_kp2 : m_kp1
+    int    m_tS = m_pw ? m_ts2 : m_ts1
+    int    m_tP = m_pw ? m_tp2 : m_tp1
+    string m_hO = m_pw ? m_h2 : m_h1
+    bool   m_cO = m_pw ? m_c2 : m_c1
+    if not m_pO and (m_pw ? m_p1 : m_p2) and m_dm == m_dp
+        m_pO := true
+        m_kP := m_pw ? m_kp1 : m_kp2
+        m_tP := m_pw ? m_tp1 : m_tp2
+        m_hO := m_pw ? m_h1 : m_h2
+    [m_sO, m_pO, m_kS, m_kP, m_tS, m_tP, m_hO, m_cO]
+
+[sBsM, pBsM, kSBsM, kPBsM, tSBsM, tPBsM, hPBsM, cBsM, dmBs, rmBs, tmBs] = f_leg(eS, -1, "15s")
+[sBsQ, pBsQ, kSBsQ, kPBsQ, tSBsQ, tPBsQ, hPBsQ, cBsQ, dqBs, rqBs, tqBs] = f_leg(qS, -1, "15sY")
+[sBs, pBs, kSBs, kPBs, tSBs, tPBs, hPBs, cBs] = f_mg(dmBs, rmBs, tmBs, dqBs, rqBs, tqBs, sBsM, pBsM, kSBsM, kPBsM, tSBsM, tPBsM, hPBsM, cBsM, sBsQ, pBsQ, kSBsQ, kPBsQ, tSBsQ, tPBsQ, hPBsQ, cBsQ)
+[sUsM, pUsM, kSUsM, kPUsM, tSUsM, tPUsM, hPUsM, cUsM, dmUs, rmUs, tmUs] = f_leg(eS, 1, "15s")
+[sUsQ, pUsQ, kSUsQ, kPUsQ, tSUsQ, tPUsQ, hPUsQ, cUsQ, dqUs, rqUs, tqUs] = f_leg(qS, 1, "15sY")
+[sUs, pUs, kSUs, kPUs, tSUs, tPUs, hPUs, cUs] = f_mg(dmUs, rmUs, tmUs, dqUs, rqUs, tqUs, sUsM, pUsM, kSUsM, kPUsM, tSUsM, tPUsM, hPUsM, cUsM, sUsQ, pUsQ, kSUsQ, kPUsQ, tSUsQ, tPUsQ, hPUsQ, cUsQ)
+[sB1M, pB1M, kSB1M, kPB1M, tSB1M, tPB1M, hPB1M, cB1M, dmB1, rmB1, tmB1] = f_leg(e1, -1, "1m")
+[sB1Q, pB1Q, kSB1Q, kPB1Q, tSB1Q, tPB1Q, hPB1Q, cB1Q, dqB1, rqB1, tqB1] = f_leg(q1, -1, "1mY")
+[sB1, pB1, kSB1, kPB1, tSB1, tPB1, hPB1, cB1] = f_mg(dmB1, rmB1, tmB1, dqB1, rqB1, tqB1, sB1M, pB1M, kSB1M, kPB1M, tSB1M, tPB1M, hPB1M, cB1M, sB1Q, pB1Q, kSB1Q, kPB1Q, tSB1Q, tPB1Q, hPB1Q, cB1Q)
+[sU1M, pU1M, kSU1M, kPU1M, tSU1M, tPU1M, hPU1M, cU1M, dmU1, rmU1, tmU1] = f_leg(e1, 1, "1m")
+[sU1Q, pU1Q, kSU1Q, kPU1Q, tSU1Q, tPU1Q, hPU1Q, cU1Q, dqU1, rqU1, tqU1] = f_leg(q1, 1, "1mY")
+[sU1, pU1, kSU1, kPU1, tSU1, tPU1, hPU1, cU1] = f_mg(dmU1, rmU1, tmU1, dqU1, rqU1, tqU1, sU1M, pU1M, kSU1M, kPU1M, tSU1M, tPU1M, hPU1M, cU1M, sU1Q, pU1Q, kSU1Q, kPU1Q, tSU1Q, tPU1Q, hPU1Q, cU1Q)
+[sB5M, pB5M, kSB5M, kPB5M, tSB5M, tPB5M, hPB5M, cB5M, dmB5, rmB5, tmB5] = f_leg(e5, -1, "5m")
+[sB5Q, pB5Q, kSB5Q, kPB5Q, tSB5Q, tPB5Q, hPB5Q, cB5Q, dqB5, rqB5, tqB5] = f_leg(q5, -1, "5mY")
+[sB5, pB5, kSB5, kPB5, tSB5, tPB5, hPB5, cB5] = f_mg(dmB5, rmB5, tmB5, dqB5, rqB5, tqB5, sB5M, pB5M, kSB5M, kPB5M, tSB5M, tPB5M, hPB5M, cB5M, sB5Q, pB5Q, kSB5Q, kPB5Q, tSB5Q, tPB5Q, hPB5Q, cB5Q)
+[sU5M, pU5M, kSU5M, kPU5M, tSU5M, tPU5M, hPU5M, cU5M, dmU5, rmU5, tmU5] = f_leg(e5, 1, "5m")
+[sU5Q, pU5Q, kSU5Q, kPU5Q, tSU5Q, tPU5Q, hPU5Q, cU5Q, dqU5, rqU5, tqU5] = f_leg(q5, 1, "5mY")
+[sU5, pU5, kSU5, kPU5, tSU5, tPU5, hPU5, cU5] = f_mg(dmU5, rmU5, tmU5, dqU5, rqU5, tqU5, sU5M, pU5M, kSU5M, kPU5M, tSU5M, tPU5M, hPU5M, cU5M, sU5Q, pU5Q, kSU5Q, kPU5Q, tSU5Q, tPU5Q, hPU5Q, cU5Q)
+[sB15M, pB15M, kSB15M, kPB15M, tSB15M, tPB15M, hPB15M, cB15M, dmB15, rmB15, tmB15] = f_leg(e15, -1, "15m")
+[sB15Q, pB15Q, kSB15Q, kPB15Q, tSB15Q, tPB15Q, hPB15Q, cB15Q, dqB15, rqB15, tqB15] = f_leg(q15, -1, "15mY")
+[sB15, pB15, kSB15, kPB15, tSB15, tPB15, hPB15, cB15] = f_mg(dmB15, rmB15, tmB15, dqB15, rqB15, tqB15, sB15M, pB15M, kSB15M, kPB15M, tSB15M, tPB15M, hPB15M, cB15M, sB15Q, pB15Q, kSB15Q, kPB15Q, tSB15Q, tPB15Q, hPB15Q, cB15Q)
+[sU15M, pU15M, kSU15M, kPU15M, tSU15M, tPU15M, hPU15M, cU15M, dmU15, rmU15, tmU15] = f_leg(e15, 1, "15m")
+[sU15Q, pU15Q, kSU15Q, kPU15Q, tSU15Q, tPU15Q, hPU15Q, cU15Q, dqU15, rqU15, tqU15] = f_leg(q15, 1, "15mY")
+[sU15, pU15, kSU15, kPU15, tSU15, tPU15, hPU15, cU15] = f_mg(dmU15, rmU15, tmU15, dqU15, rqU15, tqU15, sU15M, pU15M, kSU15M, kPU15M, tSU15M, tPU15M, hPU15M, cU15M, sU15Q, pU15Q, kSU15Q, kPU15Q, tSU15Q, tPU15Q, hPU15Q, cU15Q)
 
 // מזהה הרגל לזוג בין מסגרות (SSMT קודם), ומזהה לזוג באותה מסגרת
 f_k1(string kS, string kP) => kS != "" ? kS : kP
@@ -1276,7 +1363,8 @@ f_part(int d, string p) =>
     string tf  = f_ptTf(p)
     int    ty  = tf == "15m" ? (d == -1 ? sB15 : sU15) : tf == "5m" ? (d == -1 ? sB5 : sU5) : tf == "1m" ? (d == -1 ? sB1 : sU1) : (d == -1 ? sBs : sUs)
     string wh  = tf == "15m" ? (d == -1 ? hPB15 : hPU15) : tf == "5m" ? (d == -1 ? hPB5 : hPU5) : (d == -1 ? hPB1 : hPU1)
-    tf + " " + (isP ? "PSP" : f_legName(ty)) + " " + str.format_time(f_ptT(d, p), "HH:mm", TZ) + (isP and wh != "" ? " (" + wh + ")" : "")
+    bool   pr  = str.contains(p, "Y")
+    tf + " " + (isP ? "PSP" : f_legName(ty)) + (pr ? " YM/RTY" : "") + " " + str.format_time(f_ptT(d, p), "HH:mm", TZ) + (isP and wh != "" ? " (" + wh + ")" : "")
 // האם לפחות אחת השבירות נוצרה על נר הקיצון של החלון (או על הנר שאחריו):
 // הנר של השבירה חופף ל-[נר הקיצון, שני נרות גרף אחריו)
 f_atExtK(int d, string key) =>
