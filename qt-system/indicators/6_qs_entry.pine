@@ -1303,7 +1303,6 @@ f_bump(int i, bool win, float rv, float mfe) =>
 
 f_rr(int k) => k == 4 ? rr56 : k == 3 ? rr225 : k == 2 ? rr90 : rrBig
 
-f_rr(int k) => k == 4 ? rr56 : k == 3 ? rr225 : k == 2 ? rr90 : rrBig
 
 // ── הציור של העסקה בבדיקה: כל ניסיון מהכניסה עד היציאה בפועל ──
 f_tDraw(Trd t) =>
