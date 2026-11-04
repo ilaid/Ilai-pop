@@ -54,6 +54,7 @@ beAt    = input.float(1.0, "קידום אחרי (R)", minval = 0.3, step = 0.1, 
 beLock  = input.float(0.0, "נעילה (R)", minval = 0.0, step = 0.1, group = grpTr, tooltip = "0 = נקודת איזון. חייב להיות קטן מ'קידום אחרי'.")
 runOn   = input.bool(false, "בבדיקה: אחרי היעד — לא לצאת, לגרור סטופ", group = grpTr, tooltip = "כשהמחיר מגיע ליעד העסקה נשארת פתוחה: הסטופ ננעל במרחק הגרירה מתחת ליעד (בלונג) ונגרר אחרי המחיר הכי טוב. התוצאה = ה-R שננעל ביציאה.")
 trD     = input.float(0.5, "מרחק הגרירה (R)", minval = 0.1, step = 0.1, group = grpTr)
+legacy  = input.bool(false, "בבדיקה: לבדוק כבר על נר האישור (כמו הגרסה הישנה)", group = grpTr, tooltip = "כבוי (נכון): העסקה נבדקת מהנר שאחרי הכניסה, כי הכניסה היא בסגירת נר האישור.\nדלוק: כמו עד גרסה 51 — גם הגבוה / הנמוך של נר האישור עצמו נחשבים, למרות שהם קרו לפני הסגירה. להשוואה בלבד.\nבשני המצבים, עסקה שהיעד שלה נגעו בו כבר בנר האישור מסומנת על התגית (EB).")
 trOn    = input.bool(false, "בדיקה אחורה (שורת TEST)", group = grpTr, tooltip = "כל אישור נבדק כעסקה: כניסה בסגירת נר האישור, הסטופ למעלה, יעד לפי גודל החלון.")
 rr56    = input.float(1.3, "יעד בחלון 5.6 (R)", minval = 0.5, step = 0.1, group = grpTr)
 rr225   = input.float(2.0, "יעד בחלון 22.5 (R)", minval = 0.5, step = 0.1, group = grpTr)
@@ -1275,6 +1276,7 @@ type Trd
     float  acc = 0.0     // סכום ה-R של הניסיונות הקודמים בחלון
     int    eb  = -1      // נר הכניסה — לא בודקים יציאה על אותו נר
     float  chR = na      // לכניסה חוזרת עם CHoCH: הנר הנגדי האחרון
+    bool   ebT = false   // היעד נגע כבר בנר האישור (לפני הכניסה בסגירה)
     label  lb
     line   l1
     line   l2
@@ -1292,6 +1294,7 @@ var array<float> stR = array.new_float(5, 0.0)
 var array<float> stM = array.new_float(5, 0.0)
 // כמה עסקאות הגיעו לפחות ל-1R לטובתן לפני שנסגרו (אפשר היה להזיז לנקודת איזון)
 var array<int>   stB = array.new_int(5, 0)
+var int stEB = 0   // כמה עסקאות: היעד נגע כבר בנר האישור
 // rv = התוצאה ב-R (יעד = R של היעד · סטופ = -1 · נקודת איזון = 0 · סטופ נגרר = מה שננעל)
 f_bump(int i, bool win, float rv, float mfe) =>
     array.set(stN, i, array.get(stN, i) + 1)
@@ -1385,7 +1388,8 @@ f_trArm(Trd t, label lb, float px, float stpIn) =>
                 t.ent := px
                 t.stp := stp
                 t.tgt := t.dir == -1 ? px - risk * t.rr : px + risk * t.rr
-                t.eb  := bar_index
+                t.eb  := legacy ? -1 : bar_index
+                t.ebT := t.dir == -1 ? low <= t.tgt : high >= t.tgt
                 t.st  := 2
                 f_tDraw(t)
     t.st
@@ -1925,6 +1929,14 @@ rsS0 = f_trCheck(tS, stpNS, cUpL)
 rsL0 = f_trCheck(tL, stpNL, cDnH)
 rsS = pdS != "" and rsS0 != "" ? pdS + "\n" + rsS0 : pdS + rsS0
 rsL = pdL != "" and rsL0 != "" ? pdL + "\n" + rsL0 : pdL + rsL0
+if rsS0 != "" and tS.ebT
+    rsS := rsS + " · EB"
+    stEB += 1
+    tS.ebT := false
+if rsL0 != "" and tL.ebT
+    rsL := rsL + " · EB"
+    stEB += 1
+    tL.ebT := false
 if showRes and rsS != ""
     label.set_text(tS.lb, label.get_text(tS.lb) + "\n" + rsS)
     if tS.win == wNmS
@@ -1970,7 +1982,7 @@ if barstate.islast and (showTbl or trOn)
             rA += array.get(stR, k)
             mA += array.get(stM, k)
             bA += array.get(stB, k)
-        table.cell(tb, 0, row, "TEST " + str.format_time(firstT, "dd/MM/yy", TZ) + "–" + str.format_time(time, "dd/MM/yy", TZ) + "  " + f_stTxt(nA, wA, rA, mA, bA), bgcolor = color.new(rA >= 0 ? colBull : colBear, 70), text_color = color.white, text_size = szT)
+        table.cell(tb, 0, row, "TEST " + str.format_time(firstT, "dd/MM/yy", TZ) + "–" + str.format_time(time, "dd/MM/yy", TZ) + "  " + f_stTxt(nA, wA, rA, mA, bA) + " · EB " + str.tostring(stEB), bgcolor = color.new(rA >= 0 ? colBull : colBear, 70), text_color = color.white, text_size = szT)
         // איפה נוצר הקיצון שהחזיק: Q1–Q4 של החלון, או אחרי ה-QS
         for w = 0 to 1
             array<int> a = w == 0 ? ex225 : ex56
