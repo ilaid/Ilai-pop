@@ -49,7 +49,10 @@ grpTr   = "סטופ ובדיקה"
 stopMode = input.string("קיצון החלון", "סטופ", options = ["קיצון החלון", "קיצון המחזור"], group = grpTr, tooltip = "קיצון המחזור: טיק מעבר לקיצון של המחזור שמכיל את החלון, מתחילתו ועד עכשיו (חלון 5.6 → רבע 22.5 · חלון 22.5 → מיקרו 90). אם ה-QS עשה את הקיצון — מעבר ל-QS; אם לפניו יש פתיל שהוא הקיצון — מעבר לפתיל.\nקיצון החלון: טיק מעבר לחלון ה-QS בלבד.")
 showStp = input.bool(true, "קו סטופ לסטאפ הפעיל", group = grpTr)
 trMode  = input.string("נר האישור", "כניסה בבדיקה", options = ["נר האישור", "סוף חלון ה-QS", "מעורב: 22.5 בסוף, 5.6 בנר האישור"], group = grpTr, tooltip = "מעורב: בחלון 22.5 — כניסה בסוף החלון; בחלון 5.6 — בנר האישור.\nנר האישור: כניסה בסגירת הנר שבו כל התנאים התקיימו, סטופ לפי הגדרת הסטופ.\nסוף חלון ה-QS: כניסה בנר הראשון שאחרי ה-QS (למשל כש-333 מתחלף ל-334), סטופ מעבר לקיצון של החלון (הנר הכי נמוך בלונג / הכי גבוה בשורט), יעד לפי ה-R הרגיל.")
-beOn    = input.bool(false, "בבדיקה: סטופ לנקודת איזון אחרי 1R", group = grpTr, tooltip = "אחרי שהמחיר הגיע ל-1R לטובת העסקה, הסטופ עובר למחיר הכניסה. עסקה שחוזרת לכניסה נסגרת ב-0R (לא ניצחון ולא הפסד).")
+beOn    = input.bool(false, "בבדיקה: סטופ לנקודת איזון", group = grpTr, tooltip = "אחרי שהמחיר הגיע ל-X R לטובת העסקה (בנר קודם), הסטופ עובר למחיר הכניסה. עסקה שחוזרת לכניסה נסגרת ב-0R.")
+beAt    = input.float(1.0, "נקודת איזון אחרי (R)", minval = 0.3, step = 0.1, group = grpTr)
+runOn   = input.bool(false, "בבדיקה: אחרי היעד — לא לצאת, לגרור סטופ", group = grpTr, tooltip = "כשהמחיר מגיע ליעד העסקה נשארת פתוחה: הסטופ ננעל במרחק הגרירה מתחת ליעד (בלונג) ונגרר אחרי המחיר הכי טוב. התוצאה = ה-R שננעל ביציאה.")
+trD     = input.float(0.5, "מרחק הגרירה (R)", minval = 0.1, step = 0.1, group = grpTr)
 trOn    = input.bool(false, "בדיקה אחורה (שורת TEST)", group = grpTr, tooltip = "כל אישור נבדק כעסקה: כניסה בסגירת נר האישור, הסטופ למעלה, יעד לפי גודל החלון.")
 rr56    = input.float(1.3, "יעד בחלון 5.6 (R)", minval = 0.5, step = 0.1, group = grpTr)
 rr225   = input.float(2.0, "יעד בחלון 22.5 (R)", minval = 0.5, step = 0.1, group = grpTr)
@@ -59,6 +62,7 @@ colBull = input.color(#26a69a, "לונג", group = grpVis)
 colBear = input.color(#ef5350, "שורט", group = grpVis)
 colQS   = input.color(#4b56ba, "QS", group = grpVis)
 showBg  = input.bool(true, "רקע בזמן חלון QS", group = grpVis)
+showBrk = input.bool(false, "כתוב את השבירות על התגית (לבדיקות)", group = grpVis, tooltip = "שורה שנייה בתגית עם שתי השבירות והשעות, בלי לעבור עם העכבר.")
 keepN   = input.int(5, "כמה תגיות להשאיר", minval = 1, maxval = 50, group = grpVis)
 showTbl = input.bool(false, "טבלה", group = grpVis, tooltip = "שורה אחת: ה-QS והסטאפ הפעיל. ועוד שורת TEST אם הבדיקה דלוקה.")
 posIn   = input.string("ימין למעלה", "מיקום הטבלה", options = ["ימין למעלה", "ימין באמצע", "ימין למטה", "מרכז למעלה", "מרכז באמצע", "מרכז למטה", "שמאל למעלה", "שמאל באמצע", "שמאל למטה"], group = grpVis)
@@ -76,9 +80,7 @@ real15s  = false
 trg1m    = false
 rr90     = 3.0
 rrBig    = 4.0
-stBy     = "לפי חלון"
 showX    = true
-showBrk  = false
 lblOff   = 0.0
 
 TZ = "America/New_York"
@@ -385,8 +387,6 @@ type Eng
     array<int>   pBorn
     int          bBorn = 0
     int          uBorn = 0
-    int          trgDir = 0
-    int          trgBar = -1
     string       bStr = ""
     string       uStr = ""
     bool         bQs  = false
@@ -540,10 +540,6 @@ f_step(Eng e, int t, float no, float nh, float nl, float nc, float eo, float eh,
             e.lUpL := al
         if ac < ao
             e.lDnH := ah
-        int oBS = e.bSeq
-        int oUS = e.uSeq
-        int oBT = e.bTy
-        int oUT = e.uTy
         if nbT != 0
             if e.bTy == 0 or nbI != e.bRefI
                 e.seqC := e.seqC + 1
@@ -618,16 +614,6 @@ f_step(Eng e, int t, float no, float nh, float nl, float nc, float eo, float eh,
         array.set(e.cv, 10, yl)
         array.set(e.cv, 11, yc)
         e.cn := math.min(e.cn + 1, 3)
-        // ── טריגר: הנר הזה הוא PCP, ובאותו נר נוצר (או שודרג ל-H) SSMT ──
-        bool nwB  = e.bTy != 0 and (e.bSeq != oBS or (e.bTy == 2 and oBT == 1))
-        bool nwU  = e.uTy != 0 and (e.uSeq != oUS or (e.uTy == 2 and oUT == 1))
-        int  d0N  = f_dir(no, nc)
-        int  d0E  = f_dir(eo, ec)
-        int  d0Y  = f_dir(yo, yc)
-        bool pcp0 = d0N != d0E or (d0Y > 0 and (d0E < 0 or d0N < 0))
-        if pcp0 and (nwB or nwU)
-            e.trgDir := nwB ? -1 : 1
-            e.trgBar := bar_index
         // ── PSP חדש על הנר האמצעי: PCP + סווינג של 3 נרות ──
         if usePsp and e.cls != 1 and e.cn == 3
             int  dN   = f_dir(f_cv(e, 1, 0, 0), f_cv(e, 1, 0, 3))
@@ -1206,12 +1192,6 @@ f_hasFresh(string fresh, string key) =>
         if part != "" and str.contains(fresh, "|" + part + "|")
             any := true
     any
-f_nFresh(string fresh, string key) =>
-    int n = 0
-    for part in str.split(key, "+")
-        if part != "" and str.contains(fresh, "|" + part + "|")
-            n += 1
-    math.min(n, 2)
 f_ok(string used, string fresh, string k) => f_new(used, k) and (not useFresh or f_hasFresh(fresh, k))
 f_entry(int d, int g15, int g5, int g1, int gS, int s15, bool p15, int s5, bool p5, int s1, bool p1, string a15, string b15, string a5, string b5, string a1, string b1, string aS, string used, string fresh) =>
     string txt = ""
@@ -1264,25 +1244,24 @@ type Trd
     float  tgt = na
     float  rr  = na
     float  mfe = 0.0
-    int    nf  = 0     // כמה מהשבירות נוצרו בתוך ה-QS: 2 · 1 · 0
+    bool   run = false   // עבר את היעד והסטופ נגרר
+    float  tsl = na      // הסטופ הנגרר
     label  lb
 
 var Trd tS = Trd.new(-1)
 var Trd tL = Trd.new(1)
-// סטטיסטיקה בסלים: 0–4 לפי חלון (k) · 5 = שתי השבירות בתוך ה-QS ·
-// 6 = אחת לפני ואחת בתוך · 7 = שתיהן לפני. כל עסקה נספרת בסל של החלון שלה
-// ובסל של זמן השבירות שלה. עסקאות, הצלחות, סכום R, וסכום ה-R המקסימלי.
-var array<int>   stN = array.new_int(8, 0)
-var array<int>   stW = array.new_int(8, 0)
-var array<float> stR = array.new_float(8, 0.0)
-var array<float> stM = array.new_float(8, 0.0)
+// סטטיסטיקה לפי חלון (k = 0..4): עסקאות, הצלחות, סכום R, סכום ה-R המקסימלי
+var array<int>   stN = array.new_int(5, 0)
+var array<int>   stW = array.new_int(5, 0)
+var array<float> stR = array.new_float(5, 0.0)
+var array<float> stM = array.new_float(5, 0.0)
 // כמה עסקאות הגיעו לפחות ל-1R לטובתן לפני שנסגרו (אפשר היה להזיז לנקודת איזון)
-var array<int>   stB = array.new_int(8, 0)
-// res: 1 = יעד · 0 = נקודת איזון · -1 = סטופ
-f_bump(int i, int res, float rr, float mfe) =>
+var array<int>   stB = array.new_int(5, 0)
+// rv = התוצאה ב-R (יעד = R של היעד · סטופ = -1 · נקודת איזון = 0 · סטופ נגרר = מה שננעל)
+f_bump(int i, bool win, float rv, float mfe) =>
     array.set(stN, i, array.get(stN, i) + 1)
-    array.set(stW, i, array.get(stW, i) + (res == 1 ? 1 : 0))
-    array.set(stR, i, array.get(stR, i) + (res == 1 ? rr : res == 0 ? 0.0 : -1.0))
+    array.set(stW, i, array.get(stW, i) + (win ? 1 : 0))
+    array.set(stR, i, array.get(stR, i) + rv)
     array.set(stM, i, array.get(stM, i) + math.min(mfe, 20.0))
     array.set(stB, i, array.get(stB, i) + (mfe >= 1.0 ? 1 : 0))
     i
@@ -1290,11 +1269,11 @@ f_bump(int i, int res, float rr, float mfe) =>
 f_rr(int k) => k == 4 ? rr56 : k == 3 ? rr225 : k == 2 ? rr90 : rrBig
 
 // כניסה מיידית (טריגר / נר האישור): סטופ מעבר לקיצון של החלון עד עכשיו
-f_trArm(Trd t, label lb, float px, int nf, float stpIn) =>
+f_trArm(Trd t, label lb, float px, float stpIn) =>
     if trOn and t.st == 0
         t.win := qsId
         t.k   := qsK
-        t.nf  := nf
+        t.run := false
         t.lb  := lb
         t.mfe := 0.0
         if trMode == "סוף חלון ה-QS" or (str.startswith(trMode, "מעורב") and qsK == 3)
@@ -1308,11 +1287,6 @@ f_trArm(Trd t, label lb, float px, int nf, float stpIn) =>
                 t.rr  := f_rr(t.k)
                 t.tgt := t.dir == -1 ? px - risk * t.rr : px + risk * t.rr
                 t.st  := 2
-    t.st
-
-f_trCancel(Trd t) =>
-    if t.st == 1
-        t.st := 0
     t.st
 
 prevClose = close[1]
@@ -1338,18 +1312,30 @@ f_trOpen(Trd t, float stpIn) =>
 f_trCheck(Trd t) =>
     if t.st == 2
         float risk = math.abs(t.stp - t.ent)
-        // נקודת איזון: רק אם 1R הושג כבר בנר קודם (לא מנחשים מה קרה קודם בתוך הנר)
-        bool  be   = beOn and t.mfe >= 1.0
-        float sl   = be ? t.ent : t.stp
-        bool  loss = t.dir == -1 ? high >= sl : low <= sl
-        bool  win  = not loss and (t.dir == -1 ? low <= t.tgt : high >= t.tgt)
+        // נקודת איזון: רק אם beAt הושג כבר בנר קודם (לא מנחשים מה קרה קודם בתוך הנר)
+        bool  be   = beOn and t.mfe >= beAt
+        float sl   = t.run ? t.tsl : be ? t.ent : t.stp
+        bool  hit  = t.dir == -1 ? high >= sl : low <= sl
+        bool  tg   = not hit and not t.run and (t.dir == -1 ? low <= t.tgt : high >= t.tgt)
         if risk > 0
             t.mfe := math.max(t.mfe, (t.dir == -1 ? t.ent - low : high - t.ent) / risk)
-        if loss or win
-            int res = win ? 1 : be ? 0 : -1
-            f_bump(t.k, res, t.rr, t.mfe)
-            f_bump(7 - t.nf, res, t.rr, t.mfe)
-            t.st := 0
+        if hit
+            float rv = risk > 0 ? (t.dir == -1 ? t.ent - sl : sl - t.ent) / risk : -1.0
+            f_bump(t.k, rv > 0, rv, t.mfe)
+            t.st  := 0
+            t.run := false
+        else if tg
+            if runOn
+                // הגיע ליעד — לא יוצאים: הסטופ ננעל trD מתחת ליעד וממשיך להיגרר
+                t.run := true
+                t.tsl := t.dir == -1 ? t.tgt + trD * risk : t.tgt - trD * risk
+            else
+                f_bump(t.k, true, t.rr, t.mfe)
+                t.st := 0
+        if t.st == 2 and t.run and risk > 0
+            float best = t.dir == -1 ? t.ent - t.mfe * risk : t.ent + t.mfe * risk
+            float ns   = t.dir == -1 ? best + trD * risk : best - trD * risk
+            t.tsl := t.dir == -1 ? math.min(t.tsl, ns) : math.max(t.tsl, ns)
     t.st
 
 // השבירות של האישור, כל אחת עם השעה של הנר שלה (לפי זמן הפתיחה, כמו בגרף):
@@ -1593,8 +1579,8 @@ if exMode and xOnL
             brL  := true
             xOnL := false
             f_exBump(xKL, x1L ? xQL : 4)
-bool fNowS = exMode ? brS : (keyS != "" and not f_alive(keyS, liveS))
-bool fNowL = exMode ? brL : (keyL != "" and not f_alive(keyL, liveL))
+bool fNowS = brS
+bool fNowL = brL
 // תגית שנכשלה הופכת ל-✕ אפור וקטן, עם הרצף, המחזור והשבירות
 if fNowS
     if not showX
@@ -1607,8 +1593,6 @@ if fNowS
     keyS  := ""
     txS   := ""
     failS := true
-    if not exMode
-        f_trCancel(tS)
 if fNowL
     if not showX
         label.delete(lbL)
@@ -1620,8 +1604,6 @@ if fNowL
     keyL  := ""
     txL   := ""
     failL := true
-    if not exMode
-        f_trCancel(tL)
 // החלון נגמר (או התחלף) — האישור נגמר, התגית נשארת דהויה. השבירות שלה
 // ממשיכות להיבדק: אם אחת מהן מתה אחר כך, התגית עדיין מקבלת ✕.
 // החלון נגמר והאישור עדיין חי — התגית מתכווצת: חץ, הרצף והמחזור, בצבע שלה
@@ -1660,7 +1642,7 @@ if entS != "" and doneS != qsId
     array.push(hist, lbS)
     line.delete(slS)
     slS := showStp ? line.new(wHiB, stpNS, bar_index + 3, stpNS, color = color.new(colBear, 30), style = line.style_dashed, width = 1) : na
-    f_trArm(tS, lbS, entPxS, f_nFresh(freshS, keyNS), stpNS)
+    f_trArm(tS, lbS, entPxS, stpNS)
     alTxt := "▼ SHORT · QS " + qsPat + " " + f_kLen(qsK) + " · " + str.replace_all(entS, "\n", " · ")
 if entL != "" and doneL != qsId
     doneL := qsId
@@ -1682,7 +1664,7 @@ if entL != "" and doneL != qsId
     array.push(hist, lbL)
     line.delete(slL)
     slL := showStp ? line.new(wLoB, stpNL, bar_index + 3, stpNL, color = color.new(colBull, 30), style = line.style_dashed, width = 1) : na
-    f_trArm(tL, lbL, entPxL, f_nFresh(freshL, keyNL), stpNL)
+    f_trArm(tL, lbL, entPxL, stpNL)
     alTxt := alTxt + (alTxt == "" ? "" : "\n") + "▲ LONG · QS " + qsPat + " " + f_kLen(qsK) + " · " + str.replace_all(entL, "\n", " · ")
 while array.size(hist) > keepN
     label.delete(array.shift(hist))
