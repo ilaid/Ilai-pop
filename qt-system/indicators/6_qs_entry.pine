@@ -51,7 +51,7 @@ reFilt  = input.string("בלי — מיד", "תנאי לכניסה חוזרת", 
 trMode  = input.string("נר האישור", "כניסה בבדיקה", options = ["נר האישור", "סוף חלון ה-QS", "מעורב: 22.5 בסוף, 5.6 בנר האישור"], group = grpTr, tooltip = "מעורב: בחלון 22.5 — כניסה בסוף החלון; בחלון 5.6 — בנר האישור.\nנר האישור: כניסה בסגירת הנר שבו כל התנאים התקיימו, סטופ לפי הגדרת הסטופ.\nסוף חלון ה-QS: כניסה בנר הראשון שאחרי ה-QS (למשל כש-333 מתחלף ל-334), סטופ מעבר לקיצון של החלון (הנר הכי נמוך בלונג / הכי גבוה בשורט), יעד לפי ה-R הרגיל.")
 beOn    = input.bool(false, "בבדיקה: קידום סטופ", group = grpTr, tooltip = "אחרי שהמחיר הגיע ל-X R לטובת העסקה (בנר קודם), הסטופ עובר לכניסה + הנעילה. נעילה 0 = נקודת איזון. למשל: אחרי 1R לנעול 0.5R בעסקה שמכוונת ל-2R.")
 beAt    = input.float(1.0, "קידום אחרי (R)", minval = 0.3, step = 0.1, group = grpTr)
-beLock  = input.float(0.0, "נעילה (R)", minval = 0.0, step = 0.1, group = grpTr, tooltip = "0 = נקודת איזון. חייב להיות קטן מ'קידום אחרי'.")
+beLock  = input.float(0.0, "נעילה (R)", minval = 0.0, step = 0.1, group = grpTr, tooltip = "0 = נקודת איזון. לא יכול להיות גדול מ'קידום אחרי' — אם כן, הוא מוגבל אליו (אי אפשר לנעול רווח שהמחיר לא הגיע אליו).")
 runOn   = input.bool(false, "בבדיקה: אחרי היעד — לא לצאת, לגרור סטופ", group = grpTr, tooltip = "כשהמחיר מגיע ליעד העסקה נשארת פתוחה: הסטופ ננעל במרחק הגרירה מתחת ליעד (בלונג) ונגרר אחרי המחיר הכי טוב. התוצאה = ה-R שננעל ביציאה.")
 trD     = input.float(0.5, "מרחק הגרירה (R)", minval = 0.1, step = 0.1, group = grpTr)
 legacy  = input.bool(false, "בבדיקה: לבדוק כבר על נר האישור (כמו הגרסה הישנה)", group = grpTr, tooltip = "כבוי (נכון): העסקה נבדקת מהנר שאחרי הכניסה, כי הכניסה היא בסגירת נר האישור.\nדלוק: כמו עד גרסה 51 — גם הגבוה / הנמוך של נר האישור עצמו נחשבים, למרות שהם קרו לפני הסגירה. להשוואה בלבד.\nבשני המצבים, עסקה שהיעד שלה נגעו בו כבר בנר האישור מסומנת על התגית (EB).")
@@ -1461,16 +1461,20 @@ f_trCheck(Trd t, float reStp, float chRef) =>
         float risk = math.abs(t.stp - t.ent)
         // קידום סטופ: רק אם beAt הושג כבר בנר קודם (לא מנחשים מה קרה קודם בתוך הנר)
         bool  be   = beOn and t.mfe >= beAt
-        float beLv = t.dir == -1 ? t.ent - beLock * risk : t.ent + beLock * risk
+        // הנעילה לא יכולה להיות מעבר לנקודה שהמחיר כבר הגיע אליה (אחרת "סטופ" מעבר למחיר = רווח שלא קרה)
+        float lkR  = math.min(beLock, beAt)
+        float beLv = t.dir == -1 ? t.ent - lkR * risk : t.ent + lkR * risk
         float sl   = t.run ? t.tsl : be ? beLv : t.stp
         bool  hit  = t.dir == -1 ? high >= sl : low <= sl
         bool  tg   = not hit and not t.run and (t.dir == -1 ? low <= t.tgt : high >= t.tgt)
         if risk > 0
             t.mfe := math.max(t.mfe, (t.dir == -1 ? t.ent - low : high - t.ent) / risk)
         if hit
-            float rv = risk > 0 ? (t.dir == -1 ? t.ent - sl : sl - t.ent) / risk : -1.0
+            // גאפ: אם הנר נפתח כבר מעבר לסטופ — יוצאים בפתיחה (גרוע יותר), לא בסטופ
+            float xp = t.dir == -1 ? math.max(sl, open) : math.min(sl, open)
+            float rv = risk > 0 ? (t.dir == -1 ? t.ent - xp : xp - t.ent) / risk : -1.0
             f_bump(t.k, rv > 0, rv, t.mfe)
-            f_tClose(t, sl)
+            f_tClose(t, xp)
             string r1 = (t.run ? "Trail " : be ? (beLock > 0 ? "Lock " : "BE ") : "SL ") + f_fmtR(rv) + f_inTx(t)
             bool   again = reOn and rv < 0 and not t.run and t.att < maxAtt and qsOn and t.win == qsId
             if again
