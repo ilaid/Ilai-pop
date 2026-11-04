@@ -1743,6 +1743,8 @@ var table tb = table.new(posT, 1, 4, border_width = 1)
 
 f_stTxt(int n, int w, float r, float m, int b) => str.tostring(n) + " trades · " + (n > 0 ? str.tostring(math.round(w * 100.0 / n)) : "0") + "% · " + (r >= 0 ? "+" : "") + str.tostring(r, "#.#") + "R · max " + (n > 0 ? str.tostring(m / n, "#.#") : "0") + "R · 1R+ " + (n > 0 ? str.tostring(math.round(b * 100.0 / n)) : "0") + "%"
 
+// התקופה של הבדיקה: מהנר הראשון שנטען בגרף ועד הנר הנוכחי
+var int firstT = time
 // שורה אחת: ה-QS והסטאפ הפעיל (הפרטים במעבר עכבר) · ושורת TEST אם הבדיקה דלוקה
 if barstate.islast and (showTbl or trOn)
     int row = 0
@@ -1764,7 +1766,7 @@ if barstate.islast and (showTbl or trOn)
             rA += array.get(stR, k)
             mA += array.get(stM, k)
             bA += array.get(stB, k)
-        table.cell(tb, 0, row, "TEST  " + f_stTxt(nA, wA, rA, mA, bA), bgcolor = color.new(rA >= 0 ? colBull : colBear, 70), text_color = color.white, text_size = szT)
+        table.cell(tb, 0, row, "TEST " + str.format_time(firstT, "dd/MM/yy", TZ) + "–" + str.format_time(time, "dd/MM/yy", TZ) + "  " + f_stTxt(nA, wA, rA, mA, bA), bgcolor = color.new(rA >= 0 ? colBull : colBear, 70), text_color = color.white, text_size = szT)
         // איפה נוצר הקיצון שהחזיק: Q1–Q4 של החלון, או אחרי ה-QS
         for w = 0 to 1
             array<int> a = w == 0 ? ex225 : ex56
