@@ -62,6 +62,7 @@ colBull = input.color(#26a69a, "לונג", group = grpVis)
 colBear = input.color(#ef5350, "שורט", group = grpVis)
 colQS   = input.color(#4b56ba, "QS", group = grpVis)
 showBg  = input.bool(true, "רקע בזמן חלון QS", group = grpVis)
+showRes = input.bool(true, "כתוב על התגית את תוצאת הבדיקה", group = grpTr, tooltip = "כשהבדיקה דלוקה: איך העסקה נסגרה (יעד / נגרר / איזון / סטופ) ובכמה R, ובסוף החלון — באיזה נר של החלון נוצר הקיצון, וכמה ניסיונות כניסה זה היה לוקח (כל פעם שהקיצון זז אחרי האישור = סטופ וניסיון נוסף).")
 showBrk = input.bool(false, "כתוב את השבירות על התגית (לבדיקות)", group = grpVis, tooltip = "שורה שנייה בתגית עם שתי השבירות והשעות, בלי לעבור עם העכבר.")
 keepN   = input.int(5, "כמה תגיות להשאיר", minval = 1, maxval = 50, group = grpVis)
 showTbl = input.bool(false, "טבלה", group = grpVis, tooltip = "שורה אחת: ה-QS והסטאפ הפעיל. ועוד שורת TEST אם הבדיקה דלוקה.")
@@ -1132,6 +1133,8 @@ var int    eHiT  = 0
 var int    eLoT  = 0
 var string eId   = ""
 var int    eStart = 0
+var int    wStartB = 0
+var int    eStartB = 0
 bool wEnded = false
 if qsId != wId
     if wId != ""
@@ -1143,10 +1146,12 @@ if qsId != wId
         eLoT   := wLoT
         eId    := wId
         eStart := wStart
+        eStartB := wStartB
         wEnded := true
     wId := qsId
     if qsOn
         wStart := time
+        wStartB := bar_index
         wHi    := high
         wLo    := low
         wHiB   := bar_index
@@ -1310,6 +1315,7 @@ f_trOpen(Trd t, float stpIn) =>
     t.st
 
 f_trCheck(Trd t) =>
+    string rs = ""
     if t.st == 2
         float risk = math.abs(t.stp - t.ent)
         // נקודת איזון: רק אם beAt הושג כבר בנר קודם (לא מנחשים מה קרה קודם בתוך הנר)
@@ -1322,6 +1328,7 @@ f_trCheck(Trd t) =>
         if hit
             float rv = risk > 0 ? (t.dir == -1 ? t.ent - sl : sl - t.ent) / risk : -1.0
             f_bump(t.k, rv > 0, rv, t.mfe)
+            rs := (t.run ? "נגרר " : be and rv >= 0 ? "איזון " : "סטופ ") + (rv >= 0 ? "+" : "") + str.tostring(rv, "#.#") + "R"
             t.st  := 0
             t.run := false
         else if tg
@@ -1331,12 +1338,13 @@ f_trCheck(Trd t) =>
                 t.tsl := t.dir == -1 ? t.tgt + trD * risk : t.tgt - trD * risk
             else
                 f_bump(t.k, true, t.rr, t.mfe)
+                rs := "יעד +" + str.tostring(t.rr, "#.#") + "R"
                 t.st := 0
         if t.st == 2 and t.run and risk > 0
             float best = t.dir == -1 ? t.ent - t.mfe * risk : t.ent + t.mfe * risk
             float ns   = t.dir == -1 ? best + trD * risk : best - trD * risk
             t.tsl := t.dir == -1 ? math.min(t.tsl, ns) : math.max(t.tsl, ns)
-    t.st
+    rs
 
 // השבירות של האישור, כל אחת עם השעה של הנר שלה (לפי זמן הפתיחה, כמו בגרף):
 // SSMT — הנר שעשה את השבירה · PSP — נר הסווינג עצמו. ככה אפשר ללכת לנר
@@ -1532,6 +1540,10 @@ var int   xKL   = 4
 var array<int> ex225 = array.new_int(5, 0)
 var array<int> ex56  = array.new_int(5, 0)
 var int xQS = 0
+var int atS = 1
+var int atL = 1
+var string wNmS = ""
+var string wNmL = ""
 var float xEnS = na
 var float xEnL = na
 var bool  x1S  = false
@@ -1552,11 +1564,17 @@ if xOnL and not x1L and not na(xEnL) and xEnL - xL > 0 and high - xEnL >= xEnL -
     x1L := true
 if exMode and xOnS
     if qsOn and doneS == qsId
+        // הקיצון זז אחרי האישור = הכניסה הייתה נסגרת בסטופ, וצריך ניסיון נוסף
+        if wHi > xS
+            atS += 1
         xS := wHi
     else
         if xEndS == 0
             xEndS := time + f_parMs(xKS)
             xQS   := f_qtr(eHiT, eStart, xKS)
+            if trOn and showRes
+                nmS := nmS + "\nקיצון בנר " + str.tostring(eHiB - eStartB + 1) + "/" + str.tostring(bar_index - eStartB) + " · " + str.tostring(atS) + (atS == 1 ? " ניסיון" : " ניסיונות")
+                label.set_text(lbS, label.get_text(lbS) + "\nקיצון בנר " + str.tostring(eHiB - eStartB + 1) + "/" + str.tostring(bar_index - eStartB) + " · " + str.tostring(atS) + (atS == 1 ? " ניסיון" : " ניסיונות"))
         if time >= xEndS
             xOnS := false
             f_exBump(xKS, xQS)
@@ -1567,11 +1585,16 @@ if exMode and xOnS
             f_exBump(xKS, x1S ? xQS : 4)
 if exMode and xOnL
     if qsOn and doneL == qsId
+        if wLo < xL
+            atL += 1
         xL := wLo
     else
         if xEndL == 0
             xEndL := time + f_parMs(xKL)
             xQL   := f_qtr(eLoT, eStart, xKL)
+            if trOn and showRes
+                nmL := nmL + "\nקיצון בנר " + str.tostring(eLoB - eStartB + 1) + "/" + str.tostring(bar_index - eStartB) + " · " + str.tostring(atL) + (atL == 1 ? " ניסיון" : " ניסיונות")
+                label.set_text(lbL, label.get_text(lbL) + "\nקיצון בנר " + str.tostring(eLoB - eStartB + 1) + "/" + str.tostring(bar_index - eStartB) + " · " + str.tostring(atL) + (atL == 1 ? " ניסיון" : " ניסיונות"))
         if time >= xEndL
             xOnL := false
             f_exBump(xKL, xQL)
@@ -1632,6 +1655,8 @@ if entS != "" and doneS != qsId
     lsS   := false
     nmS   := n1S + (showBrk ? "\n" + bkS : "")
     xOnS  := true
+    atS   := 1
+    wNmS  := qsId
     xEnS  := close
     x1S   := false
     xS    := wHi
@@ -1654,6 +1679,8 @@ if entL != "" and doneL != qsId
     lsL   := false
     nmL   := n1L + (showBrk ? "\n" + bkL : "")
     xOnL  := true
+    atL   := 1
+    wNmL  := qsId
     xEnL  := close
     x1L   := false
     xL    := wLo
@@ -1691,8 +1718,17 @@ if barstate.islast and noWin
 // כניסה בסוף ה-QS: הסטופ מעבר לקיצון של החלון עצמו (הנר הכי גבוה / הכי נמוך שלו)
 f_trOpen(tS, eHi + syminfo.mintick)
 f_trOpen(tL, eLo - syminfo.mintick)
-f_trCheck(tS)
-f_trCheck(tL)
+// התוצאה נכתבת על התגית של העסקה (ונשמרת גם אם התגית מתכווצת או מקבלת ✕)
+rsS = f_trCheck(tS)
+rsL = f_trCheck(tL)
+if showRes and rsS != ""
+    label.set_text(tS.lb, label.get_text(tS.lb) + "\n" + rsS)
+    if tS.win == wNmS
+        nmS := nmS + "\n" + rsS
+if showRes and rsL != ""
+    label.set_text(tL.lb, label.get_text(tL.lb) + "\n" + rsL)
+    if tL.win == wNmL
+        nmL := nmL + "\n" + rsL
 
 if alertOn and alTxt != ""
     alert("QS Entry · " + syminfo.ticker + "\n" + alTxt, alert.freq_once_per_bar)
