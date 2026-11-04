@@ -1003,13 +1003,13 @@ f_col(color base, int typ, bool weak, bool hot) =>
 f_starTxt(string sym, string pat, string chT) => pat == "" or pat == chT ? sym : sym + pat
 
 // הטקסט של התווית: שורה עליונה — מאיזה רצף עברנו לאיזה, וכוכב אם ב-QS;
-// שורה תחתונה — המחזור, הסוג והנכסים (בזוג 3–4 גם שם הזוג).
-f_lblTxt(Brk b, bool isPair) =>
+// שורה תחתונה — המחזור, הסוג והנכסים. לזוג 3–4 אותה תווית בדיוק — הצבע מבדיל.
+f_lblTxt(Brk b) =>
     star = b.qH ? f_starTxt("★", b.qP, b.qT) : b.qX ? f_starTxt("☆", b.xP, b.qT != "" ? b.qT : b.xT) : ""
     cR   = b.qR != "" ? b.qR : b.xR
     cT   = b.qT != "" ? b.qT : b.xT
     top  = cR != "" ? cR + "-" + cT + (star != "" ? " " + star : "") : ""
-    bot  = f_cycName(tfClass) + " " + (b.typ == 2 ? "HSSMT" : "SSMT") + " · " + (isPair ? nmP + ": " : "") + f_assets(b.lbl)
+    bot  = f_cycName(tfClass) + " " + (b.typ == 2 ? "HSSMT" : "SSMT") + " · " + f_assets(b.lbl)
     top == "" ? bot : top + "\n" + bot
 
 // הנכס הראשון בקבוצה שלקח את הרמה — לעיגון התווית כשנכס הגרף לא חלק מהשבירה
@@ -1054,7 +1054,7 @@ f_draw(int k, Brk b, bool weak, array<label> L, array<line> N) =>
         lB = low[bar_index - b2]
         pd = atr * 0.15
         yl = isBull ? math.min(lB, nz(y2, lB)) - pd : math.max(hB, nz(y2, hB)) + pd
-        array.push(L, label.new(b2, yl, f_lblTxt(b, isPair), style = isBull ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = cFin, size = labelSize, textalign = text.align_center))
+        array.push(L, label.new(b2, yl, f_lblTxt(b), style = isBull ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = cFin, size = labelSize, textalign = text.align_center))
     ok
 
 // רק המצב הנוכחי מצויר, ולכן מציירים רק בנר האחרון: מוחקים הכול ומציירים מחדש
