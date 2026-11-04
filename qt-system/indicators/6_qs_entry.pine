@@ -219,7 +219,13 @@ f_findBull(nqLoA, esLoA, ymLoA, nqLoCA, esLoCA, ymLoCA, nqCL, esCL, ymCL, nqCLC,
 
 hotKey = "," + str.replace_all(hotList, " ", "") + ","
 f_qsHot(string s) => str.length(s) == 3 and str.contains(hotKey, "," + s + ",")
-f_kOn(int k) => k == 0 ? useK0 : k == 1 ? useK1 : k == 2 ? useK2 : k == 3 ? useK3 : useK4
+// חלון נבדק רק כשיש בו לפחות 4 נרות של הגרף. אחרת הנר של הגרף ארוך מדי:
+// הוא מכיל מחירים מלפני החלון ומאחריו, ושעת האישור והקיצון לא מדויקים — וזה
+// מה שגרם ל-15m להראות כיוון אחר מ-1m ו-5m. גרף 1m: 22.5 ו-5.6 · גרף 5m:
+// רק 22.5 · גרף 15m: אף אחד (פותחים 1m או 5m).
+f_kMs(int k) => k == 4 ? 337500 : k == 3 ? 1350000 : k == 2 ? 5400000 : k == 1 ? 21600000 : 86400000
+f_kFit(int k) => f_kMs(k) >= 4 * timeframe.in_seconds() * 1000
+f_kOn(int k) => (k == 0 ? useK0 : k == 1 ? useK1 : k == 2 ? useK2 : k == 3 ? useK3 : useK4) and f_kFit(k)
 // שם המחזור של החלון: שלוש הרמות, ואורך החלון
 f_kName(int k) => k == 0 ? "Month·Week·Day" : k == 1 ? "Week·Day·Session" : k == 2 ? "Day·Session·90m" : k == 3 ? "Session·90m·22.5m" : "90m·22.5m·5.6m"
 f_kLen(int k) => k == 0 ? "1D" : k == 1 ? "6H" : k == 2 ? "90m" : k == 3 ? "22.5m" : "5.6m"
@@ -1694,6 +1700,11 @@ if qsOn and doneL == qsId
     line.set_xy2(slL, bar_index + 3, stpNL)
 
 bgcolor(showBg and qsOn ? color.new(colQS, 93) : na, title = "QS window")
+// אף חלון לא נבדק בגרף הזה — הודעה קטנה במקום סימונים שגויים
+noWin = not ((useK3 and f_kFit(3)) or (useK4 and f_kFit(4)))
+var table tbW = table.new(position.top_right, 1, 1)
+if barstate.islast and noWin
+    table.cell(tbW, 0, 0, "QS Entry: החלונות קצרים מהגרף הזה — פתח 1m (או 5m ל-22.5)", text_color = color.white, bgcolor = color.new(color.gray, 40), text_size = size.small)
 
 // כניסה בסוף ה-QS: הסטופ מעבר לקיצון של החלון עצמו (הנר הכי גבוה / הכי נמוך שלו)
 f_trOpen(tS, eHi + syminfo.mintick)
