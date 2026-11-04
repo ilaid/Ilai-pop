@@ -1292,7 +1292,7 @@ f_engPick(Eng e) =>
     if best >= 0
         pl  = array.get(e.lbA, best)
         tag = array.get(e.qhA, best) ? " ★" : array.get(e.qsA, best) ? " ☆" : ""
-        e.txt   := (best % 2 == 1 ? "▲" : "▼") + pl + tag + (best >= 2 ? " · " + nmP : "")
+        e.txt   := (best % 2 == 1 ? "▲" : "▼") + pl + tag
         e.pSeq  := array.get(e.sqA, best)
         e.pGrey := greyC and f_closed(pl)
     else
@@ -1435,7 +1435,8 @@ if mtfOn and tfClass != 0
 markPos = mtfMarkPos == "שמאל למטה" ? position.bottom_left : mtfMarkPos == "שמאל למעלה" ? position.top_left : mtfMarkPos == "אמצע למטה" ? position.bottom_center : position.bottom_right
 var table markTbl = table.new(markPos, 12, 1, border_width = 0)
 
-// צבע שורה בפינה: אדום/ירוק לשלישייה, הצבע של הזוג לזוג 3–4, אפור ל-closed מואפר
+// צבע שורה בפינה: אדום/ירוק לשלישייה, הצבע של הזוג לזוג 3–4 (בלי שם הזוג — הצבע
+// מבדיל, בדיוק כמו בתווית), אפור ל-closed מואפר
 f_rowCol(int k, bool grey) => k < 0 ? mtfColor : grey ? color.gray : k >= 2 ? colPair : k % 2 == 1 ? colBull : colBear
 
 // המונה של הראשית האחרונה שהתריעה בכל אחת משש השורות. התראה יוצאת רק כשהראשית
@@ -1458,7 +1459,7 @@ if barstate.islast and tfClass != 0
     if prim >= 0
         pb  = array.get(bk, prim)
         tag = pb.qH ? " ★" : pb.qX ? " ☆" : ""
-        sC    := (prim % 2 == 1 ? "▲" : "▼") + pb.lbl + tag + (prim >= 2 ? " · " + nmP : "")
+        sC    := (prim % 2 == 1 ? "▲" : "▼") + pb.lbl + tag
         cSeq  := pb.seq
         cGrey := greyC and f_closed(pb.lbl)
 
