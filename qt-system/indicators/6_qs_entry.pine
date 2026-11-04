@@ -43,7 +43,7 @@ use15s  = input.bool(true, "SSMT / HSSMT של 15 שניות", group = grpBrk, to
 useFresh = input.bool(false, "לפחות שבירה אחת נוצרה בתוך ה-QS", group = grpBrk, tooltip = "כבוי: גם שתי שבירות שנוצרו לפני ה-QS (ועדיין חיות) נותנות סימון. אז סטאפ שאחת השבירות שלו נוצרה בתוך ה-QS מסומן ★.")
 
 grpTr   = "סטופ ובדיקה"
-stopMode = input.string("קיצון החלון", "סטופ", options = ["קיצון החלון", "קיצון המחזור"], group = grpTr, tooltip = "קיצון המחזור: טיק מעבר לקיצון של המחזור שמכיל את החלון, מתחילתו ועד עכשיו (חלון 5.6 → רבע 22.5 · חלון 22.5 → מיקרו 90). אם ה-QS עשה את הקיצון — מעבר ל-QS; אם לפניו יש פתיל שהוא הקיצון — מעבר לפתיל.\nקיצון החלון: טיק מעבר לחלון ה-QS בלבד.")
+stopMode = input.string("מעל נר האישור", "סטופ", options = ["מעל נר האישור", "קיצון החלון", "קיצון המחזור"], group = grpTr, tooltip = "מעל נר האישור: טיק מעבר לגבוה (שורט) / לנמוך (לונג) של הנר שבו כל התנאים התקיימו — הנר שבסגירתו נכנסים.\nקיצון החלון: טיק מעבר לגבוה / נמוך של חלון ה-QS עד עכשיו.\nקיצון המחזור: טיק מעבר לקיצון של המחזור שמכיל את החלון.")
 posView = input.string("קו סטופ", "תצוגת העסקה", options = ["כבוי", "קו סטופ", "סטופ + יעד", "פוזיציה"], group = grpTr, tooltip = "בלי בדיקה: לסטאפ הפעיל, מהכניסה ו-20 נרות קדימה. עם בדיקה: כל ניסיון מצויר מהכניסה עד היציאה בפועל, והאזור הירוק נגמר במחיר היציאה.\nקו סטופ: קו מקווקו דק.\nסטופ + יעד: קו סטופ אדום וקו יעד ירוק, עבים.\nפוזיציה: כמו כלי ה-Long / Short של TradingView — אזור אדום עד הסטופ ואזור ירוק עד היעד.\nכשהקיצון של החלון זז (ניסיון חדש), הציור עובר לכניסה החדשה.")
 reOn    = input.bool(false, "בבדיקה: כניסה חוזרת אחרי סטופ בתוך החלון", group = grpTr, tooltip = "אם הקיצון של החלון זז וסגר את העסקה בסטופ, וה-QS עדיין חי — נכנסים שוב בסגירת אותו נר, עם סטופ מעבר לקיצון החדש. כל ניסיון נספר כעסקה. על התגית: כל ניסיון והסה״כ.")
 maxAtt  = input.int(3, "מקסימום ניסיונות בחלון", minval = 1, maxval = 10, group = grpTr)
@@ -1277,6 +1277,7 @@ type Trd
     int    eb  = -1      // נר הכניסה — לא בודקים יציאה על אותו נר
     float  chR = na      // לכניסה חוזרת עם CHoCH: הנר הנגדי האחרון
     bool   ebT = false   // היעד נגע כבר בנר האישור (לפני הכניסה בסגירה)
+    int    et  = 0       // זמן נר הכניסה
     label  lb
     line   l1
     line   l2
@@ -1389,6 +1390,7 @@ f_trArm(Trd t, label lb, float px, float stpIn) =>
                 t.stp := stp
                 t.tgt := t.dir == -1 ? px - risk * t.rr : px + risk * t.rr
                 t.eb  := legacy ? -1 : bar_index
+                t.et  := time
                 t.ebT := t.dir == -1 ? low <= t.tgt : high >= t.tgt
                 t.st  := 2
                 f_tDraw(t)
@@ -1416,6 +1418,8 @@ f_trOpen(Trd t, float stpIn) =>
     t.st
 
 f_fmtR(float v) => (v >= 0 ? "+" : "") + str.tostring(v, "#.#") + "R"
+// "in 10:05 @28250 SL 28262": זמן נר הכניסה, מחיר הכניסה והסטופ — כדי לבדוק בעיניים
+f_inTx(Trd t) => " · in " + str.format_time(t.et, "HH:mm", TZ) + " @" + str.tostring(t.ent, format.mintick) + " SL " + str.tostring(t.stp, format.mintick)
 
 // כניסה בסגירת הנר הזה עם הסטופ הנתון (לכניסה חוזרת). false אם הסטופ לא מעבר למחיר
 f_reIn(Trd t, float stpNow) =>
@@ -1428,6 +1432,7 @@ f_reIn(Trd t, float stpNow) =>
         t.mfe := 0.0
         t.run := false
         t.eb  := bar_index
+        t.et  := time
         t.st  := 2
         f_tDraw(t)
     ok
@@ -1466,7 +1471,7 @@ f_trCheck(Trd t, float reStp, float chRef) =>
             float rv = risk > 0 ? (t.dir == -1 ? t.ent - sl : sl - t.ent) / risk : -1.0
             f_bump(t.k, rv > 0, rv, t.mfe)
             f_tClose(t, sl)
-            string r1 = (t.run ? "Trail " : be ? (beLock > 0 ? "Lock " : "BE ") : "SL ") + f_fmtR(rv)
+            string r1 = (t.run ? "Trail " : be ? (beLock > 0 ? "Lock " : "BE ") : "SL ") + f_fmtR(rv) + f_inTx(t)
             bool   again = reOn and rv < 0 and not t.run and t.att < maxAtt and qsOn and t.win == qsId
             if again
                 // ניסיון נוסף באותו חלון — מיד, או ממתין לתנאי
@@ -1494,7 +1499,7 @@ f_trCheck(Trd t, float reStp, float chRef) =>
             else
                 f_bump(t.k, true, t.rr, t.mfe)
                 f_tClose(t, t.tgt)
-                rs := (t.att > 1 ? "Try " + str.tostring(t.att) + ": " : "") + "TP " + f_fmtR(t.rr) + (t.att > 1 ? " · Total " + f_fmtR(t.acc + t.rr) : "")
+                rs := (t.att > 1 ? "Try " + str.tostring(t.att) + ": " : "") + "TP " + f_fmtR(t.rr) + f_inTx(t) + (t.att > 1 ? " · Total " + f_fmtR(t.acc + t.rr) : "")
                 t.st := 0
         if t.st == 2 and t.run and risk > 0
             float best = t.dir == -1 ? t.ent - t.mfe * risk : t.ent + t.mfe * risk
@@ -1578,8 +1583,10 @@ f_stopAt(int d, int k, float ext, float qh, float ql, float mh, float ml) =>
         if not na(c) and not na(ext)
             lv := d == -1 ? math.max(c, ext) : math.min(c, ext)
     na(lv) ? na : (d == -1 ? lv + syminfo.mintick : lv - syminfo.mintick)
-stpNS = f_stopAt(-1, qsK, wHi, cqHi, cqLo, cmHi, cmLo)
-stpNL = f_stopAt(1, qsK, wLo, cqHi, cqLo, cmHi, cmLo)
+// סטופ "מעל נר האישור": הגבוה / הנמוך של הנר הזה (הנר שבסגירתו נכנסים)
+cbS = stopMode == "מעל נר האישור"
+stpNS = cbS ? high + syminfo.mintick : f_stopAt(-1, qsK, wHi, cqHi, cqLo, cmHi, cmLo)
+stpNL = cbS ? low - syminfo.mintick : f_stopAt(1, qsK, wLo, cqHi, cqLo, cmHi, cmLo)
 
 // זוגות שכבר נתנו אישור, לכל כיוון — אישור חדש רק עם שבירה חדשה
 var string usedS = "#"
