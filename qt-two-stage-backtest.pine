@@ -1,0 +1,916 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0
+// QT Two-Stage Backtest
+// שלב 2 בבניית המערכת: האם Two-Stage (שתי שבירות קורלציה חיות באותו כיוון,
+// בהפרש של עד שתי מדרגות) משפר את ההגעה לגאפ של המחזור הקודם, והאם שבירות
+// הפוכות במטרה עצמה משפרות את התגובה ממנה.
+//
+// המנועים מועתקים מהאינדיקטורים של המשתמש, בגרסה מצומצמת (שלישייה בלבד):
+//   SSMT / HSSMT  — f_accStep + f_findTri מ-"SSMT + HSSMT | Quarterly Theory"
+//   PSP           — PCP על סווינג של 3 נרות, ביטול כש-1 וגם 2 חצו (ADI v5.36)
+//   SSMT Fill     — גאפ קולקטיבי, track + register, דרגות F1–F3 ("SSMT Fill")
+// שלושה מנועים רצים במקביל: מסגרת הגרף, מדרגה אחת מעליה ושתיים מעליה.
+// כל מנוע מוזן רק בנרות סגורים של המסגרת שלו — בלי ריפיינט.
+//@version=6
+indicator("QT Two-Stage Backtest", shorttitle = "QT 2S", overlay = true, max_labels_count = 500)
+
+// ══════════════════════════════════════════════════════════════
+// הגדרות
+// ══════════════════════════════════════════════════════════════
+G1 = "נכסים"
+sym1 = input.symbol("CME_MINI:MNQ1!",  "נכס 1 (חזק)", group = G1)
+sym2 = input.symbol("CME_MINI:MES1!",  "נכס 2 (חזק)", group = G1)
+sym3 = input.symbol("CBOT_MINI:MYM1!", "נכס 3 (חלש)", group = G1)
+
+G2 = "בדיקה"
+tgtIn     = input.string("מדרגה אחת מעל הגרף", "המטרה: גאפ / קיצון של המחזור הקודם ב...", options = ["מדרגה אחת מעל הגרף", "שתי מדרגות מעל הגרף"], group = G2, tooltip = "למשל בגרף 15m: מדרגה אחת מעל = 1H, כלומר הגאפ של היום הקודם. שתי מדרגות = 4H, הגאפ של השבוע הקודם.\nהשבירות נמדדות בגרף ובשתי המדרגות שמעליו.")
+crossOnly = input.bool(false, "Two-Stage רק משתי מסגרות שונות", group = G2, tooltip = "כבוי = כל שתי שבירות חיות שונות נספרות, גם שני סוגים באותה מסגרת (למשל HSSMT ו-PSP ב-15m).\nדלוק = חייבות להיות בשתי מסגרות שונות.")
+kConf     = input.int(3, "חלון אישור אחרי הנגיעה (נרות גרף)", minval = 0, maxval = 50, group = G2, tooltip = "כמה נרות אחרי הנגיעה בגאפ מחפשים Two-Stage הפוך (אישור לתגובה). 0 = רק בנר הנגיעה.")
+fromT     = input.time(timestamp("01 Jan 2010 00:00 +0000"), "מתאריך", group = G2)
+toT       = input.time(timestamp("31 Dec 2099 00:00 +0000"), "עד תאריך", group = G2)
+
+GG = "הגדרת גאפ (זהה ל-SSMT Fill)"
+fvgOn        = input.bool(true, "זהה FVG (שלושה נרות)", group = GG)
+volImbOn     = input.bool(true, "זהה VI — גאפ סגירה/פתיחה בין שני נרות", group = GG)
+extendBodies = input.bool(true, "הרחב גאפים לגופי הנרות", group = GG)
+viMinTicks   = input.int(4, "VI לבד — מינימום טיקים", minval = 1, maxval = 100, group = GG)
+viMergeTicks = input.int(1, "הרחבה — מינימום טיקים", minval = 1, maxval = 100, group = GG)
+
+G3 = "תצוגה"
+showLb = input.bool(true, "סמן על הגרף (2S / ⛽)", group = G3)
+tbPos  = input.string("ימין למעלה", "מיקום הטבלה", options = ["ימין למעלה", "ימין למטה", "שמאל למעלה", "שמאל למטה"], group = G3)
+tbSize = input.string("קטן", "גודל טקסט", options = ["זעיר", "קטן", "רגיל"], group = G3)
+cBull  = input.color(#26a69a, "שורי", group = G3)
+cBear  = input.color(#ef5350, "דובי", group = G3)
+
+// ══════════════════════════════════════════════════════════════
+// מדרגות: 1=1m · 2=5m · 3=15m · 4=1H · 5=4H · 6=1D · 7=1W · 8=1M
+// ══════════════════════════════════════════════════════════════
+TZ  = "America/New_York"
+tfS = timeframe.in_seconds()
+L   = timeframe.ismonthly ? 8 : timeframe.isweekly ? 7 : timeframe.isdaily ? 6 : tfS >= 14400 ? 5 : tfS >= 3600 ? 4 : tfS >= 900 ? 3 : tfS >= 300 ? 2 : 1
+L1  = math.min(L + 1, 8)
+L2  = math.min(L + 2, 8)
+T   = tgtIn == "מדרגה אחת מעל הגרף" ? L1 : L2
+has2 = L2 != L1
+
+tf1 = L1 == 2 ? "5" : L1 == 3 ? "15" : L1 == 4 ? "60" : L1 == 5 ? "240" : L1 == 6 ? "D" : L1 == 7 ? "W" : "M"
+tf2 = L2 == 2 ? "5" : L2 == 3 ? "15" : L2 == 4 ? "60" : L2 == 5 ? "240" : L2 == 6 ? "D" : L2 == 7 ? "W" : "M"
+
+TFN  = array.from("", "1m", "5m", "15m", "1H", "4H", "1D", "1W", "1M")
+SUBN = array.from("", "22.5 דק'", "90 דק'", "סשן", "יום", "שבוע", "רבע-רבעון", "רבעון QT", "שנה")
+
+// ══════════════════════════════════════════════════════════════
+// מחזורי QT מתוך חותמת זמן — אותם כללים כמו בשלושת האינדיקטורים
+// מחזיר [תת-מחזור, מיכל, מיקום 0..3, חסום]
+// ══════════════════════════════════════════════════════════════
+f_ser(int y, int m, int d) =>
+    int(math.floor(timestamp("UTC", y, m, d, 0, 0) / 86400000.0))
+f_y(int s) =>
+    year(s * 86400000, "UTC")
+f_m(int s) =>
+    month(s * 86400000, "UTC")
+f_d(int s) =>
+    dayofmonth(s * 86400000, "UTC")
+
+f_cyc(int lv, int t) =>
+    int  sub  = na
+    int  cont = na
+    int  pos  = na
+    bool blk  = false
+    if not na(t)
+        int td   = t + 21600000                      // 18:00 → חצות: התאריך = יום המסחר
+        int dS   = f_ser(year(td, TZ), month(td, TZ), dayofmonth(td, TZ))
+        int sod  = ((hour(t, TZ) * 3600 + minute(t, TZ) * 60 + second(t, TZ)) - 64800 + 86400) % 86400
+        int dw   = (dS + 4) % 7                      // 0 = ראשון, 1 = שני ... 5 = שישי
+        int mon  = dw == 0 ? dS - 6 : dS - (dw - 1)  // ראשון (קריפטו) שייך לשבוע שלפניו
+        int tue  = mon + 1
+        int tM   = f_m(tue)
+        bool dead = f_m(mon + 3) != tM
+        int wk   = int(math.floor((f_d(tue) - 1) / 7.0)) + 1
+        if lv == 1
+            int qi = int(math.floor(sod / 1350.0))
+            sub  := dS * 64 + qi
+            cont := dS * 16 + int(math.floor(qi / 4.0))
+            pos  := qi % 4
+        else if lv == 2
+            int mi = int(math.floor(sod / 5400.0))
+            sub  := dS * 16 + mi
+            cont := dS * 4 + int(math.floor(mi / 4.0))
+            pos  := mi % 4
+        else if lv == 3
+            int se = int(math.floor(sod / 21600.0))
+            sub  := dS * 4 + se
+            cont := dS
+            pos  := se
+        else if lv == 4
+            sub  := dS
+            cont := mon
+            pos  := math.max(0, math.min(4, dw - 1))
+            blk  := dw == 5 or dw == 6 or dw == 0
+        else if lv == 5
+            bool own = dead or wk == 5
+            sub  := mon
+            cont := own ? -mon : f_y(tue) * 12 + tM
+            pos  := own ? 0 : wk - 1
+            blk  := own or (wk == 4 and dw == 5)
+        else if lv == 6
+            int y  = f_y(dS)
+            int m  = f_m(dS)
+            int qm = m >= 10 ? 10 : m >= 7 ? 7 : m >= 4 ? 4 : 1
+            int qS = f_ser(y, qm, 1)
+            int qE = qm == 10 ? f_ser(y + 1, 1, 1) : f_ser(y, qm + 3, 1)
+            int k  = math.max(0, math.min(3, int(math.floor((dS - qS) * 4.0 / (qE - qS)))))
+            cont := y * 12 + qm
+            sub  := cont * 4 + k
+            pos  := k
+        else if lv == 7
+            int m  = f_m(tue)
+            int y  = f_y(tue)
+            int qi = m >= 10 ? 2 : m >= 7 ? 1 : m >= 4 ? 0 : 3
+            int qy = m >= 4 ? y : y - 1
+            sub  := qy * 4 + qi
+            cont := qy
+            pos  := qi
+        else
+            int y = f_y(dS)
+            sub  := y
+            cont := int(math.floor((y - 2023) / 4.0))
+            pos  := ((y - 2023) % 4 + 4) % 4
+    [sub, cont, pos, blk]
+
+// זרע: 1m, 5m, 1H (כמו ב-SSMT וב-Fill)
+f_seedLv(int lv) =>
+    lv == 1 or lv == 2 or lv == 4
+
+f_dir(float o, float c) =>
+    c > o ? 1 : c < o ? -1 : 0
+
+// ══════════════════════════════════════════════════════════════
+// רגל של גאפ — העתק של f_leg מ-SSMT Fill
+// נרות: 1 = (o2,h2,l2,cX2) · 2 = (o1,c1) · 3 = (o0,h0,l0,c0)
+// ══════════════════════════════════════════════════════════════
+f_leg(int d, bool ok, float o0, float h0, float l0, float c0, float o1, float c1, float h2, float l2, float cX2, float o2, float tk, bool edge) =>
+    float b  = na
+    float t  = na
+    int   ti = math.round(math.abs(o0 - c1) / tk)
+    int   pi = math.round(math.abs(o1 - cX2) / tk)
+    bool  f  = fvgOn and ok and (d == 1 ? l0 > h2 : h0 < l2)
+    bool  r  = ok and (d == 1 ? (o0 > c1 and (edge or (c1 > o1 and c0 > o0))) : (o0 < c1 and (edge or (c1 < o1 and c0 < o0))))
+    bool  m  = extendBodies and r and ti >= viMergeTicks
+    bool  p  = extendBodies and pi >= viMergeTicks and (d == 1 ? (o1 > cX2 and cX2 > o2 and c1 > o1) : (o1 < cX2 and cX2 < o2 and c1 < o1))
+    bool  v  = volImbOn and r and ti >= viMinTicks
+    if f
+        if d == 1
+            b := (extendBodies and o1 > h2 and pi >= viMergeTicks) ? cX2 : h2
+            t := (extendBodies and l0 > c1 and ti >= viMergeTicks) ? o0 : l0
+            if p
+                b := math.min(b, cX2)
+        else
+            t := (extendBodies and o1 < l2 and pi >= viMergeTicks) ? cX2 : l2
+            b := (extendBodies and h0 < c1 and ti >= viMergeTicks) ? o0 : h0
+            if p
+                t := math.max(t, cX2)
+    if (f and m) or (v and (not f or extendBodies))
+        if d == 1
+            b := na(b) ? c1 : math.min(b, c1)
+            t := na(t) ? o0 : math.max(t, o0)
+        else
+            t := na(t) ? c1 : math.max(t, c1)
+            b := na(b) ? o0 : math.min(b, o0)
+    [b, t, f, m, v]
+
+// ══════════════════════════════════════════════════════════════
+// SSMT / HSSMT — מצבר של קיצונים לכל תת-מחזור (מ-SSMT + HSSMT)
+// ══════════════════════════════════════════════════════════════
+type Acc
+    float hi
+    float lo
+    float hc
+    float lc
+    array<float> hiA
+    array<float> loA
+    array<float> hcA
+    array<float> lcA
+
+f_newAcc() =>
+    Acc.new(na, na, na, na, array.new_float(), array.new_float(), array.new_float(), array.new_float())
+
+f_accA(Acc a, bool isBull, bool isH) =>
+    isBull ? (isH ? a.lcA : a.loA) : (isH ? a.hcA : a.hiA)
+f_accV(Acc a, bool isBull, bool isH) =>
+    isBull ? (isH ? a.lc : a.lo) : (isH ? a.hc : a.hi)
+
+f_accStep(Acc a, bool newRef, bool clr, bool push, bool drop, float h, float l, float c) =>
+    if newRef
+        if clr
+            a.hiA.clear()
+            a.loA.clear()
+            a.hcA.clear()
+            a.lcA.clear()
+        if push
+            a.hiA.push(a.hi)
+            a.loA.push(a.lo)
+            a.hcA.push(a.hc)
+            a.lcA.push(a.lc)
+        if drop and a.hiA.size() > 0
+            a.hiA.remove(0)
+            a.loA.remove(0)
+            a.hcA.remove(0)
+            a.lcA.remove(0)
+        a.hi := h
+        a.lo := l
+        a.hc := c
+        a.lc := c
+    else
+        if na(a.hi) or h > a.hi
+            a.hi := h
+        if na(a.lo) or l < a.lo
+            a.lo := l
+        if na(a.hc) or c > a.hc
+            a.hc := c
+        if na(a.lc) or c < a.lc
+            a.lc := c
+    0
+
+f_beyond(bool isBull, float v, float r) =>
+    isBull ? v < r : v > r
+f_ext(bool isBull, float v, float r) =>
+    isBull ? math.min(v, r) : math.max(v, r)
+
+// 0 = אין · 1 = SSMT · 2 = HSSMT
+f_findTri(bool isBull, Acc n, Acc e, Acc y) =>
+    int bT = 0
+    nA  = f_accA(n, isBull, false)
+    eA  = f_accA(e, isBull, false)
+    yA  = f_accA(y, isBull, false)
+    nCA = f_accA(n, isBull, true)
+    eCA = f_accA(e, isBull, true)
+    yCA = f_accA(y, isBull, true)
+    int cnt = nA.size()
+    if cnt > 0 and eA.size() == cnt and yA.size() == cnt
+        float nM  = f_accV(n, isBull, false)
+        float eM  = f_accV(e, isBull, false)
+        float yM  = f_accV(y, isBull, false)
+        float nMc = f_accV(n, isBull, true)
+        float eMc = f_accV(e, isBull, true)
+        float yMc = f_accV(y, isBull, true)
+        for i = cnt - 1 to 0
+            if bT == 0
+                bool nw = f_beyond(isBull, nM,  nA.get(i))
+                bool ew = f_beyond(isBull, eM,  eA.get(i))
+                bool yw = f_beyond(isBull, yM,  yA.get(i))
+                bool nc = f_beyond(isBull, nMc, nCA.get(i))
+                bool ec = f_beyond(isBull, eMc, eCA.get(i))
+                bool yc = f_beyond(isBull, yMc, yCA.get(i))
+                bool hValid = isBull ? (nc or ec) and not (nc and ec and yc) : (nc or ec or yc) and not (nc and ec)
+                bool wValid = isBull ? (nw or ew) and not (nw and ew and yw) : (nw or ew or yw) and not (nw and ew)
+                if hValid or wValid
+                    bT := hValid ? 2 : 1
+            nM  := f_ext(isBull, nM,  nA.get(i))
+            eM  := f_ext(isBull, eM,  eA.get(i))
+            yM  := f_ext(isBull, yM,  yA.get(i))
+            nMc := f_ext(isBull, nMc, nCA.get(i))
+            eMc := f_ext(isBull, eMc, eCA.get(i))
+            yMc := f_ext(isBull, yMc, yCA.get(i))
+    bT
+
+// ══════════════════════════════════════════════════════════════
+// PSP (מ-ADI): הרמה שכל נכס מגן עליה = הקצה של נר הסווינג אצלו
+// ══════════════════════════════════════════════════════════════
+type PB
+    int   dir
+    float n
+    float e
+    float y
+    int   cont
+
+// ══════════════════════════════════════════════════════════════
+// SSMT Fill — גאפ קולקטיבי של השלישייה (a = 1, b = 2, c = 3)
+// ══════════════════════════════════════════════════════════════
+type FG
+    int   dir
+    float aTop
+    float aBot
+    float bTop
+    float bBot
+    float cTop
+    float cBot
+    float aExt
+    float bExt
+    float cExt
+    int   ref
+    bool  armed   = false
+    bool  dead    = false
+    bool  inVisit = false
+    int   visits  = 0
+    int   fDeg    = 0
+    int   fVis    = 0
+    int   fPrev   = 0
+
+method depthOf(FG g, int a) =>
+    float top = a == 0 ? g.aTop : a == 1 ? g.bTop : g.cTop
+    float bot = a == 0 ? g.aBot : a == 1 ? g.bBot : g.cBot
+    float ext = a == 0 ? g.aExt : a == 1 ? g.bExt : g.cExt
+    float d = na
+    if not na(top) and not na(ext) and top - bot > 0
+        d := g.dir == 1 ? (top - ext) / (top - bot) : (ext - bot) / (top - bot)
+        d := math.max(d, 0.0)
+    d
+
+method leadIdx(FG g) =>
+    int   best = -1
+    float bd   = -1.0
+    for a = 0 to 2
+        if not (g.dir == 1 and a == 2)
+            float d = g.depthOf(a)
+            if not na(d) and d > bd
+                bd   := d
+                best := a
+    best
+
+method lagIdx(FG g) =>
+    int   worst = -1
+    float wd    = 1e12
+    for a = 0 to 2
+        if not (g.dir == -1 and a == 2)
+            float d = g.depthOf(a)
+            if not na(d) and d < wd
+                wd    := d
+                worst := a
+    worst
+
+f_degree(float dLead, float dLag) =>
+    int deg = 0
+    if dLead >= 1.0 and dLag < 1.0
+        deg := 3
+    else if dLead >= 0.5 and dLag < 0.5
+        deg := 2
+    else if dLead > 0.0 and dLag <= 0.0
+        deg := 1
+    deg
+
+method fracDeg(FG g) =>
+    int li  = g.leadIdx()
+    int gi  = g.lagIdx()
+    int deg = 0
+    if li != -1 and gi != -1 and li != gi
+        deg := f_degree(g.depthOf(li), g.depthOf(gi))
+    deg
+
+method track(FG g, int rf, float hA, float lA, float cA, float hB, float lB, float cB, float hC, float lC, float cC) =>
+    if not g.dead
+        if not g.armed and g.ref != rf
+            g.armed := true
+        if g.armed
+            bool pA = not na(hA) and not na(lA)
+            bool pB = not na(hB) and not na(lB)
+            bool pC = not na(hC) and not na(lC)
+            bool outA = na(g.aTop) or not pA or (g.dir == 1 ? lA > g.aTop : hA < g.aBot)
+            bool outB = na(g.bTop) or not pB or (g.dir == 1 ? lB > g.bTop : hB < g.bBot)
+            bool outC = na(g.cTop) or not pC or (g.dir == 1 ? lC > g.cTop : hC < g.cBot)
+            if outA and outB and outC
+                g.inVisit := false
+                g.aExt    := g.dir == 1 ? g.aTop : g.aBot
+                g.bExt    := g.dir == 1 ? g.bTop : g.bBot
+                g.cExt    := g.dir == 1 ? g.cTop : g.cBot
+            else
+                if not g.inVisit
+                    g.inVisit := true
+                    g.visits  := g.visits + 1
+                if g.dir == 1
+                    if not na(g.aTop) and pA
+                        g.aExt := math.min(g.aExt, lA)
+                    if not na(g.bTop) and pB
+                        g.bExt := math.min(g.bExt, lB)
+                    if not na(g.cTop) and pC
+                        g.cExt := math.min(g.cExt, lC)
+                else
+                    if not na(g.aTop) and pA
+                        g.aExt := math.max(g.aExt, hA)
+                    if not na(g.bTop) and pB
+                        g.bExt := math.max(g.bExt, hB)
+                    if not na(g.cTop) and pC
+                        g.cExt := math.max(g.cExt, hC)
+        // IFVG — רק נכס 1 ו-2 הורגים; נכס 3 רק יוצא
+        if g.dir == 1
+            if (not na(g.aBot) and not na(cA) and cA < g.aBot) or (not na(g.bBot) and not na(cB) and cB < g.bBot)
+                g.dead := true
+        else
+            if (not na(g.aTop) and not na(cA) and cA > g.aTop) or (not na(g.bTop) and not na(cB) and cB > g.bTop)
+                g.dead := true
+        if not g.dead and not na(g.cTop) and not na(cC) and (g.dir == 1 ? cC < g.cBot : cC > g.cTop)
+            g.cBot := na
+            g.cTop := na
+            g.cExt := na
+    g.dead
+
+method register(FG g, bool canReg) =>
+    bool fired = false
+    if not g.dead and g.armed
+        int deg = g.fracDeg()
+        if canReg and deg > g.fDeg
+            if g.fVis != g.visits
+                g.fPrev := g.fDeg
+                g.fVis  := g.visits
+            g.fDeg := deg
+            fired  := true
+        else if g.inVisit and g.fVis == g.visits and deg < g.fDeg
+            g.fDeg := math.max(deg, g.fPrev)
+    fired
+
+// ══════════════════════════════════════════════════════════════
+// גאפ מטרה (נכס 1 בלבד, כמו QT Refuel)
+// ══════════════════════════════════════════════════════════════
+type TG
+    int   dir
+    float top
+    float bot
+    int   sub
+    int   bar
+    bool  dead = false
+
+// ══════════════════════════════════════════════════════════════
+// מנוע למסגרת זמן אחת
+// ══════════════════════════════════════════════════════════════
+type Eng
+    int          cls
+    bool         tgt
+    array<float> hN        // [o1,h1,l1,c1,o2,h2,l2,c2] — שני הנרות הקודמים
+    array<float> hE
+    array<float> hY
+    Acc          aN
+    Acc          aE
+    Acc          aY
+    array<PB>    ps
+    array<FG>    fg
+    array<TG>    tg
+    int          lastT    = 0
+    int          subPrev
+    int          refId    = 0
+    int          lifeId   = 0
+    bool         started  = false
+    bool         sAct     = false
+    bool         fSeed    = false
+    int          fSeedRef = 0
+    int          ssB      = 0
+    int          ssU      = 0
+    bool         psB      = false
+    bool         psU      = false
+    bool         fiB      = false
+    bool         fiU      = false
+
+f_newEng(int c, bool tg) =>
+    Eng.new(cls = c, tgt = tg, hN = array.new_float(8, na), hE = array.new_float(8, na), hY = array.new_float(8, na), aN = f_newAcc(), aE = f_newAcc(), aY = f_newAcc(), ps = array.new<PB>(), fg = array.new<FG>(), tg = array.new<TG>())
+
+f_shift(array<float> h, float o, float hi, float lo, float c) =>
+    for q = 0 to 3
+        h.set(q + 4, h.get(q))
+    h.set(0, o)
+    h.set(1, hi)
+    h.set(2, lo)
+    h.set(3, c)
+    0
+
+// צעד אחד: נר סגור אחד של המסגרת. tk* = גודל טיק לכל נכס.
+method step(Eng e, int t, float oN, float hN, float lN, float cN, float oE, float hE, float lE, float cE, float oY, float hY, float lY, float cY, float tkN, float tkE, float tkY) =>
+    if not na(t) and t != e.lastT and not na(cN) and not na(cE) and not na(cY)
+        int tPrev = e.lastT
+        e.lastT := t
+        [sub, cont, pos, blk] = f_cyc(e.cls, t)
+        bool seedL   = f_seedLv(e.cls)
+        bool newRef  = e.started and sub != e.refId
+        bool newLife = e.started and cont != e.lifeId
+        int  prevRef = e.refId
+
+        // ── SSMT / HSSMT ──
+        bool canP  = not na(e.aN.hi) and not na(e.aE.hi) and not na(e.aY.hi)
+        bool push  = newRef and ((not newLife) or seedL) and canP
+        bool sDrop = newRef and (not newLife) and e.sAct
+        f_accStep(e.aN, newRef, newLife, push, sDrop, hN, lN, cN)
+        f_accStep(e.aE, newRef, newLife, push, sDrop, hE, lE, cE)
+        f_accStep(e.aY, newRef, newLife, push, sDrop, hY, lY, cY)
+        if newRef and newLife
+            e.sAct := seedL and canP
+        else if newRef
+            e.sAct := false
+        e.ssB := 0
+        e.ssU := 0
+        if not blk and e.aN.hiA.size() > 0
+            e.ssB := f_findTri(false, e.aN, e.aE, e.aY)
+            e.ssU := f_findTri(true,  e.aN, e.aE, e.aY)
+
+        // ── PSP: קודם הנר שנסגר לוקח רמות, אחר כך סווינג חדש על הנר הקודם ──
+        int i = 0
+        while i < e.ps.size()
+            PB b = e.ps.get(i)
+            if not na(b.n) and (b.dir == -1 ? hN > b.n : lN < b.n)
+                b.n := na
+            if not na(b.e) and (b.dir == -1 ? hE > b.e : lE < b.e)
+                b.e := na
+            if not na(b.y) and (b.dir == -1 ? hY > b.y : lY < b.y)
+                b.y := na
+            if (na(b.n) and na(b.e)) or b.cont != cont
+                e.ps.remove(i)
+            else
+                i += 1
+        if not na(e.hN.get(7)) and not na(e.hE.get(7)) and not na(e.hY.get(7))
+            int  dN   = f_dir(e.hN.get(0), e.hN.get(3))
+            int  dE   = f_dir(e.hE.get(0), e.hE.get(3))
+            int  dY   = f_dir(e.hY.get(0), e.hY.get(3))
+            bool divP = dN != dE
+            bool divY = dY > 0 and (dE < 0 or dN < 0)
+            bool divW = e.cls >= 6 and dY < 0 and (dE > 0 or dN > 0) and not divP and not divY
+            if divP or divY or divW
+                bool ymIn = divY or divW
+                bool sHN = e.hN.get(1) > e.hN.get(5) and e.hN.get(1) > hN
+                bool sHE = e.hE.get(1) > e.hE.get(5) and e.hE.get(1) > hE
+                bool sHY = ymIn and e.hY.get(1) > e.hY.get(5) and e.hY.get(1) > hY
+                bool sLN = e.hN.get(2) < e.hN.get(6) and e.hN.get(2) < lN
+                bool sLE = e.hE.get(2) < e.hE.get(6) and e.hE.get(2) < lE
+                bool sLY = ymIn and e.hY.get(2) < e.hY.get(6) and e.hY.get(2) < lY
+                int nHi = (sHN ? 1 : 0) + (sHE ? 1 : 0) + (sHY ? 1 : 0)
+                int nLo = (sLN ? 1 : 0) + (sLE ? 1 : 0) + (sLY ? 1 : 0)
+                [bc, bx1, bx2, bx3] = f_cyc(e.cls, tPrev)
+                if (nHi > 0 or nLo > 0) and bc == cont
+                    bool bear = nHi >= nLo
+                    e.ps.unshift(PB.new(bear ? -1 : 1, bear ? e.hN.get(1) : e.hN.get(2), bear ? e.hE.get(1) : e.hE.get(2), bear ? e.hY.get(1) : e.hY.get(2), bc))
+                    while e.ps.size() > 5
+                        e.ps.pop()
+        e.psB := false
+        e.psU := false
+        for pb in e.ps
+            if pb.dir == -1
+                e.psB := true
+            else
+                e.psU := true
+
+        // ── SSMT Fill: החלפת מיכל + זרע ──
+        if newLife
+            if seedL
+                int n0 = e.fg.size()
+                if n0 > 0
+                    for j = n0 - 1 to 0
+                        if e.fg.get(j).ref != prevRef
+                            e.fg.remove(j)
+                for g in e.fg
+                    g.fDeg  := 0
+                    g.fPrev := 0
+                e.fSeedRef := prevRef
+                e.fSeed    := e.fg.size() > 0
+            else
+                e.fg.clear()
+                e.fSeed := false
+        else if newRef and e.fSeed
+            int n1 = e.fg.size()
+            if n1 > 0
+                for j = n1 - 1 to 0
+                    if e.fg.get(j).ref == e.fSeedRef
+                        e.fg.remove(j)
+            e.fSeed := false
+        for g in e.fg
+            g.track(sub, hN, lN, cN, hE, lE, cE, hY, lY, cY)
+
+        // ── גאפים חדשים (קולקטיביים + מטרה) ──
+        bool okN = not na(e.hN.get(7)) and not na(e.hN.get(0))
+        bool okE = not na(e.hE.get(7)) and not na(e.hE.get(0))
+        bool okY = not na(e.hY.get(7)) and not na(e.hY.get(0))
+        [bNu, tNu, fNu, mNu, vNu] = f_leg(1,  okN, oN, hN, lN, cN, e.hN.get(0), e.hN.get(3), e.hN.get(5), e.hN.get(6), e.hN.get(7), e.hN.get(4), tkN, newRef)
+        [bNd, tNd, fNd, mNd, vNd] = f_leg(-1, okN, oN, hN, lN, cN, e.hN.get(0), e.hN.get(3), e.hN.get(5), e.hN.get(6), e.hN.get(7), e.hN.get(4), tkN, newRef)
+        [bEu, tEu, fEu, mEu, vEu] = f_leg(1,  okE, oE, hE, lE, cE, e.hE.get(0), e.hE.get(3), e.hE.get(5), e.hE.get(6), e.hE.get(7), e.hE.get(4), tkE, newRef)
+        [bEd, tEd, fEd, mEd, vEd] = f_leg(-1, okE, oE, hE, lE, cE, e.hE.get(0), e.hE.get(3), e.hE.get(5), e.hE.get(6), e.hE.get(7), e.hE.get(4), tkE, newRef)
+        [bYu, tYu, fYu, mYu, vYu] = f_leg(1,  okY, oY, hY, lY, cY, e.hY.get(0), e.hY.get(3), e.hY.get(5), e.hY.get(6), e.hY.get(7), e.hY.get(4), tkY, newRef)
+        [bYd, tYd, fYd, mYd, vYd] = f_leg(-1, okY, oY, hY, lY, cY, e.hY.get(0), e.hY.get(3), e.hY.get(5), e.hY.get(6), e.hY.get(7), e.hY.get(4), tkY, newRef)
+        int cU = (na(tNu) ? 0 : 1) + (na(tEu) ? 0 : 1) + (na(tYu) ? 0 : 1)
+        int cD = (na(tNd) ? 0 : 1) + (na(tEd) ? 0 : 1) + (na(tYd) ? 0 : 1)
+        int gd = cU >= 2 ? 1 : cD >= 2 ? -1 : 0
+        int midRef = tPrev == 0 ? sub : e.subPrev
+        if gd != 0
+            float at = gd == 1 ? tNu : tNd
+            float ab = gd == 1 ? bNu : bNd
+            float bt = gd == 1 ? tEu : tEd
+            float bb = gd == 1 ? bEu : bEd
+            float ct = gd == 1 ? tYu : tYd
+            float cb = gd == 1 ? bYu : bYd
+            bool anyF = (not na(at) and (gd == 1 ? fNu : fNd)) or (not na(bt) and (gd == 1 ? fEu : fEd)) or (not na(ct) and (gd == 1 ? fYu : fYd))
+            bool anyM = (not na(at) and (gd == 1 ? mNu : mNd)) or (not na(bt) and (gd == 1 ? mEu : mEd)) or (not na(ct) and (gd == 1 ? mYu : mYd))
+            bool tagNow = (newRef and anyM) or not anyF
+            if not (newLife and not seedL and not tagNow)
+                e.fg.push(FG.new(dir = gd, aTop = at, aBot = ab, bTop = bt, bBot = bb, cTop = ct, cBot = cb, aExt = gd == 1 ? at : ab, bExt = gd == 1 ? bt : bb, cExt = gd == 1 ? ct : cb, ref = tagNow ? sub : midRef))
+                if e.fg.size() > 60
+                    int kDead = -1
+                    int kFree = -1
+                    for j = 0 to e.fg.size() - 1
+                        FG gx = e.fg.get(j)
+                        if kDead == -1 and gx.dead
+                            kDead := j
+                        if kFree == -1 and not gx.dead and gx.fDeg == 0
+                            kFree := j
+                    e.fg.remove(kDead != -1 ? kDead : kFree != -1 ? kFree : 0)
+
+        // ── רישום שבירות Fill ──
+        for g in e.fg
+            g.register(not blk)
+        e.fiB := false
+        e.fiU := false
+        for g in e.fg
+            if not g.dead and g.fDeg > 0
+                if g.dir == -1
+                    e.fiB := true
+                else
+                    e.fiU := true
+
+        // ── גאפי מטרה (נכס 1) ──
+        if e.tgt
+            for g in e.tg
+                if not g.dead and (g.dir == 1 ? cN < g.bot : cN > g.top)
+                    g.dead := true
+            if not na(tNu) and not na(bNu) and tNu > bNu
+                e.tg.push(TG.new(1, tNu, bNu, ((newRef and mNu) or not fNu) ? sub : midRef, bar_index))
+            if not na(tNd) and not na(bNd) and tNd > bNd
+                e.tg.push(TG.new(-1, tNd, bNd, ((newRef and mNd) or not fNd) ? sub : midRef, bar_index))
+            while e.tg.size() > 200
+                e.tg.shift()
+
+        // ── היסטוריה ──
+        f_shift(e.hN, oN, hN, lN, cN)
+        f_shift(e.hE, oE, hE, lE, cE)
+        f_shift(e.hY, oY, hY, lY, cY)
+        e.subPrev := sub
+        e.refId   := sub
+        e.lifeId  := cont
+        e.started := true
+    e.started
+
+// ══════════════════════════════════════════════════════════════
+// נתונים — כל המנועים מקבלים רק נרות סגורים ([1])
+// ══════════════════════════════════════════════════════════════
+[rLt, rLoN, rLhN, rLlN, rLcN] = request.security(sym1, timeframe.period, [time[1], open[1], high[1], low[1], close[1]])
+[rLoE, rLhE, rLlE, rLcE]      = request.security(sym2, timeframe.period, [open[1], high[1], low[1], close[1]])
+[rLoY, rLhY, rLlY, rLcY]      = request.security(sym3, timeframe.period, [open[1], high[1], low[1], close[1]])
+[r1t, r1oN, r1hN, r1lN, r1cN] = request.security(sym1, tf1, [time[1], open[1], high[1], low[1], close[1]])
+[r1oE, r1hE, r1lE, r1cE]      = request.security(sym2, tf1, [open[1], high[1], low[1], close[1]])
+[r1oY, r1hY, r1lY, r1cY]      = request.security(sym3, tf1, [open[1], high[1], low[1], close[1]])
+[r2t, r2oN, r2hN, r2lN, r2cN] = request.security(sym1, tf2, [time[1], open[1], high[1], low[1], close[1]])
+[r2oE, r2hE, r2lE, r2cE]      = request.security(sym2, tf2, [open[1], high[1], low[1], close[1]])
+[r2oY, r2hY, r2lY, r2cY]      = request.security(sym3, tf2, [open[1], high[1], low[1], close[1]])
+// הנר הנוכחי של נכס 1 במסגרת הגרף — לנגיעה במטרה
+[xH, xL, xC] = request.security(sym1, timeframe.period, [high, low, close])
+tkN = request.security(sym1, timeframe.period, syminfo.mintick)
+tkE = request.security(sym2, timeframe.period, syminfo.mintick)
+tkY = request.security(sym3, timeframe.period, syminfo.mintick)
+var float vtN = 0.25
+var float vtE = 0.25
+var float vtY = 1.0
+vtN := na(tkN) ? vtN : tkN
+vtE := na(tkE) ? vtE : tkE
+vtY := na(tkY) ? vtY : tkY
+
+var Eng eL = f_newEng(L,  false)
+var Eng e1 = f_newEng(L1, T == L1)
+var Eng e2 = f_newEng(L2, T == L2 and has2)
+
+eL.step(rLt, rLoN, rLhN, rLlN, rLcN, rLoE, rLhE, rLlE, rLcE, rLoY, rLhY, rLlY, rLcY, vtN, vtE, vtY)
+e1.step(r1t, r1oN, r1hN, r1lN, r1cN, r1oE, r1hE, r1lE, r1cE, r1oY, r1hY, r1lY, r1cY, vtN, vtE, vtY)
+if has2
+    e2.step(r2t, r2oN, r2hN, r2lN, r2cN, r2oE, r2hE, r2lE, r2cE, r2oY, r2hY, r2lY, r2cY, vtN, vtE, vtY)
+
+eT = T == L1 ? e1 : e2
+
+// ══════════════════════════════════════════════════════════════
+// Two-Stage עכשיו
+// ══════════════════════════════════════════════════════════════
+f_n(bool a, bool b, bool c) =>
+    (a ? 1 : 0) + (b ? 1 : 0) + (c ? 1 : 0)
+
+nB0 = f_n(eL.ssB > 0, eL.psB, eL.fiB)
+nB1 = f_n(e1.ssB > 0, e1.psB, e1.fiB)
+nB2 = has2 ? f_n(e2.ssB > 0, e2.psB, e2.fiB) : 0
+nU0 = f_n(eL.ssU > 0, eL.psU, eL.fiU)
+nU1 = f_n(e1.ssU > 0, e1.psU, e1.fiU)
+nU2 = has2 ? f_n(e2.ssU > 0, e2.psU, e2.fiU) : 0
+
+tsBear = crossOnly ? f_n(nB0 > 0, nB1 > 0, nB2 > 0) >= 2 : nB0 + nB1 + nB2 >= 2
+tsBull = crossOnly ? f_n(nU0 > 0, nU1 > 0, nU2 > 0) >= 2 : nU0 + nU1 + nU2 >= 2
+
+// מה חי עכשיו — לטולטיפ
+f_slots(Eng e, bool bull) =>
+    string s = ""
+    string nm = TFN.get(e.cls)
+    int ss = bull ? e.ssU : e.ssB
+    if ss > 0
+        s += nm + (ss == 2 ? " HSSMT" : " SSMT") + "\n"
+    if bull ? e.psU : e.psB
+        s += nm + " PSP\n"
+    if bull ? e.fiU : e.fiB
+        s += nm + " Fill\n"
+    s
+
+// ══════════════════════════════════════════════════════════════
+// מעקב אחרי מחזורי המטרה (רמה T) על נרות הגרף
+// ══════════════════════════════════════════════════════════════
+// st: 0 מחזורים · 1 הגיע · 2 Two-Stage קודם · 3 ואז הגיע · 4 בלי Two-Stage קודם · 5 ובכל זאת הגיע
+//     6 הגיע + אישור · 7 אישור והחזיק · 8 אישור ולקח קיצון נגדי
+//     9 הגיע בלי אישור · 10 בלי אישור והחזיק · 11 בלי אישור ולקח קיצון · 12 Two-Stage בכלל במחזור
+type Sd
+    int   dir            // 1 = גאפ מתחת (ירידה אליו) · -1 = גאפ מעל (עלייה אליו)
+    bool  avail = false
+    bool  inR   = false
+    int   tG
+    TG    fg
+    int   tTs
+    bool  conf  = false
+    bool  ext   = false
+    label lb
+
+var Sd sDn = Sd.new(1)
+var Sd sUp = Sd.new(-1)
+var array<int> stDn = array.new_int(13, 0)
+var array<int> stUp = array.new_int(13, 0)
+
+f_inc(array<int> a, int i) =>
+    a.set(i, a.get(i) + 1)
+    0
+
+method fin(Sd s, array<int> st) =>
+    if s.avail and s.inR
+        bool r = not na(s.tG)
+        f_inc(st, 0)
+        if r
+            f_inc(st, 1)
+        if not na(s.tTs)
+            f_inc(st, 12)
+        if not na(s.tTs) and (na(s.tG) or s.tTs < s.tG)
+            f_inc(st, 2)
+            if r
+                f_inc(st, 3)
+        else
+            f_inc(st, 4)
+            if r
+                f_inc(st, 5)
+        if r
+            bool held = not s.fg.dead
+            if s.conf
+                f_inc(st, 6)
+                if held
+                    f_inc(st, 7)
+                if s.ext
+                    f_inc(st, 8)
+            else
+                f_inc(st, 9)
+                if held
+                    f_inc(st, 10)
+                if s.ext
+                    f_inc(st, 11)
+            if not na(s.lb)
+                s.lb.set_text(s.conf ? "⛽✓" : "⛽")
+                s.lb.set_tooltip((s.conf ? "היה Two-Stage הפוך במטרה (אישור)" : "בלי אישור במטרה") + "\n" + (held ? "הגאפ החזיק" : "הגאפ הפך ל-IFVG") + "\n" + (s.ext ? "לקח את הקיצון הנגדי של המחזור הקודם" : "לא לקח את הקיצון הנגדי"))
+    0
+
+method reset(Sd s, bool av, bool inR) =>
+    s.avail := av
+    s.inR   := inR
+    s.tG    := na
+    s.fg    := na
+    s.tTs   := na
+    s.conf  := false
+    s.ext   := false
+    s.lb    := na
+    0
+
+var int   cS  = na
+var int   cC  = na
+var int   cP  = na
+var bool  cBk = false
+var float cHi = na
+var float cLo = na
+var int   pS  = na
+var int   pC  = na
+var int   pP  = na
+var bool  pBk = false
+var float pHi = na
+var float pLo = na
+var bool  act = false
+
+[tS, tC, tP, tB] = f_cyc(T, time)
+
+if not na(tS) and (na(cS) or tS != cS)
+    if act
+        sDn.fin(stDn)
+        sUp.fin(stUp)
+    if not na(cS)
+        pS  := cS
+        pC  := cC
+        pP  := cP
+        pBk := cBk
+        pHi := cHi
+        pLo := cLo
+    cS  := tS
+    cC  := tC
+    cP  := tP
+    cBk := tB
+    cHi := na
+    cLo := na
+    act := not na(pS) and not tB and not pBk and pC == tC and pP == tP - 1
+    bool avD = false
+    bool avU = false
+    if act
+        for g in eT.tg
+            if g.sub == pS and not g.dead
+                if g.dir == 1
+                    avD := true
+                else
+                    avU := true
+    bool inR = time >= fromT and time <= toT
+    sDn.reset(avD, inR)
+    sUp.reset(avU, inR)
+
+if not na(xH)
+    cHi := na(cHi) ? xH : math.max(cHi, xH)
+    cLo := na(cLo) ? xL : math.min(cLo, xL)
+
+// צד אחד בנר הנוכחי. dn = ירידה לגאפ שורי מתחת: Two-Stage מכוון = דובי, אישור = שורי.
+method onBar(Sd s, bool tsTo, bool tsBack, string tipTo) =>
+    bool dn = s.dir == 1
+    if act and s.avail
+        if na(s.tTs) and na(s.tG) and tsTo
+            s.tTs := bar_index
+            if showLb
+                label.new(bar_index, dn ? high : low, dn ? "2S▼" : "2S▲", yloc = dn ? yloc.abovebar : yloc.belowbar, style = label.style_none, textcolor = dn ? cBear : cBull, size = size.small, tooltip = "Two-Stage לכיוון המטרה:\n" + tipTo)
+        if na(s.tG)
+            TG best = na
+            for g in eT.tg
+                if g.sub == pS and g.dir == s.dir and not g.dead and g.bar < bar_index
+                    if dn ? xL <= g.top : xH >= g.bot
+                        if na(best)
+                            best := g
+                        else if dn ? g.top > best.top : g.bot < best.bot
+                            best := g
+            if not na(best)
+                s.tG := bar_index
+                s.fg := best
+                if showLb
+                    s.lb := label.new(bar_index, dn ? low : high, "⛽", yloc = dn ? yloc.belowbar : yloc.abovebar, style = dn ? label.style_label_up : label.style_label_down, color = dn ? cBull : cBear, textcolor = color.white, size = size.small)
+        if not na(s.tG)
+            if not s.conf and bar_index <= s.tG + kConf and not s.fg.dead and tsBack
+                s.conf := true
+            if dn ? xH > pHi : xL < pLo
+                s.ext := true
+    0
+
+tipB = f_slots(eL, false) + f_slots(e1, false) + (has2 ? f_slots(e2, false) : "")
+tipU = f_slots(eL, true)  + f_slots(e1, true)  + (has2 ? f_slots(e2, true) : "")
+sDn.onBar(tsBear, tsBull, tipB)
+sUp.onBar(tsBull, tsBear, tipU)
+
+// ══════════════════════════════════════════════════════════════
+// טבלה
+// ══════════════════════════════════════════════════════════════
+tbP = tbPos == "ימין למעלה" ? position.top_right : tbPos == "ימין למטה" ? position.bottom_right : tbPos == "שמאל למעלה" ? position.top_left : position.bottom_left
+tsz = tbSize == "זעיר" ? size.tiny : tbSize == "קטן" ? size.small : size.normal
+BG  = color.new(#131722, 5)
+BGS = color.new(#2a2e39, 0)
+TXT = #d1d4dc
+DIM = #9598a1
+
+var table tb = table.new(tbP, 3, 14, border_width = 1, border_color = color.new(#363a45, 0), frame_width = 1, frame_color = color.new(#363a45, 0))
+
+f_pc(int n, int d) =>
+    d > 0 ? str.tostring(math.round(100.0 * n / d)) + "% (" + str.tostring(n) + ")" : "–"
+
+f_row(int r, string t, int i, int d) =>
+    tb.cell(2, r, t, text_color = TXT, bgcolor = BG, text_size = tsz, text_halign = text.align_right)
+    tb.cell(1, r, f_pc(stDn.get(i), stDn.get(d)), text_color = TXT, bgcolor = BG, text_size = tsz)
+    tb.cell(0, r, f_pc(stUp.get(i), stUp.get(d)), text_color = TXT, bgcolor = BG, text_size = tsz)
+    0
+
+f_sec(int r, string t) =>
+    tb.cell(0, r, t, text_color = color.white, bgcolor = BGS, text_size = tsz, text_halign = text.align_right)
+    0
+
+var bool merged = false
+if barstate.islast
+    if not merged
+        tb.merge_cells(0, 0, 2, 0)
+        tb.merge_cells(0, 3, 2, 3)
+        tb.merge_cells(0, 7, 2, 7)
+        tb.merge_cells(0, 13, 2, 13)
+        merged := true
+    string brk = TFN.get(L) + " · " + TFN.get(L1) + (has2 ? " · " + TFN.get(L2) : "")
+    tb.cell(0, 0, "QT Two-Stage · מטרה: " + SUBN.get(T) + " קודם · שבירות: " + brk, text_color = color.white, bgcolor = BGS, text_size = tsz)
+    tb.cell(2, 1, "", bgcolor = BGS, text_size = tsz)
+    tb.cell(1, 1, "▼ לגאפ מתחת", text_color = cBear, bgcolor = BGS, text_size = tsz)
+    tb.cell(0, 1, "▲ לגאפ מעל", text_color = cBull, bgcolor = BGS, text_size = tsz)
+    tb.cell(2, 2, "מחזורים עם מטרה", text_color = TXT, bgcolor = BG, text_size = tsz, text_halign = text.align_right)
+    tb.cell(1, 2, str.tostring(stDn.get(0)), text_color = TXT, bgcolor = BG, text_size = tsz)
+    tb.cell(0, 2, str.tostring(stUp.get(0)), text_color = TXT, bgcolor = BG, text_size = tsz)
+    f_sec(3, "הדרך למטרה")
+    f_row(4, "הגיע לגאפ — כללי", 1, 0)
+    f_row(5, "Two-Stage לכיוון ← הגיע", 3, 2)
+    f_row(6, "היה Two-Stage במחזור", 12, 0)
+    f_sec(7, "במטרה: Two-Stage הפוך תוך " + str.tostring(kConf) + " נרות = אישור")
+    f_row(8, "כמה פעמים היה אישור", 6, 1)
+    f_row(9, "עם אישור ← הגאפ החזיק", 7, 6)
+    f_row(10, "בלי אישור ← הגאפ החזיק", 10, 9)
+    f_row(11, "עם אישור ← לקח קיצון נגדי", 8, 6)
+    f_row(12, "בלי אישור ← לקח קיצון נגדי", 11, 9)
+    tb.cell(0, 13, "2S = Two-Stage · ⛽ = הגיע לגאפ · ⛽✓ = עם אישור", text_color = DIM, bgcolor = BG, text_size = size.tiny)
