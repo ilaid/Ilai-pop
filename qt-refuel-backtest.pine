@@ -1,0 +1,691 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0
+// QT Refuel Backtest
+// בודק את תאוריית ה"תדלוק": כל תת-מחזור חוזר לגאפ (FVG) מתת-המחזור הקודם באותו מיכל,
+// לפני או אחרי לקיחת הגבוה/נמוך של המחזור הקודם. כולל כלל N+2 והשוואה בין שני נכסים.
+//@version=6
+indicator("QT Refuel Backtest", shorttitle = "QT Refuel", overlay = true, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
+
+// ══════════════════════════════════════════════════════════════
+// הגדרות
+// ══════════════════════════════════════════════════════════════
+G1 = "מחזורים"
+G2 = "נכס שני"
+G3 = "תצוגה"
+
+lvlIn  = input.string("Auto", "רמת מחזור", options = ["Auto", "15s", "1m", "5m", "15m", "1H", "4H", "1D", "1W", "1Mo"], group = G1, tooltip = "Auto = לפי טווח הזמן של הגרף.\n15s: תת-רבע בתוך רבע · 1m: רבע בתוך מיקרו · 5m: מיקרו בתוך סשן · 15m: סשן בתוך יום · 1H: יום בתוך שבוע · 4H: שבוע בתוך חודש · 1D: רבע-רבעון בתוך רבעון · 1W: רבעון בתוך שנת QT · 1M: שנה בתוך מחזור 4 שנים")
+seedIn = input.bool(true, "זרע: Q1 בודק גאפים מה-Q4 של המיכל הקודם", group = G1, tooltip = "פעיל רק ב-15s / 1m / 5m / 1H (ב-1H: שני מול שישי). נספר בשורה נפרדת ולא נכנס לסטטיסטיקה הראשית.")
+fromT  = input.time(timestamp("01 Jan 2010 00:00 +0000"), "מתאריך", group = G1)
+toT    = input.time(timestamp("31 Dec 2099 00:00 +0000"), "עד תאריך", group = G1)
+minTk  = input.int(0, "גודל גאפ מינימלי (טיקים)", minval = 0, group = G1)
+
+sym2   = input.symbol("CME_MINI:MES1!", "נכס להשוואה", group = G2, tooltip = "על גרף NQ בחר כאן ES, ועל גרף ES בחר NQ.")
+tol    = input.int(1, "גאפ משותף: סטייה מותרת בנרות", minval = 0, maxval = 3, group = G2, tooltip = "גאפ נחשב משותף אם בנכס השני נוצר גאפ באותו כיוון באותו נר (או עד X נרות הפרש).")
+
+showBx = input.bool(true, "הצג את הגאפים שנבדקים", group = G3)
+showLv = input.bool(true, "הצג גבוה/נמוך של המחזור הקודם", group = G3)
+showX  = input.bool(true, "סמן לקיחת גבוה/נמוך (x)", group = G3)
+showLb = input.bool(true, "סמן חזרה לגאפ (↺)", group = G3)
+showTb = input.bool(true, "טבלת סטטיסטיקה", group = G3)
+tbPos  = input.string("ימין למעלה", "מיקום הטבלה", options = ["ימין למעלה", "ימין למטה", "שמאל למעלה", "שמאל למטה"], group = G3)
+tbSize = input.string("קטן", "גודל טקסט בטבלה", options = ["זעיר", "קטן", "רגיל"], group = G3)
+cBull  = input.color(#26a69a, "שורי", group = G3)
+cBear  = input.color(#ef5350, "דובי", group = G3)
+cN2    = input.color(#ab47bc, "N+2", group = G3)
+
+// ══════════════════════════════════════════════════════════════
+// קבועים
+// ══════════════════════════════════════════════════════════════
+TZ = "America/New_York"
+
+// אינדקסים במערך הסטטיסטיקה
+S_BASE  = 0    // מחזורים שנבדקו (היה גאפ זמין)
+S_NOGAP = 1    // מחזורים בלי גאפ זמין
+S_RET   = 2    // חזר לגאפ
+S_BEF   = 3    // חזר לפני לקיחת הקיצון
+S_AFT   = 4    // חזר אחרי לקיחת הקיצון
+S_SAME  = 5    // באותו נר
+S_RETNX = 6    // חזר בלי לקיחת הקיצון
+S_EXTO  = 7    // לקח קיצון בלי לחזור
+S_NONE  = 8    // לא זה ולא זה
+S_HELD  = 9    // החזיק בגאפ הראשון
+S_FLIP  = 10   // הגאפ הראשון הפך ל-IFVG ונעצר
+S_DEEP  = 11   // המשיך לגאפ עמוק יותר
+S_OPP   = 12   // הגיע לקיצון הנגדי של המחזור הקודם
+S_N2B   = 13   // N+2: בסיס
+S_N2R   = 14   // N+2: חזר
+S_SDB   = 15   // זרע: בסיס
+S_SDR   = 16   // זרע: חזר
+S_JB    = 17   // גאפים משותפים
+S_JR    = 18   // גאפים משותפים שנבדקו
+S_SB    = 19   // גאפים בנכס אחד
+S_SR    = 20   // גאפים בנכס אחד שנבדקו
+S_PB    = 21   // בסיס לפי מיקום (+pos)
+S_PR    = 25   // חזרות לפי מיקום (+pos)
+S_N     = 29
+
+// ══════════════════════════════════════════════════════════════
+// רמת המחזור
+// ══════════════════════════════════════════════════════════════
+tfS     = timeframe.in_seconds()
+autoLvl = timeframe.ismonthly ? 8 : timeframe.isweekly ? 7 : timeframe.isdaily ? 6 : tfS >= 14400 ? 5 : tfS >= 3600 ? 4 : tfS >= 900 ? 3 : tfS >= 300 ? 2 : tfS >= 60 ? 1 : 0
+lvl     = lvlIn == "Auto" ? autoLvl : array.from("15s", "1m", "5m", "15m", "1H", "4H", "1D", "1W", "1Mo").indexof(lvlIn)
+seedOn  = seedIn and (lvl <= 2 or lvl == 4)
+
+SUBN  = array.from("5.625 דק'", "22.5 דק'", "90 דק'", "סשן", "יום", "שבוע", "רבע-רבעון", "רבעון QT", "שנה")
+CONTN = array.from("22.5 דק'", "90 דק'", "סשן", "יום", "שבוע", "חודש", "רבעון QT", "שנת QT", "מחזור 4 שנים")
+
+f_posName(int p) =>
+    string r = "Q" + str.tostring(p + 1)
+    if lvl == 3
+        r := array.from("אסיה", "לונדון", "NY AM", "NY PM").get(p)
+    else if lvl == 4
+        r := array.from("שני", "שלישי", "רביעי", "חמישי").get(p)
+    else if lvl == 5
+        r := "שבוע " + str.tostring(p + 1)
+    r
+
+parts2 = str.split(sym2, ":")
+T1 = syminfo.ticker
+T2 = parts2.get(parts2.size() - 1)
+
+// ══════════════════════════════════════════════════════════════
+// תאריכים
+// ══════════════════════════════════════════════════════════════
+f_ser(int y, int m, int d) =>
+    int(math.floor(timestamp("UTC", y, m, d, 0, 0) / 86400000.0))
+f_y(int s) =>
+    year(s * 86400000, "UTC")
+f_m(int s) =>
+    month(s * 86400000, "UTC")
+f_d(int s) =>
+    dayofmonth(s * 86400000, "UTC")
+
+// יום מסחר מתחיל ב-18:00 ניו יורק
+hNY  = hour(time, TZ)
+secD = hNY * 3600 + minute(time, TZ) * 60 + second(time, TZ)
+td   = f_ser(year(time, TZ), month(time, TZ), dayofmonth(time, TZ)) + (hNY >= 18 ? 1 : 0)
+sod  = (secD - 64800 + 86400) % 86400      // שניות מתחילת יום המסחר
+dow  = (td + 4) % 7                         // 0 = ראשון, 1 = שני ... 5 = שישי
+
+// ══════════════════════════════════════════════════════════════
+// מפתח תת-מחזור, מיכל ומיקום לכל נר
+// ══════════════════════════════════════════════════════════════
+int  key     = na     // מפתח תת-המחזור (na = זמן חסום)
+int  cont    = na     // מפתח המיכל
+int  pos     = na     // מיקום בתוך המיכל 0..3 (שישי ב-1H = 4)
+bool ev      = true   // האם המחזור נבדק
+bool isSrc   = true   // האם הגאפים שלו נספרים
+int  lastPos = 3      // המיקום האחרון במיכל (לזרע)
+int  expPrev = na     // מפתח המיכל הקודם הצפוי (לזרע)
+
+if lvl == 0
+    int si = int(math.floor(sod * 2.0 / 675.0))
+    key     := td * 256 + si
+    cont    := td * 64 + int(math.floor(si / 4.0))
+    pos     := si % 4
+    expPrev := cont - 1
+else if lvl == 1
+    int qi = int(math.floor(sod / 1350.0))
+    key     := td * 64 + qi
+    cont    := td * 16 + int(math.floor(qi / 4.0))
+    pos     := qi % 4
+    expPrev := cont - 1
+else if lvl == 2
+    int mi = int(math.floor(sod / 5400.0))
+    key     := td * 16 + mi
+    cont    := td * 4 + int(math.floor(mi / 4.0))
+    pos     := mi % 4
+    expPrev := cont - 1
+else if lvl == 3
+    int se = int(math.floor(sod / 21600.0))
+    key  := td * 4 + se
+    cont := td
+    pos  := se
+else if lvl == 4
+    if dow >= 1 and dow <= 5
+        key     := td
+        cont    := td - (dow - 1)
+        pos     := dow - 1
+        ev      := dow <= 4
+        isSrc   := dow <= 4 or seedOn
+        lastPos := 4
+        expPrev := cont - 7
+else if lvl == 5
+    if dow >= 1 and dow <= 5
+        int mon = td - (dow - 1)
+        int tue = mon + 1
+        int thu = mon + 3
+        int tM  = f_m(tue)
+        int wk  = int(math.floor((f_d(tue) - 1) / 7.0)) + 1
+        bool deadWk = f_m(thu) != tM
+        if not deadWk and wk <= 4 and not (wk == 4 and dow == 5)
+            key  := mon
+            cont := f_y(tue) * 12 + tM
+            pos  := wk - 1
+else if lvl == 6
+    int dS = int(math.floor(time_tradingday / 86400000.0))
+    int y  = f_y(dS)
+    int m  = f_m(dS)
+    int qm = m >= 10 ? 10 : m >= 7 ? 7 : m >= 4 ? 4 : 1
+    int qS = f_ser(y, qm, 1)
+    int qE = qm == 10 ? f_ser(y + 1, 1, 1) : f_ser(y, qm + 3, 1)
+    int n  = qE - qS
+    int ix = dS - qS
+    int k  = 3
+    while k > 0 and math.floor(k * n / 4.0) > ix
+        k -= 1
+    cont := y * 12 + qm
+    key  := cont * 4 + k
+    pos  := k
+else if lvl == 7
+    int dS  = int(math.floor(time_tradingday / 86400000.0))
+    int dw  = (dS + 4) % 7
+    int mon = dw == 0 ? dS + 1 : dS - (dw - 1)
+    int tue = mon + 1
+    int m   = f_m(tue)
+    int y   = f_y(tue)
+    int qi  = m >= 10 ? 2 : m >= 7 ? 1 : m >= 4 ? 0 : 3
+    int qy  = m >= 4 ? y : y - 1
+    key  := qy * 4 + qi
+    cont := qy
+    pos  := qi
+else
+    int y = year(time_tradingday, "UTC")
+    key  := y
+    cont := int(math.floor((y - 2023) / 4.0))
+    pos  := ((y - 2023) % 4 + 4) % 4
+
+// ══════════════════════════════════════════════════════════════
+// נתוני הנכס השני
+// ══════════════════════════════════════════════════════════════
+[h2x, l2x, c2, hh2, ll2] = request.security(sym2, timeframe.period, [high, low, close, high[2], low[2]], gaps = barmerge.gaps_on)
+mt2 = request.security(sym2, timeframe.period, syminfo.mintick)
+var float mt2v = na
+mt2v := na(mt2) ? mt2v : mt2
+
+// ══════════════════════════════════════════════════════════════
+// טיפוסים
+// ══════════════════════════════════════════════════════════════
+type Gap
+    int   dir             // 1 = שורי, -1 = דובי
+    float top
+    float bot
+    int   sub             // מפתח תת-המחזור שבו נוצר (לפי נר 3)
+    int   bar             // bar_index של נר 3
+    bool  dead  = false   // הפך ל-IFVG (סגירה מעבר לגאפ)
+    bool  joint = false   // קיים גם בנכס השני
+    bool  av    = false   // היה זמין בתחילת המחזור הבא
+    bool  hit   = false   // נבדק במחזור הבא
+    box   bx
+
+type Cyc
+    int   key
+    int   cont
+    int   pos
+    bool  ev
+    bool  isSrc
+    int   t0
+    int   b0
+    float hi
+    float lo
+    bool  missU = false   // צד שורי: היה גאפ ולא חזר (ל-N+2)
+    bool  missD = false
+
+type Side
+    int   dir
+    bool  n2     = false
+    bool  on     = false
+    bool  seed   = false
+    bool  avail  = false
+    bool  inR    = false
+    int   pos
+    int   ref
+    float ext             // הקיצון שצריך לקחת (גבוה בשורי)
+    float opp             // הקיצון הנגדי (נמוך בשורי)
+    int   tExt
+    int   tGap
+    Gap   fg              // הגאפ הראשון שנבדק
+    bool  deeper = false
+    bool  oppHit = false
+    label lb
+
+type Eng
+    bool       isMain
+    array<Gap> gaps
+    Cyc        cur
+    Cyc        prv
+    Cyc        prv2
+    Side       su
+    Side       sd
+    Side       s2u
+    Side       s2d
+    array<int> stU
+    array<int> stD
+    Gap        newG
+    line       lnH
+    line       lnL
+    int        r1
+    int        r2
+
+f_inc(array<int> a, int i) =>
+    a.set(i, a.get(i) + 1)
+    0
+
+// ══════════════════════════════════════════════════════════════
+// צד (שורי / דובי) של בדיקת מחזור
+// ══════════════════════════════════════════════════════════════
+method off(Side this) =>
+    this.on := false
+    this.lb := na
+    0
+
+method begin(Side this, Eng e, Cyc p, bool seed, int ps, bool inRng) =>
+    this.on     := true
+    this.seed   := seed
+    this.pos    := ps
+    this.inR    := inRng
+    this.ref    := p.key
+    this.ext    := this.dir == 1 ? p.hi : p.lo
+    this.opp    := this.dir == 1 ? p.lo : p.hi
+    this.tExt   := na
+    this.tGap   := na
+    this.fg     := na
+    this.deeper := false
+    this.oppHit := false
+    this.lb     := na
+    int cnt = 0
+    for g in e.gaps
+        if g.sub == p.key and g.dir == this.dir and not g.dead
+            cnt += 1
+            if not this.n2
+                g.av  := true
+                g.hit := false
+            if e.isMain and showBx and na(g.bx)
+                color cc = g.dir == 1 ? cBull : cBear
+                g.bx := box.new(g.bar - 2, g.top, bar_index, g.bot, border_color = color.new(cc, 40), border_style = g.joint ? line.style_solid : line.style_dashed, bgcolor = color.new(cc, 88))
+    this.avail := cnt > 0
+    cnt
+
+method onBar(Side this, Eng e, float h, float l) =>
+    if this.on
+        bool bull = this.dir == 1
+        // לקיחת הקיצון של המחזור הקודם
+        if not this.n2 and na(this.tExt) and (bull ? h > this.ext : l < this.ext)
+            this.tExt := bar_index
+            if e.isMain and showX
+                label.new(bar_index, bull ? high : low, "", yloc = bull ? yloc.abovebar : yloc.belowbar, style = label.style_xcross, size = size.tiny, color = color.new(bull ? cBull : cBear, 20), tooltip = bull ? "נלקח הגבוה של המחזור הקודם" : "נלקח הנמוך של המחזור הקודם")
+        // נגיעה בגאפים של המחזור הקודם
+        Gap best = na
+        for g in e.gaps
+            if g.sub == this.ref and g.dir == this.dir and not g.dead
+                if bull ? l <= g.top : h >= g.bot
+                    if not this.n2
+                        g.hit := true
+                    if e.isMain and not na(g.bx)
+                        g.bx.set_bgcolor(color.new(bull ? cBull : cBear, 72))
+                    if na(this.tGap)
+                        if na(best)
+                            best := g
+                        else if bull ? g.top > best.top : g.bot < best.bot
+                            best := g
+                    else if bull ? g.top < this.fg.bot : g.bot > this.fg.top
+                        this.deeper := true
+        if na(this.tGap) and not na(best)
+            this.tGap := bar_index
+            this.fg   := best
+            for g in e.gaps
+                if g.sub == this.ref and g.dir == this.dir and not g.dead and (bull ? l <= g.top and g.top < best.bot : h >= g.bot and g.bot > best.top)
+                    this.deeper := true
+            if e.isMain and showLb
+                string tx  = this.n2 ? "↺2" : this.seed ? "↺S" : "↺1"
+                color  col = this.n2 ? cN2 : bull ? cBull : cBear
+                this.lb := label.new(bar_index, bull ? low : high, tx, yloc = bull ? yloc.belowbar : yloc.abovebar, style = bull ? label.style_label_up : label.style_label_down, color = col, textcolor = color.white, size = size.tiny)
+        // אחרי החזרה: הגיע לקיצון הנגדי של המחזור הקודם?
+        if not this.n2 and not na(this.tGap) and (bull ? l < this.opp : h > this.opp)
+            this.oppHit := true
+    this.on
+
+method finish(Side this, Eng e, array<int> st) =>
+    bool ret = not na(this.tGap)
+    if this.on
+        if this.inR
+            if this.n2
+                if this.avail
+                    f_inc(st, S_N2B)
+                    if ret
+                        f_inc(st, S_N2R)
+            else if this.seed
+                if this.avail
+                    f_inc(st, S_SDB)
+                    if ret
+                        f_inc(st, S_SDR)
+            else if not this.avail
+                f_inc(st, S_NOGAP)
+            else
+                bool ext = not na(this.tExt)
+                f_inc(st, S_BASE)
+                f_inc(st, S_PB + this.pos)
+                if ret
+                    f_inc(st, S_RET)
+                    f_inc(st, S_PR + this.pos)
+                    f_inc(st, not ext ? S_RETNX : this.tGap < this.tExt ? S_BEF : this.tGap > this.tExt ? S_AFT : S_SAME)
+                    f_inc(st, this.oppHit ? S_OPP : this.deeper ? S_DEEP : this.fg.dead ? S_FLIP : S_HELD)
+                else
+                    f_inc(st, ext ? S_EXTO : S_NONE)
+                for g in e.gaps
+                    if g.sub == this.ref and g.dir == this.dir and g.av
+                        f_inc(st, g.joint ? S_JB : S_SB)
+                        if g.hit
+                            f_inc(st, g.joint ? S_JR : S_SR)
+        // סימון "לא חזר" לכלל N+2
+        if not this.n2 and not this.seed
+            Cyc cc = e.cur
+            if not na(cc)
+                if this.dir == 1
+                    cc.missU := this.avail and not ret
+                else
+                    cc.missD := this.avail and not ret
+    ret
+
+// ══════════════════════════════════════════════════════════════
+// מנוע לכל נכס
+// ══════════════════════════════════════════════════════════════
+method upd(Eng this, float h, float l) =>
+    Cyc cc = this.cur
+    if not na(cc) and not na(h)
+        cc.hi := na(cc.hi) ? h : math.max(cc.hi, h)
+        cc.lo := na(cc.lo) ? l : math.min(cc.lo, l)
+    0
+
+method roll(Eng this, int ky, int ct, int ps, bool evv, bool srcv, bool inRng, int lp, int ep) =>
+    if not na(this.cur)
+        this.prv2 := this.prv
+        this.prv  := this.cur
+    if na(ky)
+        this.cur := na
+    else
+        this.cur := Cyc.new(ky, ct, ps, evv, srcv, time, bar_index)
+    this.su.off()
+    this.sd.off()
+    this.s2u.off()
+    this.s2d.off()
+    this.r1  := na
+    this.r2  := na
+    this.lnH := na
+    this.lnL := na
+    // ניקוי גאפים ישנים (שומרים רק נוכחי, קודם, ולפני-קודם)
+    int k0 = na(this.cur)  ? na : this.cur.key
+    int k1 = na(this.prv)  ? na : this.prv.key
+    int k2 = na(this.prv2) ? na : this.prv2.key
+    int n = this.gaps.size()
+    if n > 0
+        for i = n - 1 to 0
+            int sb = this.gaps.get(i).sub
+            if not (sb == k0 or sb == k1 or sb == k2)
+                this.gaps.remove(i)
+    // התחלת בדיקה מול המחזור הקודם
+    Cyc p  = this.prv
+    Cyc p2 = this.prv2
+    if not na(ky) and evv and not na(p)
+        bool normal = p.isSrc and p.cont == ct and p.pos == ps - 1
+        bool seed   = not normal and seedOn and ps == 0 and p.isSrc and p.pos == lp and p.cont == ep
+        if normal or seed
+            this.su.begin(this, p, seed, ps, inRng)
+            this.sd.begin(this, p, seed, ps, inRng)
+            this.r1 := p.key
+            if this.isMain and showLv
+                this.lnH := line.new(bar_index, p.hi, bar_index, p.hi, color = color.new(cBull, 30), style = line.style_dotted)
+                this.lnL := line.new(bar_index, p.lo, bar_index, p.lo, color = color.new(cBear, 30), style = line.style_dotted)
+        // כלל N+2
+        if normal and not na(p2)
+            if p2.isSrc and p2.cont == ct and p2.pos == ps - 2
+                if p.missU
+                    this.s2u.begin(this, p2, false, ps, inRng)
+                    this.r2 := p2.key
+                if p.missD
+                    this.s2d.begin(this, p2, false, ps, inRng)
+                    this.r2 := p2.key
+    0
+
+method gapsBar(Eng this, float h, float l, float c, float h2, float l2, float mt, int ky, bool srcv) =>
+    this.newG := na
+    // IFVG: סגירה מעבר לקצה הרחוק של הגאפ
+    for g in this.gaps
+        if not g.dead and g.bar < bar_index and (g.dir == 1 ? c < g.bot : c > g.top)
+            g.dead := true
+            if not na(g.bx)
+                g.bx.set_right(bar_index)
+                g.bx.set_bgcolor(color.new(color.gray, 90))
+                g.bx.set_border_color(color.new(color.gray, 60))
+    // גאפ חדש (שייך למחזור של נר 3)
+    if not na(this.cur) and srcv and not na(h2) and not na(l2) and not na(c)
+        float minSz = minTk * nz(mt)
+        if l > h2 and l - h2 >= minSz
+            Gap g = Gap.new(1, l, h2, ky, bar_index)
+            this.gaps.push(g)
+            this.newG := g
+        else if h < l2 and l2 - h >= minSz
+            Gap g = Gap.new(-1, l2, h, ky, bar_index)
+            this.gaps.push(g)
+            this.newG := g
+    0
+
+method extend(Eng this) =>
+    for g in this.gaps
+        if not na(g.bx) and not g.dead and (g.sub == this.r1 or g.sub == this.r2)
+            g.bx.set_right(bar_index)
+    if not na(this.lnH)
+        this.lnH.set_x2(bar_index)
+        this.lnL.set_x2(bar_index)
+    0
+
+f_newEng(bool main) =>
+    Eng.new(main, array.new<Gap>(), na, na, na, Side.new(1), Side.new(-1), Side.new(1, true), Side.new(-1, true), array.new_int(S_N, 0), array.new_int(S_N, 0))
+
+var Eng eA = f_newEng(true)
+var Eng eB = f_newEng(false)
+var array<int> crossU = array.new_int(4, 0)
+var array<int> crossD = array.new_int(4, 0)
+
+// גאפ משותף: אותו כיוון, אותו נר (± סטייה)
+f_joint(Eng a, Eng b) =>
+    Gap ng = a.newG
+    if not na(ng)
+        int n = b.gaps.size()
+        if n > 0
+            for i = n - 1 to 0
+                Gap g = b.gaps.get(i)
+                if bar_index - g.bar > tol
+                    break
+                if g.dir == ng.dir
+                    g.joint  := true
+                    ng.joint := true
+                    if not na(g.bx)
+                        g.bx.set_border_style(line.style_solid)
+    0
+
+// השוואה בין הנכסים בסוף מחזור
+f_cross(Side a, Side b, array<int> cr) =>
+    if a.on and b.on and a.avail and b.avail and a.inR and not a.seed and not a.n2
+        bool ra = not na(a.tGap)
+        bool rb = not na(b.tGap)
+        f_inc(cr, ra and rb ? 0 : ra ? 1 : rb ? 2 : 3)
+    0
+
+// פירוט בתווית (מעבר עכבר) + ◆ כשרק נכס אחד חזר
+f_tip(Side a, Side b) =>
+    bool bull = a.dir == 1
+    string hl = bull ? "הגבוה" : "הנמוך"
+    if a.on and not na(a.lb)
+        string tip = ""
+        if a.n2
+            tip := "N+2: חזר לגאפ ממחזור N אחרי שלא חזר אליו ב-N+1"
+        else
+            string whenS = na(a.tExt) ? "בלי לקיחת " + hl + " הקודם" : a.tGap < a.tExt ? "לפני לקיחת " + hl + " הקודם" : a.tGap > a.tExt ? "אחרי לקיחת " + hl + " הקודם" : "באותו נר עם לקיחת " + hl + " הקודם"
+            string lad = a.oppHit ? (bull ? "המשיך עד הנמוך הקודם" : "המשיך עד הגבוה הקודם") : a.deeper ? "המשיך לגאפ עמוק יותר" : a.fg.dead ? "הגאפ הפך ל-IFVG ונעצר" : "החזיק בגאפ"
+            string oth = not (b.on and b.avail) ? T2 + ": אין גאפ זמין" : na(b.tGap) ? T2 + ": לא חזר ◆" : T2 + ": חזר גם"
+            tip := (a.seed ? "זרע Q4→Q1" : "N+1") + " · חזרה לגאפ " + (bull ? "שורי" : "דובי") + "\n" + whenS + "\n" + lad + "\n" + oth
+            if b.on and b.avail and na(b.tGap)
+                a.lb.set_text(a.lb.get_text() + " ◆")
+        a.lb.set_tooltip(tip)
+    else if showLb and a.on and a.avail and not a.n2 and b.on and b.avail and not na(b.tGap)
+        label.new(b.tGap, bull ? low : high, "◆ " + T2, yloc = bull ? yloc.belowbar : yloc.abovebar, style = bull ? label.style_label_up : label.style_label_down, color = color.new(color.gray, 25), textcolor = color.white, size = size.tiny, tooltip = "רק " + T2 + " חזר לגאפ (" + T1 + " לא)")
+    0
+
+// ══════════════════════════════════════════════════════════════
+// לוגיקה ראשית
+// ══════════════════════════════════════════════════════════════
+bool newC = na(eA.cur) ? not na(key) : (na(key) or key != eA.cur.key)
+
+if newC
+    // סיום המחזור הקודם
+    eA.su.finish(eA, eA.stU)
+    eA.sd.finish(eA, eA.stD)
+    eA.s2u.finish(eA, eA.stU)
+    eA.s2d.finish(eA, eA.stD)
+    eB.su.finish(eB, eB.stU)
+    eB.sd.finish(eB, eB.stD)
+    eB.s2u.finish(eB, eB.stU)
+    eB.s2d.finish(eB, eB.stD)
+    f_cross(eA.su, eB.su, crossU)
+    f_cross(eA.sd, eB.sd, crossD)
+    f_tip(eA.su, eB.su)
+    f_tip(eA.sd, eB.sd)
+    f_tip(eA.s2u, eB.s2u)
+    f_tip(eA.s2d, eB.s2d)
+    // פתיחת מחזור חדש
+    bool inRange = time >= fromT and time <= toT
+    eA.roll(key, cont, pos, ev, isSrc, inRange, lastPos, expPrev)
+    eB.roll(key, cont, pos, ev, isSrc, inRange, lastPos, expPrev)
+
+// נכס הגרף
+eA.upd(high, low)
+eA.su.onBar(eA, high, low)
+eA.sd.onBar(eA, high, low)
+eA.s2u.onBar(eA, high, low)
+eA.s2d.onBar(eA, high, low)
+eA.gapsBar(high, low, close, high[2], low[2], syminfo.mintick, key, isSrc)
+
+// הנכס השני
+if not na(c2)
+    eB.upd(h2x, l2x)
+    eB.su.onBar(eB, h2x, l2x)
+    eB.sd.onBar(eB, h2x, l2x)
+    eB.s2u.onBar(eB, h2x, l2x)
+    eB.s2d.onBar(eB, h2x, l2x)
+    eB.gapsBar(h2x, l2x, c2, hh2, ll2, mt2v, key, isSrc)
+else
+    eB.newG := na
+
+f_joint(eA, eB)
+f_joint(eB, eA)
+eA.extend()
+
+// ══════════════════════════════════════════════════════════════
+// טבלה
+// ══════════════════════════════════════════════════════════════
+tbP = tbPos == "ימין למעלה" ? position.top_right : tbPos == "ימין למטה" ? position.bottom_right : tbPos == "שמאל למעלה" ? position.top_left : position.bottom_left
+tsz = tbSize == "זעיר" ? size.tiny : tbSize == "קטן" ? size.small : size.normal
+
+BG   = color.new(#131722, 5)
+BGS  = color.new(#2a2e39, 0)
+TXT  = #d1d4dc
+DIM  = #9598a1
+
+var table tb = table.new(tbP, 5, 34, border_width = 1, border_color = color.new(#363a45, 0), frame_width = 1, frame_color = color.new(#363a45, 0))
+var bool merged = false
+
+f_p(int n, int d) =>
+    d > 0 ? str.tostring(math.round(100.0 * n / d)) + "%  (" + str.tostring(n) + ")" : "–"
+
+f_lbl(int r, string t) =>
+    tb.cell(4, r, t, text_color = TXT, bgcolor = BG, text_size = tsz, text_halign = text.align_right)
+    0
+
+f_sec(int r, string t) =>
+    tb.cell(0, r, t, text_color = color.white, bgcolor = BGS, text_size = tsz, text_halign = text.align_right)
+    0
+
+f_row(int r, string t, int i, int d) =>
+    f_lbl(r, t)
+    tb.cell(3, r, f_p(eA.stU.get(i), eA.stU.get(d)), text_color = TXT, bgcolor = BG, text_size = tsz)
+    tb.cell(2, r, f_p(eA.stD.get(i), eA.stD.get(d)), text_color = TXT, bgcolor = BG, text_size = tsz)
+    tb.cell(1, r, f_p(eB.stU.get(i), eB.stU.get(d)), text_color = DIM, bgcolor = BG, text_size = tsz)
+    tb.cell(0, r, f_p(eB.stD.get(i), eB.stD.get(d)), text_color = DIM, bgcolor = BG, text_size = tsz)
+    0
+
+f_cnt(int r, string t, int i) =>
+    f_lbl(r, t)
+    tb.cell(3, r, str.tostring(eA.stU.get(i)), text_color = TXT, bgcolor = BG, text_size = tsz)
+    tb.cell(2, r, str.tostring(eA.stD.get(i)), text_color = TXT, bgcolor = BG, text_size = tsz)
+    tb.cell(1, r, str.tostring(eB.stU.get(i)), text_color = DIM, bgcolor = BG, text_size = tsz)
+    tb.cell(0, r, str.tostring(eB.stD.get(i)), text_color = DIM, bgcolor = BG, text_size = tsz)
+    0
+
+f_crossRow(int r, string t, int i) =>
+    int dU = int(crossU.sum())
+    int dD = int(crossD.sum())
+    f_lbl(r, t)
+    tb.cell(3, r, f_p(crossU.get(i), dU), text_color = TXT, bgcolor = BG, text_size = tsz)
+    tb.cell(2, r, f_p(crossD.get(i), dD), text_color = TXT, bgcolor = BG, text_size = tsz)
+    tb.cell(1, r, "", bgcolor = BG, text_size = tsz)
+    tb.cell(0, r, "", bgcolor = BG, text_size = tsz)
+    0
+
+if barstate.islast and showTb
+    if not merged
+        for r in array.from(0, 4, 12, 17, 22, 24, 32, 33)
+            tb.merge_cells(0, r, 4, r)
+        merged := true
+
+    tb.cell(0, 0, "QT Refuel  ·  מחזור: " + SUBN.get(lvl) + "  ·  מיכל: " + CONTN.get(lvl), text_color = color.white, bgcolor = BGS, text_size = tsz)
+
+    tb.cell(4, 1, "", bgcolor = BG, text_size = tsz)
+    tb.cell(3, 1, T1 + " ▲", text_color = cBull, bgcolor = BG, text_size = tsz)
+    tb.cell(2, 1, T1 + " ▼", text_color = cBear, bgcolor = BG, text_size = tsz)
+    tb.cell(1, 1, T2 + " ▲", text_color = color.new(cBull, 30), bgcolor = BG, text_size = tsz)
+    tb.cell(0, 1, T2 + " ▼", text_color = color.new(cBear, 30), bgcolor = BG, text_size = tsz)
+
+    f_cnt(2, "מחזורים שנבדקו (היה גאפ)", S_BASE)
+    f_cnt(3, "מחזורים בלי גאפ זמין", S_NOGAP)
+
+    f_sec(4, "חזרה לגאפ מהמחזור הקודם (N+1) — מתוך המחזורים שנבדקו")
+    f_row(5, "חזר לגאפ – סה״כ", S_RET, S_BASE)
+    f_row(6, "↳ חזר ואז לקח H/L", S_BEF, S_BASE)
+    f_row(7, "↳ לקח H/L ואז חזר", S_AFT, S_BASE)
+    f_row(8, "↳ באותו נר", S_SAME, S_BASE)
+    f_row(9, "↳ חזר בלי לקחת H/L", S_RETNX, S_BASE)
+    f_row(10, "לקח H/L בלי לחזור", S_EXTO, S_BASE)
+    f_row(11, "לא לקח ולא חזר", S_NONE, S_BASE)
+
+    f_sec(12, "מה קרה אחרי החזרה — מתוך החזרות")
+    f_row(13, "החזיק בגאפ הראשון", S_HELD, S_RET)
+    f_row(14, "IFVG ונעצר", S_FLIP, S_RET)
+    f_row(15, "המשיך לגאפ עמוק יותר", S_DEEP, S_RET)
+    f_row(16, "הגיע ל-L/H של המחזור הקודם", S_OPP, S_RET)
+
+    f_sec(17, "חזרה לפי מיקום במיכל")
+    f_row(18, f_posName(1) + " מול " + f_posName(0), S_PR + 1, S_PB + 1)
+    f_row(19, f_posName(2) + " מול " + f_posName(1), S_PR + 2, S_PB + 2)
+    f_row(20, f_posName(3) + " מול " + f_posName(2), S_PR + 3, S_PB + 3)
+    f_row(21, seedOn ? "זרע: Q1 מול Q4 הקודם" : "זרע: כבוי ברמה הזו", S_SDR, S_SDB)
+
+    f_sec(22, "כלל שני מחזורים")
+    f_row(23, "לא חזר ב-N+1 ← חזר ב-N+2", S_N2R, S_N2B)
+
+    f_sec(24, "ברמת הגאפ — כמה מהגאפים נבדקו במחזור הבא")
+    f_row(25, "גאפ משותף לשני הנכסים", S_JR, S_JB)
+    f_row(26, "גאפ רק בנכס אחד", S_SR, S_SB)
+
+    tb.cell(4, 27, "השוואה בין הנכסים (N+1)", text_color = color.white, bgcolor = BGS, text_size = tsz, text_halign = text.align_right)
+    tb.cell(3, 27, "▲", text_color = cBull, bgcolor = BGS, text_size = tsz)
+    tb.cell(2, 27, "▼", text_color = cBear, bgcolor = BGS, text_size = tsz)
+    tb.cell(1, 27, "", bgcolor = BGS, text_size = tsz)
+    tb.cell(0, 27, "", bgcolor = BGS, text_size = tsz)
+    f_crossRow(28, "שניהם חזרו", 0)
+    f_crossRow(29, "רק " + T1 + " חזר", 1)
+    f_crossRow(30, "רק " + T2 + " חזר", 2)
+    f_crossRow(31, "אף אחד לא חזר", 3)
+
+    tb.cell(0, 32, "▲ = לקיחת הגבוה הקודם + חזרה לגאפ שורי   ·   ▼ = לקיחת הנמוך הקודם + חזרה לגאפ דובי", text_color = DIM, bgcolor = BG, text_size = tsz)
+    tb.cell(0, 33, "↺1 = חזרה במחזור הבא   ·   ↺2 = חזרה אחרי שני מחזורים   ·   ↺S = זרע   ·   ◆ = רק נכס אחד חזר", text_color = DIM, bgcolor = BG, text_size = tsz)
