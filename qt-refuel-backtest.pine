@@ -23,9 +23,10 @@ tol    = input.int(1, "גאפ משותף: סטייה מותרת בנרות", min
 
 showBx = input.bool(true, "הצג את הגאפים שנבדקים", group = G3)
 showLv = input.bool(true, "הצג גבוה/נמוך של המחזור הקודם", group = G3)
-showX  = input.bool(true, "סמן לקיחת גבוה/נמוך (x)", group = G3)
-showLb = input.bool(true, "סמן חזרה לגאפ (↺)", group = G3)
-showTb = input.bool(true, "טבלת סטטיסטיקה", group = G3)
+showX  = input.bool(true, "סמן לקיחת גבוה/נמוך (H / L)", group = G3)
+showLb = input.bool(true, "סמן חזרה לגאפ (⛽)", group = G3)
+keepN  = input.int(4, "להציג ציורים רק ל-X מחזורים אחרונים", minval = 3, maxval = 100, group = G3, tooltip = "הסטטיסטיקה בטבלה תמיד מחושבת על כל ההיסטוריה. זה רק כדי שהגרף לא יתמלא.")
+tbMode = input.string("קומפקטית", "טבלה", options = ["קומפקטית", "מלאה", "מוסתרת"], group = G3, tooltip = "קומפקטית = רק השורות החשובות על נכס הגרף, כדי לראות גם את הגרף. מלאה = כל הפירוט ושני הנכסים.")
 tbPos  = input.string("ימין למעלה", "מיקום הטבלה", options = ["ימין למעלה", "ימין למטה", "שמאל למעלה", "שמאל למטה"], group = G3)
 tbSize = input.string("קטן", "גודל טקסט בטבלה", options = ["זעיר", "קטן", "רגיל"], group = G3)
 cBull  = input.color(#26a69a, "שורי", group = G3)
@@ -85,8 +86,29 @@ f_posName(int p) =>
     r
 
 parts2 = str.split(sym2, ":")
-T1 = syminfo.ticker
-T2 = parts2.get(parts2.size() - 1)
+T1 = str.replace_all(syminfo.ticker, "1!", "")
+T2 = str.replace_all(parts2.get(parts2.size() - 1), "1!", "")
+
+// רישום ציורים כדי למחוק ציורים של מחזורים ישנים
+var int cycN = 0
+var array<label> dL  = array.new<label>()
+var array<int>   dLc = array.new<int>()
+var array<box>   dB  = array.new<box>()
+var array<int>   dBc = array.new<int>()
+var array<line>  dN  = array.new<line>()
+var array<int>   dNc = array.new<int>()
+f_rl(label x) =>
+    dL.push(x)
+    dLc.push(cycN)
+    x
+f_rb(box x) =>
+    dB.push(x)
+    dBc.push(cycN)
+    x
+f_rn(line x) =>
+    dN.push(x)
+    dNc.push(cycN)
+    x
 
 // ══════════════════════════════════════════════════════════════
 // תאריכים
@@ -302,7 +324,7 @@ method begin(Side this, Eng e, Cyc p, bool seed, int ps, bool inRng) =>
                 g.hit := false
             if e.isMain and showBx and na(g.bx)
                 color cc = g.dir == 1 ? cBull : cBear
-                g.bx := box.new(g.bar - 2, g.top, bar_index, g.bot, border_color = color.new(cc, 40), border_style = g.joint ? line.style_solid : line.style_dashed, bgcolor = color.new(cc, 88))
+                g.bx := f_rb(box.new(g.bar - 2, g.top, bar_index, g.bot, border_color = color.new(cc, 40), border_style = g.joint ? line.style_solid : line.style_dashed, bgcolor = color.new(cc, 88)))
     this.avail := cnt > 0
     cnt
 
@@ -313,7 +335,7 @@ method onBar(Side this, Eng e, float h, float l) =>
         if not this.n2 and na(this.tExt) and (bull ? h > this.ext : l < this.ext)
             this.tExt := bar_index
             if e.isMain and showX
-                label.new(bar_index, bull ? high : low, "", yloc = bull ? yloc.abovebar : yloc.belowbar, style = label.style_xcross, size = size.tiny, color = color.new(bull ? cBull : cBear, 20), tooltip = bull ? "נלקח הגבוה של המחזור הקודם" : "נלקח הנמוך של המחזור הקודם")
+                f_rl(label.new(bar_index, bull ? high : low, bull ? "H" : "L", yloc = bull ? yloc.abovebar : yloc.belowbar, style = label.style_none, textcolor = bull ? cBull : cBear, size = size.normal, tooltip = bull ? "כאן נלקח הגבוה של המחזור הקודם" : "כאן נלקח הנמוך של המחזור הקודם"))
         // נגיעה בגאפים של המחזור הקודם
         Gap best = na
         for g in e.gaps
@@ -337,9 +359,9 @@ method onBar(Side this, Eng e, float h, float l) =>
                 if g.sub == this.ref and g.dir == this.dir and not g.dead and (bull ? l <= g.top and g.top < best.bot : h >= g.bot and g.bot > best.top)
                     this.deeper := true
             if e.isMain and showLb
-                string tx  = this.n2 ? "↺2" : this.seed ? "↺S" : "↺1"
+                string tx  = this.n2 ? "⛽2" : this.seed ? "⛽S" : "⛽"
                 color  col = this.n2 ? cN2 : bull ? cBull : cBear
-                this.lb := label.new(bar_index, bull ? low : high, tx, yloc = bull ? yloc.belowbar : yloc.abovebar, style = bull ? label.style_label_up : label.style_label_down, color = col, textcolor = color.white, size = size.tiny)
+                this.lb := f_rl(label.new(bar_index, bull ? low : high, tx, yloc = bull ? yloc.belowbar : yloc.abovebar, style = bull ? label.style_label_up : label.style_label_down, color = col, textcolor = color.white, size = size.small))
         // אחרי החזרה: הגיע לקיצון הנגדי של המחזור הקודם?
         if not this.n2 and not na(this.tGap) and (bull ? l < this.opp : h > this.opp)
             this.oppHit := true
@@ -434,8 +456,10 @@ method roll(Eng this, int ky, int ct, int ps, bool evv, bool srcv, bool inRng, i
             this.sd.begin(this, p, seed, ps, inRng)
             this.r1 := p.key
             if this.isMain and showLv
-                this.lnH := line.new(bar_index, p.hi, bar_index, p.hi, color = color.new(cBull, 30), style = line.style_dotted)
-                this.lnL := line.new(bar_index, p.lo, bar_index, p.lo, color = color.new(cBear, 30), style = line.style_dotted)
+                this.lnH := f_rn(line.new(bar_index, p.hi, bar_index, p.hi, color = color.new(cBull, 30), style = line.style_dotted))
+                this.lnL := f_rn(line.new(bar_index, p.lo, bar_index, p.lo, color = color.new(cBear, 30), style = line.style_dotted))
+                f_rl(label.new(bar_index, p.hi, "H קודם", style = label.style_label_lower_left, color = color.new(color.black, 100), textcolor = color.new(cBull, 20), size = size.tiny))
+                f_rl(label.new(bar_index, p.lo, "L קודם", style = label.style_label_upper_left, color = color.new(color.black, 100), textcolor = color.new(cBear, 20), size = size.tiny))
         // כלל N+2
         if normal and not na(p2)
             if p2.isSrc and p2.cont == ct and p2.pos == ps - 2
@@ -512,7 +536,7 @@ f_cross(Side a, Side b, array<int> cr) =>
         f_inc(cr, ra and rb ? 0 : ra ? 1 : rb ? 2 : 3)
     0
 
-// פירוט בתווית (מעבר עכבר) + ◆ כשרק נכס אחד חזר
+// פירוט בתווית (מעבר עכבר) + סימון כשרק נכס אחד חזר
 f_tip(Side a, Side b) =>
     bool bull = a.dir == 1
     string hl = bull ? "הגבוה" : "הנמוך"
@@ -523,13 +547,13 @@ f_tip(Side a, Side b) =>
         else
             string whenS = na(a.tExt) ? "בלי לקיחת " + hl + " הקודם" : a.tGap < a.tExt ? "לפני לקיחת " + hl + " הקודם" : a.tGap > a.tExt ? "אחרי לקיחת " + hl + " הקודם" : "באותו נר עם לקיחת " + hl + " הקודם"
             string lad = a.oppHit ? (bull ? "המשיך עד הנמוך הקודם" : "המשיך עד הגבוה הקודם") : a.deeper ? "המשיך לגאפ עמוק יותר" : a.fg.dead ? "הגאפ הפך ל-IFVG ונעצר" : "החזיק בגאפ"
-            string oth = not (b.on and b.avail) ? T2 + ": אין גאפ זמין" : na(b.tGap) ? T2 + ": לא חזר ◆" : T2 + ": חזר גם"
+            string oth = not (b.on and b.avail) ? T2 + ": אין גאפ זמין" : na(b.tGap) ? T2 + ": לא חזר" : T2 + ": חזר גם"
             tip := (a.seed ? "זרע Q4→Q1" : "N+1") + " · חזרה לגאפ " + (bull ? "שורי" : "דובי") + "\n" + whenS + "\n" + lad + "\n" + oth
             if b.on and b.avail and na(b.tGap)
-                a.lb.set_text(a.lb.get_text() + " ◆")
+                a.lb.set_text(a.lb.get_text() + " רק " + T1)
         a.lb.set_tooltip(tip)
     else if showLb and a.on and a.avail and not a.n2 and b.on and b.avail and not na(b.tGap)
-        label.new(b.tGap, bull ? low : high, "◆ " + T2, yloc = bull ? yloc.belowbar : yloc.abovebar, style = bull ? label.style_label_up : label.style_label_down, color = color.new(color.gray, 25), textcolor = color.white, size = size.tiny, tooltip = "רק " + T2 + " חזר לגאפ (" + T1 + " לא)")
+        f_rl(label.new(b.tGap, bull ? low : high, "⛽ רק " + T2, yloc = bull ? yloc.belowbar : yloc.abovebar, style = bull ? label.style_label_up : label.style_label_down, color = color.new(color.gray, 25), textcolor = color.white, size = size.small, tooltip = "רק " + T2 + " חזר לגאפ (" + T1 + " לא)"))
     0
 
 // ══════════════════════════════════════════════════════════════
@@ -555,6 +579,17 @@ if newC
     f_tip(eA.s2d, eB.s2d)
     // פתיחת מחזור חדש
     bool inRange = time >= fromT and time <= toT
+    if not na(key)
+        cycN += 1
+    while dLc.size() > 0 and dLc.first() < cycN - keepN + 1
+        label.delete(dL.shift())
+        dLc.shift()
+    while dBc.size() > 0 and dBc.first() < cycN - keepN + 1
+        box.delete(dB.shift())
+        dBc.shift()
+    while dNc.size() > 0 and dNc.first() < cycN - keepN + 1
+        line.delete(dN.shift())
+        dNc.shift()
     eA.roll(key, cont, pos, ev, isSrc, inRange, lastPos, expPrev)
     eB.roll(key, cont, pos, ev, isSrc, inRange, lastPos, expPrev)
 
@@ -592,7 +627,7 @@ BGS  = color.new(#2a2e39, 0)
 TXT  = #d1d4dc
 DIM  = #9598a1
 
-var table tb = table.new(tbP, 5, 34, border_width = 1, border_color = color.new(#363a45, 0), frame_width = 1, frame_color = color.new(#363a45, 0))
+var table tb = table.new(tbP, tbMode == "מלאה" ? 5 : 3, tbMode == "מלאה" ? 34 : 13, border_width = 1, border_color = color.new(#363a45, 0), frame_width = 1, frame_color = color.new(#363a45, 0))
 var bool merged = false
 
 f_p(int n, int d) =>
@@ -632,7 +667,54 @@ f_crossRow(int r, string t, int i) =>
     tb.cell(0, r, "", bgcolor = BG, text_size = tsz)
     0
 
-if barstate.islast and showTb
+// ── טבלה קומפקטית: רק נכס הגרף, רק אחוזים
+f_pc(int n, int d) =>
+    d > 0 ? str.tostring(math.round(100.0 * n / d)) + "%" : "–"
+
+f_cRow(int r, string t, string vU, string vD) =>
+    tb.cell(2, r, t, text_color = TXT, bgcolor = BG, text_size = tsz, text_halign = text.align_right)
+    tb.cell(1, r, vU, text_color = TXT, bgcolor = BG, text_size = tsz)
+    tb.cell(0, r, vD, text_color = TXT, bgcolor = BG, text_size = tsz)
+    0
+
+f_cPct(int r, string t, int i, int d) =>
+    f_cRow(r, t, f_pc(eA.stU.get(i), eA.stU.get(d)), f_pc(eA.stD.get(i), eA.stD.get(d)))
+
+f_best() =>
+    string nm = "–"
+    float bp = -1.0
+    for p = 1 to 3
+        int b0 = eA.stU.get(S_PB + p) + eA.stD.get(S_PB + p)
+        int r0 = eA.stU.get(S_PR + p) + eA.stD.get(S_PR + p)
+        if b0 > 0 and float(r0) / b0 > bp
+            bp := float(r0) / b0
+            nm := f_posName(p) + " " + str.tostring(math.round(100 * bp)) + "%"
+    nm
+
+if barstate.islast and tbMode == "קומפקטית"
+    if not merged
+        tb.merge_cells(0, 0, 2, 0)
+        tb.merge_cells(0, 11, 1, 11)
+        tb.merge_cells(0, 12, 2, 12)
+        merged := true
+    tb.cell(0, 0, "QT Refuel  ·  " + SUBN.get(lvl) + " מול " + SUBN.get(lvl) + " קודם  ·  " + T1, text_color = color.white, bgcolor = BGS, text_size = tsz)
+    tb.cell(2, 1, "", bgcolor = BGS, text_size = tsz)
+    tb.cell(1, 1, "▲ שורי", text_color = cBull, bgcolor = BGS, text_size = tsz)
+    tb.cell(0, 1, "▼ דובי", text_color = cBear, bgcolor = BGS, text_size = tsz)
+    f_cRow(2, "מחזורים שנבדקו", str.tostring(eA.stU.get(S_BASE)), str.tostring(eA.stD.get(S_BASE)))
+    f_cPct(3, "⛽ חזר לגאפ", S_RET, S_BASE)
+    f_cPct(4, "   חזר ואז לקח H/L", S_BEF, S_BASE)
+    f_cPct(5, "   לקח H/L ואז חזר", S_AFT, S_BASE)
+    f_cPct(6, "   חזר בלי לקחת H/L", S_RETNX, S_BASE)
+    f_cPct(7, "הגאפ הראשון הספיק", S_HELD, S_RET)
+    f_cPct(8, "המשיך עד הקיצון הנגדי", S_OPP, S_RET)
+    f_cPct(9, "⛽2 פספס ← חזר ב-N+2", S_N2R, S_N2B)
+    f_cRow(10, "שני הנכסים חזרו", f_pc(crossU.get(0), int(crossU.sum())), f_pc(crossD.get(0), int(crossD.sum())))
+    tb.cell(2, 11, "הכי אמין", text_color = TXT, bgcolor = BG, text_size = tsz, text_halign = text.align_right)
+    tb.cell(0, 11, f_best(), text_color = color.white, bgcolor = BG, text_size = tsz)
+    tb.cell(0, 12, "⛽ חזר לגאפ  ·  H / L = נלקח הגבוה/נמוך הקודם  ·  מלבן = גאפ שנבדק (מקווקו = רק בנכס אחד, אפור = IFVG)", text_color = DIM, bgcolor = BG, text_size = size.tiny)
+
+if barstate.islast and tbMode == "מלאה"
     if not merged
         for r in array.from(0, 4, 12, 17, 22, 24, 32, 33)
             tb.merge_cells(0, r, 4, r)
@@ -688,4 +770,4 @@ if barstate.islast and showTb
     f_crossRow(31, "אף אחד לא חזר", 3)
 
     tb.cell(0, 32, "▲ = לקיחת הגבוה הקודם + חזרה לגאפ שורי   ·   ▼ = לקיחת הנמוך הקודם + חזרה לגאפ דובי", text_color = DIM, bgcolor = BG, text_size = tsz)
-    tb.cell(0, 33, "↺1 = חזרה במחזור הבא   ·   ↺2 = חזרה אחרי שני מחזורים   ·   ↺S = זרע   ·   ◆ = רק נכס אחד חזר", text_color = DIM, bgcolor = BG, text_size = tsz)
+    tb.cell(0, 33, "⛽ = חזרה במחזור הבא   ·   ⛽2 = חזרה אחרי שני מחזורים   ·   ⛽S = זרע   ·   H / L = נלקח הקיצון הקודם", text_color = DIM, bgcolor = BG, text_size = tsz)
