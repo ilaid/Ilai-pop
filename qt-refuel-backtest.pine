@@ -62,7 +62,10 @@ S_SB    = 19   // גאפים בנכס אחד
 S_SR    = 20   // גאפים בנכס אחד שנבדקו
 S_PB    = 21   // בסיס לפי מיקום (+pos)
 S_PR    = 25   // חזרות לפי מיקום (+pos)
-S_N     = 29
+S_CB    = 29   // ביקורת: מחזורים שיש בהם גם גאפ קודם וגם גאפ מלפני 2
+S_CA    = 30   // ביקורת: חזר לגאפ של המחזור הקודם
+S_CR    = 31   // ביקורת: נגע בגאפ מלפני 2 מחזורים
+S_N     = 32
 
 // ══════════════════════════════════════════════════════════════
 // רמת המחזור
@@ -270,6 +273,7 @@ type Side
     bool  deeper = false
     bool  oppHit = false
     label lb
+    bool  ctl    = false   // צד ביקורת (גאפים מלפני 2 מחזורים)
 
 type Eng
     bool       isMain
@@ -288,6 +292,8 @@ type Eng
     line       lnL
     int        r1
     int        r2
+    Side       scu
+    Side       scd
 
 f_inc(array<int> a, int i) =>
     a.set(i, a.get(i) + 1)
@@ -322,7 +328,7 @@ method begin(Side this, Eng e, Cyc p, bool seed, int ps, bool inRng) =>
             if not this.n2
                 g.av  := true
                 g.hit := false
-            if e.isMain and showBx and na(g.bx)
+            if e.isMain and showBx and na(g.bx) and not this.ctl
                 color cc = g.dir == 1 ? cBull : cBear
                 g.bx := f_rb(box.new(g.bar - 2, g.top, bar_index, g.bot, border_color = color.new(cc, 40), border_style = g.joint ? line.style_solid : line.style_dashed, bgcolor = color.new(cc, 88)))
     this.avail := cnt > 0
@@ -343,7 +349,7 @@ method onBar(Side this, Eng e, float h, float l) =>
                 if bull ? l <= g.top : h >= g.bot
                     if not this.n2
                         g.hit := true
-                    if e.isMain and not na(g.bx)
+                    if e.isMain and not na(g.bx) and not this.ctl
                         g.bx.set_bgcolor(color.new(bull ? cBull : cBear, 72))
                     if na(this.tGap)
                         if na(best)
@@ -358,7 +364,7 @@ method onBar(Side this, Eng e, float h, float l) =>
             for g in e.gaps
                 if g.sub == this.ref and g.dir == this.dir and not g.dead and (bull ? l <= g.top and g.top < best.bot : h >= g.bot and g.bot > best.top)
                     this.deeper := true
-            if e.isMain and showLb
+            if e.isMain and showLb and not this.ctl
                 string tx  = this.n2 ? "⛽2" : this.seed ? "⛽S" : "⛽"
                 color  col = this.n2 ? cN2 : bull ? cBull : cBear
                 this.lb := f_rl(label.new(bar_index, bull ? low : high, tx, yloc = bull ? yloc.belowbar : yloc.abovebar, style = bull ? label.style_label_up : label.style_label_down, color = col, textcolor = color.white, size = size.small))
@@ -369,7 +375,7 @@ method onBar(Side this, Eng e, float h, float l) =>
 
 method finish(Side this, Eng e, array<int> st) =>
     bool ret = not na(this.tGap)
-    if this.on
+    if this.on and not this.ctl
         if this.inR
             if this.n2
                 if this.avail
@@ -431,6 +437,8 @@ method roll(Eng this, int ky, int ct, int ps, bool evv, bool srcv, bool inRng, i
     this.sd.off()
     this.s2u.off()
     this.s2d.off()
+    this.scu.off()
+    this.scd.off()
     this.r1  := na
     this.r2  := na
     this.lnH := na
@@ -460,9 +468,11 @@ method roll(Eng this, int ky, int ct, int ps, bool evv, bool srcv, bool inRng, i
                 this.lnL := f_rn(line.new(bar_index, p.lo, bar_index, p.lo, color = color.new(cBear, 30), style = line.style_dotted))
                 f_rl(label.new(bar_index, p.hi, "H קודם", style = label.style_label_lower_left, color = color.new(color.black, 100), textcolor = color.new(cBull, 20), size = size.tiny))
                 f_rl(label.new(bar_index, p.lo, "L קודם", style = label.style_label_upper_left, color = color.new(color.black, 100), textcolor = color.new(cBear, 20), size = size.tiny))
-        // כלל N+2
+        // כלל N+2 + ביקורת
         if normal and not na(p2)
             if p2.isSrc and p2.cont == ct and p2.pos == ps - 2
+                this.scu.begin(this, p2, false, ps, inRng)
+                this.scd.begin(this, p2, false, ps, inRng)
                 if p.missU
                     this.s2u.begin(this, p2, false, ps, inRng)
                     this.r2 := p2.key
@@ -504,7 +514,7 @@ method extend(Eng this) =>
     0
 
 f_newEng(bool main) =>
-    Eng.new(main, array.new<Gap>(), na, na, na, Side.new(1), Side.new(-1), Side.new(1, true), Side.new(-1, true), array.new_int(S_N, 0), array.new_int(S_N, 0))
+    Eng.new(main, array.new<Gap>(), na, na, na, Side.new(1), Side.new(-1), Side.new(1, true), Side.new(-1, true), array.new_int(S_N, 0), array.new_int(S_N, 0), na, na, na, na, na, Side.new(dir = 1, n2 = true, ctl = true), Side.new(dir = -1, n2 = true, ctl = true))
 
 var Eng eA = f_newEng(true)
 var Eng eB = f_newEng(false)
@@ -534,6 +544,16 @@ f_cross(Side a, Side b, array<int> cr) =>
         bool ra = not na(a.tGap)
         bool rb = not na(b.tGap)
         f_inc(cr, ra and rb ? 0 : ra ? 1 : rb ? 2 : 3)
+    0
+
+// ביקורת: על אותם מחזורים, גאפ מהמחזור הקודם מול גאפ מלפני 2 מחזורים
+f_ctl(Side a, Side c, array<int> st) =>
+    if a.on and c.on and a.avail and c.avail and a.inR and not a.seed
+        f_inc(st, S_CB)
+        if not na(a.tGap)
+            f_inc(st, S_CA)
+        if not na(c.tGap)
+            f_inc(st, S_CR)
     0
 
 // פירוט בתווית (מעבר עכבר) + סימון כשרק נכס אחד חזר
@@ -571,6 +591,10 @@ if newC
     eB.sd.finish(eB, eB.stD)
     eB.s2u.finish(eB, eB.stU)
     eB.s2d.finish(eB, eB.stD)
+    f_ctl(eA.su, eA.scu, eA.stU)
+    f_ctl(eA.sd, eA.scd, eA.stD)
+    f_ctl(eB.su, eB.scu, eB.stU)
+    f_ctl(eB.sd, eB.scd, eB.stD)
     f_cross(eA.su, eB.su, crossU)
     f_cross(eA.sd, eB.sd, crossD)
     f_tip(eA.su, eB.su)
@@ -599,6 +623,8 @@ eA.su.onBar(eA, high, low)
 eA.sd.onBar(eA, high, low)
 eA.s2u.onBar(eA, high, low)
 eA.s2d.onBar(eA, high, low)
+eA.scu.onBar(eA, high, low)
+eA.scd.onBar(eA, high, low)
 eA.gapsBar(high, low, close, high[2], low[2], syminfo.mintick, key, isSrc)
 
 // הנכס השני
@@ -608,6 +634,8 @@ if not na(c2)
     eB.sd.onBar(eB, h2x, l2x)
     eB.s2u.onBar(eB, h2x, l2x)
     eB.s2d.onBar(eB, h2x, l2x)
+    eB.scu.onBar(eB, h2x, l2x)
+    eB.scd.onBar(eB, h2x, l2x)
     eB.gapsBar(h2x, l2x, c2, hh2, ll2, mt2v, key, isSrc)
 else
     eB.newG := na
@@ -627,7 +655,7 @@ BGS  = color.new(#2a2e39, 0)
 TXT  = #d1d4dc
 DIM  = #9598a1
 
-var table tb = table.new(tbP, tbMode == "מלאה" ? 5 : 3, tbMode == "מלאה" ? 34 : 13, border_width = 1, border_color = color.new(#363a45, 0), frame_width = 1, frame_color = color.new(#363a45, 0))
+var table tb = table.new(tbP, tbMode == "מלאה" ? 5 : 3, tbMode == "מלאה" ? 38 : 16, border_width = 1, border_color = color.new(#363a45, 0), frame_width = 1, frame_color = color.new(#363a45, 0))
 var bool merged = false
 
 f_p(int n, int d) =>
@@ -694,8 +722,9 @@ f_best() =>
 if barstate.islast and tbMode == "קומפקטית"
     if not merged
         tb.merge_cells(0, 0, 2, 0)
-        tb.merge_cells(0, 11, 1, 11)
-        tb.merge_cells(0, 12, 2, 12)
+        tb.merge_cells(0, 7, 2, 7)
+        tb.merge_cells(0, 14, 1, 14)
+        tb.merge_cells(0, 15, 2, 15)
         merged := true
     tb.cell(0, 0, "QT Refuel  ·  " + SUBN.get(lvl) + " מול " + SUBN.get(lvl) + " קודם  ·  " + T1, text_color = color.white, bgcolor = BGS, text_size = tsz)
     tb.cell(2, 1, "", bgcolor = BGS, text_size = tsz)
@@ -706,17 +735,20 @@ if barstate.islast and tbMode == "קומפקטית"
     f_cPct(4, "   חזר ואז לקח H/L", S_BEF, S_BASE)
     f_cPct(5, "   לקח H/L ואז חזר", S_AFT, S_BASE)
     f_cPct(6, "   חזר בלי לקחת H/L", S_RETNX, S_BASE)
-    f_cPct(7, "הגאפ הראשון הספיק", S_HELD, S_RET)
-    f_cPct(8, "המשיך עד הקיצון הנגדי", S_OPP, S_RET)
-    f_cPct(9, "⛽2 פספס ← חזר ב-N+2", S_N2R, S_N2B)
-    f_cRow(10, "שני הנכסים חזרו", f_pc(crossU.get(0), int(crossU.sum())), f_pc(crossD.get(0), int(crossD.sum())))
-    tb.cell(2, 11, "הכי אמין", text_color = TXT, bgcolor = BG, text_size = tsz, text_halign = text.align_right)
-    tb.cell(0, 11, f_best(), text_color = color.white, bgcolor = BG, text_size = tsz)
-    tb.cell(0, 12, "⛽ חזר לגאפ  ·  H / L = נלקח הגבוה/נמוך הקודם  ·  מלבן = גאפ שנבדק (מקווקו = רק בנכס אחד, אפור = IFVG)", text_color = DIM, bgcolor = BG, text_size = size.tiny)
+    tb.cell(0, 7, "ביקורת — על אותם מחזורים בדיוק:", text_color = color.white, bgcolor = BGS, text_size = tsz, text_halign = text.align_right)
+    f_cPct(8, "   נגע בגאפ מהמחזור הקודם", S_CA, S_CB)
+    f_cPct(9, "   נגע בגאפ מלפני 2 מחזורים", S_CR, S_CB)
+    f_cPct(10, "הגאפ הראשון הספיק", S_HELD, S_RET)
+    f_cPct(11, "המשיך עד הקיצון הנגדי", S_OPP, S_RET)
+    f_cPct(12, "⛽2 פספס ← חזר ב-N+2", S_N2R, S_N2B)
+    f_cRow(13, "שני הנכסים חזרו", f_pc(crossU.get(0), int(crossU.sum())), f_pc(crossD.get(0), int(crossD.sum())))
+    tb.cell(2, 14, "הכי אמין", text_color = TXT, bgcolor = BG, text_size = tsz, text_halign = text.align_right)
+    tb.cell(0, 14, f_best(), text_color = color.white, bgcolor = BG, text_size = tsz)
+    tb.cell(0, 15, "⛽ חזר לגאפ  ·  H / L = נלקח הגבוה/נמוך הקודם  ·  מלבן = גאפ שנבדק (מקווקו = רק בנכס אחד, אפור = IFVG)", text_color = DIM, bgcolor = BG, text_size = size.tiny)
 
 if barstate.islast and tbMode == "מלאה"
     if not merged
-        for r in array.from(0, 4, 12, 17, 22, 24, 32, 33)
+        for r in array.from(0, 4, 12, 17, 22, 24, 32, 36, 37)
             tb.merge_cells(0, r, 4, r)
         merged := true
 
@@ -769,5 +801,9 @@ if barstate.islast and tbMode == "מלאה"
     f_crossRow(30, "רק " + T2 + " חזר", 2)
     f_crossRow(31, "אף אחד לא חזר", 3)
 
-    tb.cell(0, 32, "▲ = לקיחת הגבוה הקודם + חזרה לגאפ שורי   ·   ▼ = לקיחת הנמוך הקודם + חזרה לגאפ דובי", text_color = DIM, bgcolor = BG, text_size = tsz)
-    tb.cell(0, 33, "⛽ = חזרה במחזור הבא   ·   ⛽2 = חזרה אחרי שני מחזורים   ·   ⛽S = זרע   ·   H / L = נלקח הקיצון הקודם", text_color = DIM, bgcolor = BG, text_size = tsz)
+    f_sec(32, "ביקורת — על אותם מחזורים: גאפ מהמחזור הקודם מול גאפ מלפני 2 מחזורים")
+    f_cnt(33, "מחזורים בביקורת", S_CB)
+    f_row(34, "נגע בגאפ מהמחזור הקודם", S_CA, S_CB)
+    f_row(35, "נגע בגאפ מלפני 2 מחזורים", S_CR, S_CB)
+    tb.cell(0, 36, "▲ = לקיחת הגבוה הקודם + חזרה לגאפ שורי   ·   ▼ = לקיחת הנמוך הקודם + חזרה לגאפ דובי", text_color = DIM, bgcolor = BG, text_size = tsz)
+    tb.cell(0, 37, "⛽ = חזרה במחזור הבא   ·   ⛽2 = חזרה אחרי שני מחזורים   ·   ⛽S = זרע   ·   H / L = נלקח הקיצון הקודם", text_color = DIM, bgcolor = BG, text_size = tsz)
