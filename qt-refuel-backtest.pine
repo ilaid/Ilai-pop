@@ -16,7 +16,12 @@ lvlIn  = input.string("Auto", "רמת מחזור", options = ["Auto", "15s", "1m
 seedIn = input.bool(true, "זרע: Q1 בודק גאפים מה-Q4 של המיכל הקודם", group = G1, tooltip = "פעיל רק ב-15s / 1m / 5m / 1H (ב-1H: שני מול שישי). נספר בשורה נפרדת ולא נכנס לסטטיסטיקה הראשית.")
 fromT  = input.time(timestamp("01 Jan 2010 00:00 +0000"), "מתאריך", group = G1)
 toT    = input.time(timestamp("31 Dec 2099 00:00 +0000"), "עד תאריך", group = G1)
-minTk  = input.int(0, "גודל גאפ מינימלי (טיקים)", minval = 0, group = G1)
+GG = "הגדרת גאפ (זהה ל-SSMT Fill)"
+fvgOn        = input.bool(true, "זהה FVG (שלושה נרות)", group = GG)
+volImbOn     = input.bool(true, "זהה VI — גאפ סגירה/פתיחה בין שני נרות", group = GG)
+extendBodies = input.bool(true, "הרחב גאפים לגופי הנרות", group = GG)
+viMinTicks   = input.int(4, "VI לבד — מינימום טיקים", minval = 1, maxval = 100, group = GG)
+viMergeTicks = input.int(1, "הרחבה — מינימום טיקים", minval = 1, maxval = 100, group = GG)
 
 sym2   = input.symbol("CME_MINI:MES1!", "נכס להשוואה", group = G2, tooltip = "על גרף NQ בחר כאן ES, ועל גרף ES בחר NQ.")
 tol    = input.int(1, "גאפ משותף: סטייה מותרת בנרות", minval = 0, maxval = 3, group = G2, tooltip = "גאפ נחשב משותף אם בנכס השני נוצר גאפ באותו כיוון באותו נר (או עד X נרות הפרש).")
@@ -199,9 +204,7 @@ else if lvl == 6
     int qE = qm == 10 ? f_ser(y + 1, 1, 1) : f_ser(y, qm + 3, 1)
     int n  = qE - qS
     int ix = dS - qS
-    int k  = 3
-    while k > 0 and math.floor(k * n / 4.0) > ix
-        k -= 1
+    int k  = math.max(0, math.min(3, int(math.floor(ix * 4.0 / n))))
     cont := y * 12 + qm
     key  := cont * 4 + k
     pos  := k
@@ -254,7 +257,7 @@ else if lvl >= 6
 // ══════════════════════════════════════════════════════════════
 // נתוני הנכס השני
 // ══════════════════════════════════════════════════════════════
-[h2x, l2x, c2, hh2, ll2] = request.security(sym2, timeframe.period, [high, low, close, high[2], low[2]], gaps = barmerge.gaps_on)
+[o2x, h2x, l2x, c2, o21, c21, hh2, ll2, c22, o22] = request.security(sym2, timeframe.period, [open, high, low, close, open[1], close[1], high[2], low[2], close[2], open[2]], gaps = barmerge.gaps_on)
 mt2 = request.security(sym2, timeframe.period, syminfo.mintick)
 var float mt2v = na
 mt2v := na(mt2) ? mt2v : mt2
@@ -266,13 +269,14 @@ type Gap
     int   dir             // 1 = שורי, -1 = דובי
     float top
     float bot
-    int   sub             // מפתח תת-המחזור שבו נוצר (לפי נר 3)
+    int   sub             // תת-המחזור של הנר האמצעי (כמו SSMT Fill)
     int   bar             // bar_index של נר 3
     bool  dead  = false   // הפך ל-IFVG (סגירה מעבר לגאפ)
     bool  joint = false   // קיים גם בנכס השני
     bool  av    = false   // היה זמין בתחילת המחזור הבא
     bool  hit   = false   // נבדק במחזור הבא
     box   bx
+    int   org             // הנר הראשון של הגאפ — משם מתחילה הקופסה
 
 type Cyc
     int   key
@@ -400,7 +404,7 @@ method begin(Side this, Eng e, Cyc p, bool seed, int ps, bool inRng) =>
                 g.hit := false
             if e.isMain and showBx and na(g.bx) and not this.ctl
                 color cc = g.dir == 1 ? cBull : cBear
-                g.bx := f_rb(box.new(g.bar - 2, g.top, bar_index, g.bot, border_color = color.new(cc, 40), border_style = g.joint ? line.style_solid : line.style_dashed, bgcolor = color.new(cc, 88)))
+                g.bx := f_rb(box.new(nz(g.org, g.bar - 2), g.top, bar_index, g.bot, border_color = color.new(cc, 40), border_style = g.joint ? line.style_solid : line.style_dashed, bgcolor = color.new(cc, 88)))
     this.avail := cnt > 0
     cnt
 
@@ -424,7 +428,7 @@ method onBar(Side this, Eng e, float h, float l, float c) =>
         // נגיעה בגאפים של המחזור הקודם
         Gap best = na
         for g in e.gaps
-            if g.sub == this.ref and g.dir == this.dir and not g.dead
+            if g.sub == this.ref and g.dir == this.dir and not g.dead and g.bar < bar_index
                 if bull ? l <= g.top : h >= g.bot
                     if not this.n2
                         g.hit := true
@@ -441,7 +445,7 @@ method onBar(Side this, Eng e, float h, float l, float c) =>
             this.tGap := bar_index
             this.fg   := best
             for g in e.gaps
-                if g.sub == this.ref and g.dir == this.dir and not g.dead and (bull ? l <= g.top and g.top < best.bot : h >= g.bot and g.bot > best.top)
+                if g.sub == this.ref and g.dir == this.dir and not g.dead and g.bar < bar_index and (bull ? l <= g.top and g.top < best.bot : h >= g.bot and g.bot > best.top)
                     this.deeper := true
             if e.isMain and showLb and not this.ctl
                 string tx  = this.n2 ? "⛽2" : this.seed ? "⛽S" : "⛽"
@@ -616,27 +620,64 @@ method trgBar(Eng this, float h, float l, int tk) =>
             this.tuLoBar := bar_index
     0
 
-method gapsBar(Eng this, float h, float l, float c, float h2, float l2, float mt, int ky, bool srcv) =>
+// רגל של גאפ — העתק של f_leg מ-SSMT Fill. נרות: 1 = (o2,h2,l2,c2) · 2 = (o1,c1) · 3 = (o0,h0,l0,c0)
+f_leg(int d, bool ok, float o0, float h0, float l0, float c0, float o1, float c1, float h2, float l2, float cX2, float o2, float tk, bool edge) =>
+    float b  = na
+    float t  = na
+    int   ti = math.round(math.abs(o0 - c1) / tk)
+    int   pi = math.round(math.abs(o1 - cX2) / tk)
+    bool  f  = fvgOn and ok and (d == 1 ? l0 > h2 : h0 < l2)
+    bool  r  = ok and (d == 1 ? (o0 > c1 and (edge or (c1 > o1 and c0 > o0))) : (o0 < c1 and (edge or (c1 < o1 and c0 < o0))))
+    bool  m  = extendBodies and r and ti >= viMergeTicks
+    bool  p  = extendBodies and pi >= viMergeTicks and (d == 1 ? (o1 > cX2 and cX2 > o2 and c1 > o1) : (o1 < cX2 and cX2 < o2 and c1 < o1))
+    bool  v  = volImbOn and r and ti >= viMinTicks
+    if f
+        if d == 1
+            b := (extendBodies and o1 > h2 and pi >= viMergeTicks) ? cX2 : h2
+            t := (extendBodies and l0 > c1 and ti >= viMergeTicks) ? o0 : l0
+            if p
+                b := math.min(b, cX2)
+        else
+            t := (extendBodies and o1 < l2 and pi >= viMergeTicks) ? cX2 : l2
+            b := (extendBodies and h0 < c1 and ti >= viMergeTicks) ? o0 : h0
+            if p
+                t := math.max(t, cX2)
+    if (f and m) or (v and (not f or extendBodies))
+        if d == 1
+            b := na(b) ? c1 : math.min(b, c1)
+            t := na(t) ? o0 : math.max(t, o0)
+        else
+            t := na(t) ? c1 : math.max(t, c1)
+            b := na(b) ? o0 : math.min(b, o0)
+    [b, t, f, m, v]
+
+// גאפ חדש — רץ לפני החלפת המחזור. FVG שייך לתת-המחזור של הנר האמצעי;
+// גאפ שכולו VI, או גאפ מעבר שפותח תת-מחזור, שייך לתת-המחזור שהוא פותח.
+method gapsNew(Eng this, float o0, float h0, float l0, float c0, float o1, float c1, float h2, float l2, float cX2, float o2, float tk, int kNow, int kPrev, bool sNow, bool sPrev) =>
     this.newG := na
-    // IFVG: סגירה מעבר לקצה הרחוק של הגאפ
+    bool ok   = not na(c0) and not na(o1) and not na(h2) and not na(o2)
+    bool edge = na(kPrev) or kNow != kPrev
+    for d in array.from(1, -1)
+        [b, t, f, m, v] = f_leg(d, ok, o0, h0, l0, c0, o1, c1, h2, l2, cX2, o2, tk, edge)
+        if not na(t) and not na(b) and t > b
+            bool tagNow = (edge and m) or not f
+            int  gk = tagNow ? kNow : kPrev
+            bool gs = tagNow ? sNow : sPrev
+            if not na(gk) and gs
+                Gap g = Gap.new(dir = d, top = t, bot = b, sub = gk, bar = bar_index, org = f ? bar_index - 2 : bar_index - 1)
+                this.gaps.push(g)
+                this.newG := g
+    0
+
+// IFVG: סגירה מעבר לקצה הרחוק של הגאפ
+method gapsBar(Eng this, float c) =>
     for g in this.gaps
-        if not g.dead and g.bar < bar_index and (g.dir == 1 ? c < g.bot : c > g.top)
+        if not g.dead and g.bar < bar_index and not na(c) and (g.dir == 1 ? c < g.bot : c > g.top)
             g.dead := true
             if not na(g.bx)
                 g.bx.set_right(bar_index)
                 g.bx.set_bgcolor(color.new(color.gray, 90))
                 g.bx.set_border_color(color.new(color.gray, 60))
-    // גאפ חדש (שייך למחזור של נר 3)
-    if not na(this.cur) and srcv and not na(h2) and not na(l2) and not na(c)
-        float minSz = minTk * nz(mt)
-        if l > h2 and l - h2 >= minSz
-            Gap g = Gap.new(1, l, h2, ky, bar_index)
-            this.gaps.push(g)
-            this.newG := g
-        else if h < l2 and l2 - h >= minSz
-            Gap g = Gap.new(-1, l2, h, ky, bar_index)
-            this.gaps.push(g)
-            this.newG := g
     0
 
 method extend(Eng this) =>
@@ -753,6 +794,15 @@ f_tip(Side a, Side b) =>
 // ══════════════════════════════════════════════════════════════
 // לוגיקה ראשית
 // ══════════════════════════════════════════════════════════════
+// גאפים חדשים — לפני החלפת המחזור, כדי שגאפ של הנר האמצעי ייכנס למחזור הקודם
+int  keyP = key[1]
+bool srcP = isSrc[1]
+eA.gapsNew(open, high, low, close, open[1], close[1], high[2], low[2], close[2], open[2], syminfo.mintick, key, keyP, isSrc, srcP)
+if not na(c2)
+    eB.gapsNew(o2x, h2x, l2x, c2, o21, c21, hh2, ll2, c22, o22, nz(mt2v, syminfo.mintick), key, keyP, isSrc, srcP)
+else
+    eB.newG := na
+
 bool newC = na(eA.cur) ? not na(key) : (na(key) or key != eA.cur.key)
 
 if newC
@@ -802,7 +852,7 @@ eA.s2u.onBar(eA, high, low, close)
 eA.s2d.onBar(eA, high, low, close)
 eA.scu.onBar(eA, high, low, close)
 eA.scd.onBar(eA, high, low, close)
-eA.gapsBar(high, low, close, high[2], low[2], syminfo.mintick, key, isSrc)
+eA.gapsBar(close)
 
 // הנכס השני
 if not na(c2)
@@ -814,9 +864,7 @@ if not na(c2)
     eB.s2d.onBar(eB, h2x, l2x, c2)
     eB.scu.onBar(eB, h2x, l2x, c2)
     eB.scd.onBar(eB, h2x, l2x, c2)
-    eB.gapsBar(h2x, l2x, c2, hh2, ll2, mt2v, key, isSrc)
-else
-    eB.newG := na
+    eB.gapsBar(c2)
 
 // טריגר רק בנכס השני
 if showTr and not na(c2)
