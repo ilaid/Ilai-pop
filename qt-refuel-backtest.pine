@@ -588,7 +588,7 @@ method roll(Eng this, int ky, int ct, int ps, bool evv, bool srcv, bool inRng, i
 
 method trgBar(Eng this, float h, float l, int tk) =>
     if not na(tk) and not na(h)
-        if tk != this.tuKey
+        if na(this.tuKey) or tk != this.tuKey
             if not na(this.tuKey)
                 this.tpHi    := this.tuHi
                 this.tpLo    := this.tuLo
