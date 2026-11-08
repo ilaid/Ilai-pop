@@ -65,7 +65,8 @@ S_PR    = 25   // חזרות לפי מיקום (+pos)
 S_CB    = 29   // ביקורת: מחזורים שיש בהם גם גאפ קודם וגם גאפ מלפני 2
 S_CA    = 30   // ביקורת: חזר לגאפ של המחזור הקודם
 S_CR    = 31   // ביקורת: נגע בגאפ מלפני 2 מחזורים
-S_N     = 32
+S_RX50  = 32   // תגובה של חצי מטווח המחזור הקודם ומעלה
+S_N     = 33
 
 // ══════════════════════════════════════════════════════════════
 // רמת המחזור
@@ -253,6 +254,8 @@ type Cyc
     int   b0
     float hi
     float lo
+    int   hiBar
+    int   loBar
     bool  missU = false   // צד שורי: היה גאפ ולא חזר (ל-N+2)
     bool  missD = false
 
@@ -274,6 +277,11 @@ type Side
     bool  oppHit = false
     label lb
     bool  ctl    = false   // צד ביקורת (גאפים מלפני 2 מחזורים)
+    float rng                // טווח המחזור הקודם
+    float rxEx               // הקיצון של התגובה אחרי החזרה
+    bool  rxStop = false
+    float rxPct              // התגובה כאחוז מהטווח
+    float rxPts              // התגובה בנקודות
 
 type Eng
     bool       isMain
@@ -294,10 +302,22 @@ type Eng
     int        r2
     Side       scu
     Side       scd
+    bool       hStop = false
+    bool       lStop = false
+    float      sumU  = 0.0
+    float      sumD  = 0.0
 
 f_inc(array<int> a, int i) =>
     a.set(i, a.get(i) + 1)
     0
+
+f_prevName(Side s) =>
+    string r = ""
+    if s.seed
+        r := lvl == 4 ? "שישי" : f_posName(3)
+    else
+        r := f_posName(s.pos - 1)
+    r
 
 // ══════════════════════════════════════════════════════════════
 // צד (שורי / דובי) של בדיקת מחזור
@@ -321,6 +341,11 @@ method begin(Side this, Eng e, Cyc p, bool seed, int ps, bool inRng) =>
     this.deeper := false
     this.oppHit := false
     this.lb     := na
+    this.rng    := p.hi - p.lo
+    this.rxEx   := na
+    this.rxStop := false
+    this.rxPct  := na
+    this.rxPts  := na
     int cnt = 0
     for g in e.gaps
         if g.sub == p.key and g.dir == this.dir and not g.dead
@@ -334,14 +359,23 @@ method begin(Side this, Eng e, Cyc p, bool seed, int ps, bool inRng) =>
     this.avail := cnt > 0
     cnt
 
-method onBar(Side this, Eng e, float h, float l) =>
+method onBar(Side this, Eng e, float h, float l, float c) =>
     if this.on
         bool bull = this.dir == 1
         // לקיחת הקיצון של המחזור הקודם
         if not this.n2 and na(this.tExt) and (bull ? h > this.ext : l < this.ext)
             this.tExt := bar_index
-            if e.isMain and showX
-                f_rl(label.new(bar_index, bull ? high : low, bull ? "H" : "L", yloc = bull ? yloc.abovebar : yloc.belowbar, style = label.style_none, textcolor = bull ? cBull : cBear, size = size.normal, tooltip = bull ? "כאן נלקח הגבוה של המחזור הקודם" : "כאן נלקח הנמוך של המחזור הקודם"))
+            if e.isMain
+                if showX
+                    f_rl(label.new(bar_index, bull ? high : low, "✕ " + (bull ? "H " : "L ") + f_prevName(this), yloc = bull ? yloc.abovebar : yloc.belowbar, style = label.style_none, textcolor = bull ? cBull : cBear, size = size.small, tooltip = "בנר הזה נלקח " + (bull ? "הגבוה" : "הנמוך") + " של " + f_prevName(this)))
+                if bull and not na(e.lnH)
+                    e.lnH.set_x2(bar_index)
+                    e.lnH.set_style(line.style_solid)
+                    e.hStop := true
+                if not bull and not na(e.lnL)
+                    e.lnL.set_x2(bar_index)
+                    e.lnL.set_style(line.style_solid)
+                    e.lStop := true
         // נגיעה בגאפים של המחזור הקודם
         Gap best = na
         for g in e.gaps
@@ -371,10 +405,22 @@ method onBar(Side this, Eng e, float h, float l) =>
         // אחרי החזרה: הגיע לקיצון הנגדי של המחזור הקודם?
         if not this.n2 and not na(this.tGap) and (bull ? l < this.opp : h > this.opp)
             this.oppHit := true
+        // תגובה מהגאפ: התנועה הכי רחוקה לטובה עד שהגאפ נשבר או שהמחזור נגמר
+        if not this.n2 and not na(this.tGap) and not this.rxStop
+            if this.fg.dead
+                this.rxStop := true
+            else if this.tGap == bar_index
+                this.rxEx := c
+            else
+                this.rxEx := bull ? math.max(this.rxEx, h) : math.min(this.rxEx, l)
     this.on
 
 method finish(Side this, Eng e, array<int> st) =>
     bool ret = not na(this.tGap)
+    if this.on and not this.ctl and not this.n2 and ret
+        float mv = na(this.rxEx) ? 0.0 : math.max(0.0, this.dir == 1 ? this.rxEx - this.fg.top : this.fg.bot - this.rxEx)
+        this.rxPts := mv
+        this.rxPct := this.rng > 0 ? 100.0 * mv / this.rng : 0.0
     if this.on and not this.ctl
         if this.inR
             if this.n2
@@ -398,6 +444,12 @@ method finish(Side this, Eng e, array<int> st) =>
                     f_inc(st, S_PR + this.pos)
                     f_inc(st, not ext ? S_RETNX : this.tGap < this.tExt ? S_BEF : this.tGap > this.tExt ? S_AFT : S_SAME)
                     f_inc(st, this.oppHit ? S_OPP : this.deeper ? S_DEEP : this.fg.dead ? S_FLIP : S_HELD)
+                    if this.rxPct >= 50
+                        f_inc(st, S_RX50)
+                    if this.dir == 1
+                        e.sumU := e.sumU + nz(this.rxPct)
+                    else
+                        e.sumD := e.sumD + nz(this.rxPct)
                 else
                     f_inc(st, ext ? S_EXTO : S_NONE)
                 for g in e.gaps
@@ -421,8 +473,12 @@ method finish(Side this, Eng e, array<int> st) =>
 method upd(Eng this, float h, float l) =>
     Cyc cc = this.cur
     if not na(cc) and not na(h)
-        cc.hi := na(cc.hi) ? h : math.max(cc.hi, h)
-        cc.lo := na(cc.lo) ? l : math.min(cc.lo, l)
+        if na(cc.hi) or h > cc.hi
+            cc.hi    := h
+            cc.hiBar := bar_index
+        if na(cc.lo) or l < cc.lo
+            cc.lo    := l
+            cc.loBar := bar_index
     0
 
 method roll(Eng this, int ky, int ct, int ps, bool evv, bool srcv, bool inRng, int lp, int ep) =>
@@ -443,6 +499,8 @@ method roll(Eng this, int ky, int ct, int ps, bool evv, bool srcv, bool inRng, i
     this.r2  := na
     this.lnH := na
     this.lnL := na
+    this.hStop := false
+    this.lStop := false
     // ניקוי גאפים ישנים (שומרים רק נוכחי, קודם, ולפני-קודם)
     int k0 = na(this.cur)  ? na : this.cur.key
     int k1 = na(this.prv)  ? na : this.prv.key
@@ -464,10 +522,8 @@ method roll(Eng this, int ky, int ct, int ps, bool evv, bool srcv, bool inRng, i
             this.sd.begin(this, p, seed, ps, inRng)
             this.r1 := p.key
             if this.isMain and showLv
-                this.lnH := f_rn(line.new(bar_index, p.hi, bar_index, p.hi, color = color.new(cBull, 30), style = line.style_dotted))
-                this.lnL := f_rn(line.new(bar_index, p.lo, bar_index, p.lo, color = color.new(cBear, 30), style = line.style_dotted))
-                f_rl(label.new(bar_index, p.hi, "H קודם", style = label.style_label_lower_left, color = color.new(color.black, 100), textcolor = color.new(cBull, 20), size = size.tiny))
-                f_rl(label.new(bar_index, p.lo, "L קודם", style = label.style_label_upper_left, color = color.new(color.black, 100), textcolor = color.new(cBear, 20), size = size.tiny))
+                this.lnH := f_rn(line.new(nz(p.hiBar, bar_index), p.hi, bar_index, p.hi, color = color.new(cBull, 20), style = line.style_dotted))
+                this.lnL := f_rn(line.new(nz(p.loBar, bar_index), p.lo, bar_index, p.lo, color = color.new(cBear, 20), style = line.style_dotted))
         // כלל N+2 + ביקורת
         if normal and not na(p2)
             if p2.isSrc and p2.cont == ct and p2.pos == ps - 2
@@ -508,8 +564,9 @@ method extend(Eng this) =>
     for g in this.gaps
         if not na(g.bx) and not g.dead and (g.sub == this.r1 or g.sub == this.r2)
             g.bx.set_right(bar_index)
-    if not na(this.lnH)
+    if not na(this.lnH) and not this.hStop
         this.lnH.set_x2(bar_index)
+    if not na(this.lnL) and not this.lStop
         this.lnL.set_x2(bar_index)
     0
 
@@ -568,7 +625,9 @@ f_tip(Side a, Side b) =>
             string whenS = na(a.tExt) ? "בלי לקיחת " + hl + " הקודם" : a.tGap < a.tExt ? "לפני לקיחת " + hl + " הקודם" : a.tGap > a.tExt ? "אחרי לקיחת " + hl + " הקודם" : "באותו נר עם לקיחת " + hl + " הקודם"
             string lad = a.oppHit ? (bull ? "המשיך עד הנמוך הקודם" : "המשיך עד הגבוה הקודם") : a.deeper ? "המשיך לגאפ עמוק יותר" : a.fg.dead ? "הגאפ הפך ל-IFVG ונעצר" : "החזיק בגאפ"
             string oth = not (b.on and b.avail) ? T2 + ": אין גאפ זמין" : na(b.tGap) ? T2 + ": לא חזר" : T2 + ": חזר גם"
-            tip := (a.seed ? "זרע Q4→Q1" : "N+1") + " · חזרה לגאפ " + (bull ? "שורי" : "דובי") + "\n" + whenS + "\n" + lad + "\n" + oth
+            string rx = "תגובה: " + str.tostring(nz(a.rxPts), format.mintick) + " נק' = " + str.tostring(math.round(nz(a.rxPct))) + "% מהטווח של " + f_prevName(a)
+            tip := (a.seed ? "זרע Q4→Q1" : "N+1") + " · חזרה לגאפ " + (bull ? "שורי" : "דובי") + "\n" + whenS + "\n" + rx + "\n" + lad + "\n" + oth
+            a.lb.set_text(a.lb.get_text() + " " + str.tostring(math.round(nz(a.rxPct))) + "%")
             if b.on and b.avail and na(b.tGap)
                 a.lb.set_text(a.lb.get_text() + " רק " + T1)
         a.lb.set_tooltip(tip)
@@ -619,23 +678,23 @@ if newC
 
 // נכס הגרף
 eA.upd(high, low)
-eA.su.onBar(eA, high, low)
-eA.sd.onBar(eA, high, low)
-eA.s2u.onBar(eA, high, low)
-eA.s2d.onBar(eA, high, low)
-eA.scu.onBar(eA, high, low)
-eA.scd.onBar(eA, high, low)
+eA.su.onBar(eA, high, low, close)
+eA.sd.onBar(eA, high, low, close)
+eA.s2u.onBar(eA, high, low, close)
+eA.s2d.onBar(eA, high, low, close)
+eA.scu.onBar(eA, high, low, close)
+eA.scd.onBar(eA, high, low, close)
 eA.gapsBar(high, low, close, high[2], low[2], syminfo.mintick, key, isSrc)
 
 // הנכס השני
 if not na(c2)
     eB.upd(h2x, l2x)
-    eB.su.onBar(eB, h2x, l2x)
-    eB.sd.onBar(eB, h2x, l2x)
-    eB.s2u.onBar(eB, h2x, l2x)
-    eB.s2d.onBar(eB, h2x, l2x)
-    eB.scu.onBar(eB, h2x, l2x)
-    eB.scd.onBar(eB, h2x, l2x)
+    eB.su.onBar(eB, h2x, l2x, c2)
+    eB.sd.onBar(eB, h2x, l2x, c2)
+    eB.s2u.onBar(eB, h2x, l2x, c2)
+    eB.s2d.onBar(eB, h2x, l2x, c2)
+    eB.scu.onBar(eB, h2x, l2x, c2)
+    eB.scd.onBar(eB, h2x, l2x, c2)
     eB.gapsBar(h2x, l2x, c2, hh2, ll2, mt2v, key, isSrc)
 else
     eB.newG := na
@@ -655,7 +714,7 @@ BGS  = color.new(#2a2e39, 0)
 TXT  = #d1d4dc
 DIM  = #9598a1
 
-var table tb = table.new(tbP, tbMode == "מלאה" ? 5 : 3, tbMode == "מלאה" ? 38 : 15, border_width = 1, border_color = color.new(#363a45, 0), frame_width = 1, frame_color = color.new(#363a45, 0))
+var table tb = table.new(tbP, tbMode == "מלאה" ? 5 : 3, tbMode == "מלאה" ? 41 : 17, border_width = 1, border_color = color.new(#363a45, 0), frame_width = 1, frame_color = color.new(#363a45, 0))
 var bool merged = false
 
 f_p(int n, int d) =>
@@ -708,6 +767,9 @@ f_cRow(int r, string t, string vU, string vD) =>
 f_cPct(int r, string t, int i, int d) =>
     f_cRow(r, t, f_pc(eA.stU.get(i), eA.stU.get(d)), f_pc(eA.stD.get(i), eA.stD.get(d)))
 
+f_avg(float sm, int n) =>
+    n > 0 ? str.tostring(math.round(sm / n)) + "%" : "–"
+
 f_best() =>
     string nm = "–"
     float bp = -1.0
@@ -722,8 +784,8 @@ f_best() =>
 if barstate.islast and tbMode == "קומפקטית"
     if not merged
         tb.merge_cells(0, 0, 2, 0)
-        tb.merge_cells(0, 11, 1, 11)
-        tb.merge_cells(0, 12, 2, 12)
+        tb.merge_cells(0, 13, 1, 13)
+        tb.merge_cells(0, 14, 2, 14)
         merged := true
     tb.cell(0, 0, "QT · " + SUBN.get(lvl) + " · " + T1, text_color = color.white, bgcolor = BGS, text_size = tsz, tooltip = "⛽ = חזר לגאפ\nH / L = נלקח הגבוה/נמוך הקודם\nמלבן = גאפ שנבדק (מקווקו = רק בנכס אחד, אפור = IFVG)")
     tb.cell(2, 1, "", bgcolor = BGS, text_size = tsz)
@@ -734,19 +796,21 @@ if barstate.islast and tbMode == "קומפקטית"
     f_cPct(4, "↳ ואז H/L", S_BEF, S_BASE)
     f_cPct(5, "↳ אחרי H/L", S_AFT, S_BASE)
     f_cPct(6, "↳ בלי H/L", S_RETNX, S_BASE)
-    f_cPct(7, "גאפ 1 הספיק", S_HELD, S_RET)
-    f_cPct(8, "עד הקיצון הנגדי", S_OPP, S_RET)
-    f_cPct(9, "⛽2 (N+2)", S_N2R, S_N2B)
-    f_cRow(10, "שניהם חזרו", f_pc(crossU.get(0), int(crossU.sum())), f_pc(crossD.get(0), int(crossD.sum())))
-    tb.cell(2, 11, "הכי אמין", text_color = TXT, bgcolor = BG, text_size = tsz, text_halign = text.align_right)
-    tb.cell(0, 11, f_best(), text_color = color.white, bgcolor = BG, text_size = tsz)
-    tb.cell(0, 12, "ביקורת (אותם מחזורים)", text_color = color.white, bgcolor = BGS, text_size = tsz, text_halign = text.align_right)
-    f_cPct(13, "גאפ קודם", S_CA, S_CB)
-    f_cPct(14, "גאפ לפני 2", S_CR, S_CB)
+    f_cRow(7, "תגובה ממוצעת", f_avg(eA.sumU, eA.stU.get(S_RET)), f_avg(eA.sumD, eA.stD.get(S_RET)))
+    f_cPct(8, "תגובה ≥ חצי טווח", S_RX50, S_RET)
+    f_cPct(9, "גאפ 1 הספיק", S_HELD, S_RET)
+    f_cPct(10, "עד הקיצון הנגדי", S_OPP, S_RET)
+    f_cPct(11, "⛽2 (N+2)", S_N2R, S_N2B)
+    f_cRow(12, "שניהם חזרו", f_pc(crossU.get(0), int(crossU.sum())), f_pc(crossD.get(0), int(crossD.sum())))
+    tb.cell(2, 13, "הכי אמין", text_color = TXT, bgcolor = BG, text_size = tsz, text_halign = text.align_right)
+    tb.cell(0, 13, f_best(), text_color = color.white, bgcolor = BG, text_size = tsz)
+    tb.cell(0, 14, "ביקורת (אותם מחזורים)", text_color = color.white, bgcolor = BGS, text_size = tsz, text_halign = text.align_right)
+    f_cPct(15, "גאפ קודם", S_CA, S_CB)
+    f_cPct(16, "גאפ לפני 2", S_CR, S_CB)
 
 if barstate.islast and tbMode == "מלאה"
     if not merged
-        for r in array.from(0, 4, 12, 17, 22, 24, 32, 36, 37)
+        for r in array.from(0, 4, 12, 17, 22, 24, 32, 36, 39, 40)
             tb.merge_cells(0, r, 4, r)
         merged := true
 
@@ -803,5 +867,12 @@ if barstate.islast and tbMode == "מלאה"
     f_cnt(33, "מחזורים בביקורת", S_CB)
     f_row(34, "נגע בגאפ מהמחזור הקודם", S_CA, S_CB)
     f_row(35, "נגע בגאפ מלפני 2 מחזורים", S_CR, S_CB)
-    tb.cell(0, 36, "▲ = לקיחת הגבוה הקודם + חזרה לגאפ שורי   ·   ▼ = לקיחת הנמוך הקודם + חזרה לגאפ דובי", text_color = DIM, bgcolor = BG, text_size = tsz)
-    tb.cell(0, 37, "⛽ = חזרה במחזור הבא   ·   ⛽2 = חזרה אחרי שני מחזורים   ·   ⛽S = זרע   ·   H / L = נלקח הקיצון הקודם", text_color = DIM, bgcolor = BG, text_size = tsz)
+    f_sec(36, "תגובה מהגאפ — התנועה לטובה כאחוז מטווח המחזור הקודם")
+    f_lbl(37, "תגובה ממוצעת")
+    tb.cell(3, 37, f_avg(eA.sumU, eA.stU.get(S_RET)), text_color = TXT, bgcolor = BG, text_size = tsz)
+    tb.cell(2, 37, f_avg(eA.sumD, eA.stD.get(S_RET)), text_color = TXT, bgcolor = BG, text_size = tsz)
+    tb.cell(1, 37, f_avg(eB.sumU, eB.stU.get(S_RET)), text_color = DIM, bgcolor = BG, text_size = tsz)
+    tb.cell(0, 37, f_avg(eB.sumD, eB.stD.get(S_RET)), text_color = DIM, bgcolor = BG, text_size = tsz)
+    f_row(38, "תגובה ≥ חצי טווח", S_RX50, S_RET)
+    tb.cell(0, 39, "▲ = לקיחת הגבוה הקודם + חזרה לגאפ שורי   ·   ▼ = לקיחת הנמוך הקודם + חזרה לגאפ דובי", text_color = DIM, bgcolor = BG, text_size = tsz)
+    tb.cell(0, 40, "⛽ = חזרה במחזור הבא   ·   ⛽2 = חזרה אחרי שני מחזורים   ·   ⛽S = זרע   ·   H / L = נלקח הקיצון הקודם", text_color = DIM, bgcolor = BG, text_size = tsz)
