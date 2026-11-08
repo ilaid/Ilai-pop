@@ -32,6 +32,8 @@ tbSize = input.string("קטן", "גודל טקסט בטבלה", options = ["זע
 cBull  = input.color(#26a69a, "שורי", group = G3)
 cBear  = input.color(#ef5350, "דובי", group = G3)
 cN2    = input.color(#ab47bc, "N+2", group = G3)
+showTr = input.bool(true, "סמן טריגר If-Then (⚡)", group = G3)
+cTrg   = input.color(#ff9800, "טריגר If-Then", group = G3)
 
 // ══════════════════════════════════════════════════════════════
 // קבועים
@@ -222,6 +224,34 @@ else
     pos  := ((y - 2023) % 4 + 4) % 4
 
 // ══════════════════════════════════════════════════════════════
+// If-Then: יחידת הטריגר = מדרגה אחת מתחת לרמת המחזור (רציפה, בלי מיכלים וחסימות)
+// ══════════════════════════════════════════════════════════════
+TRGN = array.from("–", "5.625 דק'", "22.5 דק'", "90 דק'", "סשן", "יום", "שבוע", "חודש", "רבעון QT")
+int tuk = na
+if lvl == 1
+    tuk := td * 256 + int(math.floor(sod * 2.0 / 675.0))
+else if lvl == 2
+    tuk := td * 64 + int(math.floor(sod / 1350.0))
+else if lvl == 3
+    tuk := td * 16 + int(math.floor(sod / 5400.0))
+else if lvl == 4
+    tuk := td * 4 + int(math.floor(sod / 21600.0))
+else if lvl == 5
+    tuk := td
+else if lvl >= 6
+    int dS2 = int(math.floor(time_tradingday / 86400000.0))
+    int dw2 = (dS2 + 4) % 7
+    int mo2 = dw2 == 0 ? dS2 + 1 : dS2 - (dw2 - 1)
+    if lvl == 6
+        tuk := mo2
+    else if lvl == 7
+        tuk := f_y(mo2 + 1) * 12 + f_m(mo2 + 1)
+    else
+        int m2 = f_m(dS2)
+        int y2 = f_y(dS2)
+        tuk := (m2 >= 4 ? y2 : y2 - 1) * 4 + (m2 >= 10 ? 2 : m2 >= 7 ? 1 : m2 >= 4 ? 0 : 3)
+
+// ══════════════════════════════════════════════════════════════
 // נתוני הנכס השני
 // ══════════════════════════════════════════════════════════════
 [h2x, l2x, c2, hh2, ll2] = request.security(sym2, timeframe.period, [high, low, close, high[2], low[2]], gaps = barmerge.gaps_on)
@@ -282,6 +312,8 @@ type Side
     bool  rxStop = false
     float rxPct              // התגובה כאחוז מהטווח
     float rxPts              // התגובה בנקודות
+    int   tOpp               // הנר הראשון שלקח את הקיצון הנגדי (מטרה)
+    string itTxt = ""
 
 type Eng
     bool       isMain
@@ -306,6 +338,17 @@ type Eng
     bool       lStop = false
     float      sumU  = 0.0
     float      sumD  = 0.0
+    int        tuKey
+    float      tuHi
+    float      tuLo
+    int        tuHiBar
+    int        tuLoBar
+    float      tpHi
+    float      tpLo
+    int        tpHiBar
+    int        tpLoBar
+    int        trgH          // הנר הראשון במחזור שלקח H של יחידת הטריגר הקודמת
+    int        trgL
 
 f_inc(array<int> a, int i) =>
     a.set(i, a.get(i) + 1)
@@ -346,6 +389,8 @@ method begin(Side this, Eng e, Cyc p, bool seed, int ps, bool inRng) =>
     this.rxStop := false
     this.rxPct  := na
     this.rxPts  := na
+    this.tOpp   := na
+    this.itTxt  := ""
     int cnt = 0
     for g in e.gaps
         if g.sub == p.key and g.dir == this.dir and not g.dead
@@ -405,6 +450,8 @@ method onBar(Side this, Eng e, float h, float l, float c) =>
         // אחרי החזרה: הגיע לקיצון הנגדי של המחזור הקודם?
         if not this.n2 and not na(this.tGap) and (bull ? l < this.opp : h > this.opp)
             this.oppHit := true
+        if not this.n2 and na(this.tOpp) and (bull ? l < this.opp : h > this.opp)
+            this.tOpp := bar_index
         // תגובה מהגאפ: התנועה הכי רחוקה לטובה עד שהגאפ נשבר או שהמחזור נגמר
         if not this.n2 and not na(this.tGap) and not this.rxStop
             if this.fg.dead
@@ -500,6 +547,8 @@ method roll(Eng this, int ky, int ct, int ps, bool evv, bool srcv, bool inRng, i
     this.lnH := na
     this.lnL := na
     this.hStop := false
+    this.trgH  := na
+    this.trgL  := na
     this.lStop := false
     // ניקוי גאפים ישנים (שומרים רק נוכחי, קודם, ולפני-קודם)
     int k0 = na(this.cur)  ? na : this.cur.key
@@ -535,6 +584,36 @@ method roll(Eng this, int ky, int ct, int ps, bool evv, bool srcv, bool inRng, i
                 if p.missD
                     this.s2d.begin(this, p2, false, ps, inRng)
                     this.r2 := p2.key
+    0
+
+method trgBar(Eng this, float h, float l, int tk) =>
+    if not na(tk) and not na(h)
+        if tk != this.tuKey
+            if not na(this.tuKey)
+                this.tpHi    := this.tuHi
+                this.tpLo    := this.tuLo
+                this.tpHiBar := this.tuHiBar
+                this.tpLoBar := this.tuLoBar
+            this.tuKey   := tk
+            this.tuHi    := na
+            this.tuLo    := na
+        string nm = TRGN.get(lvl)
+        if this.su.on and na(this.trgH) and not na(this.tpHi) and h > this.tpHi
+            this.trgH := bar_index
+            if this.isMain and showTr
+                f_rn(line.new(nz(this.tpHiBar, bar_index), this.tpHi, bar_index, this.tpHi, color = cTrg, width = 2))
+                f_rl(label.new(bar_index, h, "⚡ H " + nm, yloc = yloc.abovebar, style = label.style_none, textcolor = cTrg, size = size.small, tooltip = "If-Then: נלקח הגבוה של ה" + nm + " הקודם ← מצפים לרדת לגאפ / לנמוך"))
+        if this.sd.on and na(this.trgL) and not na(this.tpLo) and l < this.tpLo
+            this.trgL := bar_index
+            if this.isMain and showTr
+                f_rn(line.new(nz(this.tpLoBar, bar_index), this.tpLo, bar_index, this.tpLo, color = cTrg, width = 2))
+                f_rl(label.new(bar_index, l, "⚡ L " + nm, yloc = yloc.belowbar, style = label.style_none, textcolor = cTrg, size = size.small, tooltip = "If-Then: נלקח הנמוך של ה" + nm + " הקודם ← מצפים לעלות לגאפ / לגבוה"))
+        if na(this.tuHi) or h > this.tuHi
+            this.tuHi    := h
+            this.tuHiBar := bar_index
+        if na(this.tuLo) or l < this.tuLo
+            this.tuLo    := l
+            this.tuLoBar := bar_index
     0
 
 method gapsBar(Eng this, float h, float l, float c, float h2, float l2, float mt, int ky, bool srcv) =>
@@ -613,6 +692,42 @@ f_ctl(Side a, Side c, array<int> st) =>
             f_inc(st, S_CR)
     0
 
+// If-Then
+// it: 0 חזרות · 1 חזרות שהיה לפניהן טריגר · 2 טריגר באותו נר · 3 טריגר קודם · 4 ואז מטרה
+//     5 בלי טריגר קודם · 6 ובכל זאת מטרה · 7 טריגר רק בנכס אחד (מתוך 1)
+var array<int> itU = array.new_int(8, 0)
+var array<int> itD = array.new_int(8, 0)
+
+f_minNa(int a, int b) =>
+    na(a) ? b : na(b) ? a : math.min(a, b)
+
+f_it(Side s, Side c, int tA, int tB, array<int> it) =>
+    if s.on and s.avail and s.inR and not s.seed and not s.n2
+        int tT = f_minNa(tA, tB)
+        int tg = f_minNa(f_minNa(s.tGap, s.tOpp), c.on ? c.tGap : na)
+        if not na(s.tGap)
+            f_inc(it, 0)
+            if not na(tT) and tT < s.tGap
+                f_inc(it, 1)
+                bool both = not na(tA) and not na(tB) and tA < s.tGap and tB < s.tGap
+                if not both
+                    f_inc(it, 7)
+                s.itTxt := "If-Then: ✓ היה טריגר לפני" + (both ? " (בשני הנכסים)" : na(tA) or tA >= s.tGap ? " (רק " + T2 + ")" : " (רק " + T1 + ")")
+            else if not na(tT) and tT == s.tGap
+                f_inc(it, 2)
+                s.itTxt := "If-Then: טריגר באותו נר"
+            else
+                s.itTxt := "If-Then: ✗ בלי טריגר לפני"
+        if not na(tT) and (na(tg) or tT < tg)
+            f_inc(it, 3)
+            if not na(tg)
+                f_inc(it, 4)
+        else if na(tT) or (not na(tg) and tg < tT)
+            f_inc(it, 5)
+            if not na(tg)
+                f_inc(it, 6)
+    0
+
 // פירוט בתווית (מעבר עכבר) + סימון כשרק נכס אחד חזר
 f_tip(Side a, Side b) =>
     bool bull = a.dir == 1
@@ -626,7 +741,7 @@ f_tip(Side a, Side b) =>
             string lad = a.oppHit ? (bull ? "המשיך עד הנמוך הקודם" : "המשיך עד הגבוה הקודם") : a.deeper ? "המשיך לגאפ עמוק יותר" : a.fg.dead ? "הגאפ הפך ל-IFVG ונעצר" : "החזיק בגאפ"
             string oth = not (b.on and b.avail) ? T2 + ": אין גאפ זמין" : na(b.tGap) ? T2 + ": לא חזר" : T2 + ": חזר גם"
             string rx = "תגובה: " + str.tostring(nz(a.rxPts), format.mintick) + " נק' = " + str.tostring(math.round(nz(a.rxPct))) + "% מהטווח של " + f_prevName(a)
-            tip := (a.seed ? "זרע Q4→Q1" : "N+1") + " · חזרה לגאפ " + (bull ? "שורי" : "דובי") + "\n" + whenS + "\n" + rx + "\n" + lad + "\n" + oth
+            tip := (a.seed ? "זרע Q4→Q1" : "N+1") + " · חזרה לגאפ " + (bull ? "שורי" : "דובי") + "\n" + whenS + "\n" + rx + "\n" + lad + "\n" + oth + (a.itTxt != "" ? "\n" + a.itTxt : "")
             a.lb.set_text(a.lb.get_text() + " " + str.tostring(math.round(nz(a.rxPct))) + "%")
             if b.on and b.avail and na(b.tGap)
                 a.lb.set_text(a.lb.get_text() + " רק " + T1)
@@ -656,6 +771,8 @@ if newC
     f_ctl(eB.sd, eB.scd, eB.stD)
     f_cross(eA.su, eB.su, crossU)
     f_cross(eA.sd, eB.sd, crossD)
+    f_it(eA.su, eA.scu, eA.trgH, eB.trgH, itU)
+    f_it(eA.sd, eA.scd, eA.trgL, eB.trgL, itD)
     f_tip(eA.su, eB.su)
     f_tip(eA.sd, eB.sd)
     f_tip(eA.s2u, eB.s2u)
@@ -678,6 +795,7 @@ if newC
 
 // נכס הגרף
 eA.upd(high, low)
+eA.trgBar(high, low, tuk)
 eA.su.onBar(eA, high, low, close)
 eA.sd.onBar(eA, high, low, close)
 eA.s2u.onBar(eA, high, low, close)
@@ -689,6 +807,7 @@ eA.gapsBar(high, low, close, high[2], low[2], syminfo.mintick, key, isSrc)
 // הנכס השני
 if not na(c2)
     eB.upd(h2x, l2x)
+    eB.trgBar(h2x, l2x, tuk)
     eB.su.onBar(eB, h2x, l2x, c2)
     eB.sd.onBar(eB, h2x, l2x, c2)
     eB.s2u.onBar(eB, h2x, l2x, c2)
@@ -698,6 +817,13 @@ if not na(c2)
     eB.gapsBar(h2x, l2x, c2, hh2, ll2, mt2v, key, isSrc)
 else
     eB.newG := na
+
+// טריגר רק בנכס השני
+if showTr and not na(c2)
+    if eB.trgH == bar_index and na(eA.trgH)
+        f_rl(label.new(bar_index, high, "⚡ " + T2, yloc = yloc.abovebar, style = label.style_none, textcolor = color.new(cTrg, 30), size = size.small, tooltip = "If-Then: רק " + T2 + " לקח את הגבוה של ה" + TRGN.get(lvl) + " הקודם"))
+    if eB.trgL == bar_index and na(eA.trgL)
+        f_rl(label.new(bar_index, low, "⚡ " + T2, yloc = yloc.belowbar, style = label.style_none, textcolor = color.new(cTrg, 30), size = size.small, tooltip = "If-Then: רק " + T2 + " לקח את הנמוך של ה" + TRGN.get(lvl) + " הקודם"))
 
 f_joint(eA, eB)
 f_joint(eB, eA)
@@ -714,7 +840,7 @@ BGS  = color.new(#2a2e39, 0)
 TXT  = #d1d4dc
 DIM  = #9598a1
 
-var table tb = table.new(tbP, tbMode == "מלאה" ? 5 : 3, tbMode == "מלאה" ? 41 : 17, border_width = 1, border_color = color.new(#363a45, 0), frame_width = 1, frame_color = color.new(#363a45, 0))
+var table tb = table.new(tbP, tbMode == "מלאה" ? 5 : 3, tbMode == "מלאה" ? 46 : 22, border_width = 1, border_color = color.new(#363a45, 0), frame_width = 1, frame_color = color.new(#363a45, 0))
 var bool merged = false
 
 f_p(int n, int d) =>
@@ -767,6 +893,18 @@ f_cRow(int r, string t, string vU, string vD) =>
 f_cPct(int r, string t, int i, int d) =>
     f_cRow(r, t, f_pc(eA.stU.get(i), eA.stU.get(d)), f_pc(eA.stD.get(i), eA.stD.get(d)))
 
+f_itRows(int r, int cL, int cU, int cD) =>
+    string ttl = "If-Then · טריגר: H/L של ה" + TRGN.get(lvl) + " הקודם"
+    tb.cell(0, r, ttl, text_color = color.white, bgcolor = BGS, text_size = tsz, text_halign = text.align_right, tooltip = "▲ = לקיחת גבוה ← ירידה לגאפ שורי / לנמוך\n▼ = לקיחת נמוך ← עלייה לגאפ דובי / לגבוה\nמספיק ש-" + T1 + " או " + T2 + " לקח")
+    array<string> nms = array.from("חזר לגאפ אחרי טריגר", "טריגר ← הגיע למטרה", "בלי טריגר ← הגיע למטרה", "טריגר רק בנכס אחד")
+    array<int> nu = array.from(1, 4, 6, 7)
+    array<int> de = array.from(0, 3, 5, 1)
+    for i = 0 to 3
+        tb.cell(cL, r + 1 + i, nms.get(i), text_color = TXT, bgcolor = BG, text_size = tsz, text_halign = text.align_right)
+        tb.cell(cU, r + 1 + i, f_pc(itU.get(nu.get(i)), itU.get(de.get(i))), text_color = TXT, bgcolor = BG, text_size = tsz)
+        tb.cell(cD, r + 1 + i, f_pc(itD.get(nu.get(i)), itD.get(de.get(i))), text_color = TXT, bgcolor = BG, text_size = tsz)
+    0
+
 f_avg(float sm, int n) =>
     n > 0 ? str.tostring(math.round(sm / n)) + "%" : "–"
 
@@ -786,6 +924,7 @@ if barstate.islast and tbMode == "קומפקטית"
         tb.merge_cells(0, 0, 2, 0)
         tb.merge_cells(0, 13, 1, 13)
         tb.merge_cells(0, 14, 2, 14)
+        tb.merge_cells(0, 17, 2, 17)
         merged := true
     tb.cell(0, 0, "QT · " + SUBN.get(lvl) + " · " + T1, text_color = color.white, bgcolor = BGS, text_size = tsz, tooltip = "⛽ = חזר לגאפ\nH / L = נלקח הגבוה/נמוך הקודם\nמלבן = גאפ שנבדק (מקווקו = רק בנכס אחד, אפור = IFVG)")
     tb.cell(2, 1, "", bgcolor = BGS, text_size = tsz)
@@ -807,10 +946,11 @@ if barstate.islast and tbMode == "קומפקטית"
     tb.cell(0, 14, "ביקורת (אותם מחזורים)", text_color = color.white, bgcolor = BGS, text_size = tsz, text_halign = text.align_right)
     f_cPct(15, "גאפ קודם", S_CA, S_CB)
     f_cPct(16, "גאפ לפני 2", S_CR, S_CB)
+    f_itRows(17, 2, 1, 0)
 
 if barstate.islast and tbMode == "מלאה"
     if not merged
-        for r in array.from(0, 4, 12, 17, 22, 24, 32, 36, 39, 40)
+        for r in array.from(0, 4, 12, 17, 22, 24, 32, 36, 39, 44, 45)
             tb.merge_cells(0, r, 4, r)
         merged := true
 
@@ -874,5 +1014,9 @@ if barstate.islast and tbMode == "מלאה"
     tb.cell(1, 37, f_avg(eB.sumU, eB.stU.get(S_RET)), text_color = DIM, bgcolor = BG, text_size = tsz)
     tb.cell(0, 37, f_avg(eB.sumD, eB.stD.get(S_RET)), text_color = DIM, bgcolor = BG, text_size = tsz)
     f_row(38, "תגובה ≥ חצי טווח", S_RX50, S_RET)
-    tb.cell(0, 39, "▲ = לקיחת הגבוה הקודם + חזרה לגאפ שורי   ·   ▼ = לקיחת הנמוך הקודם + חזרה לגאפ דובי", text_color = DIM, bgcolor = BG, text_size = tsz)
-    tb.cell(0, 40, "⛽ = חזרה במחזור הבא   ·   ⛽2 = חזרה אחרי שני מחזורים   ·   ⛽S = זרע   ·   H / L = נלקח הקיצון הקודם", text_color = DIM, bgcolor = BG, text_size = tsz)
+    f_itRows(39, 4, 3, 2)
+    for i = 40 to 43
+        tb.cell(1, i, "", bgcolor = BG, text_size = tsz)
+        tb.cell(0, i, "", bgcolor = BG, text_size = tsz)
+    tb.cell(0, 44, "▲ = לקיחת הגבוה הקודם + חזרה לגאפ שורי   ·   ▼ = לקיחת הנמוך הקודם + חזרה לגאפ דובי", text_color = DIM, bgcolor = BG, text_size = tsz)
+    tb.cell(0, 45, "⛽ = חזרה במחזור הבא   ·   ⛽2 = חזרה אחרי שני מחזורים   ·   ⛽S = זרע   ·   H / L = נלקח הקיצון הקודם", text_color = DIM, bgcolor = BG, text_size = tsz)
