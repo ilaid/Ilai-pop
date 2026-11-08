@@ -655,7 +655,7 @@ BGS  = color.new(#2a2e39, 0)
 TXT  = #d1d4dc
 DIM  = #9598a1
 
-var table tb = table.new(tbP, tbMode == "מלאה" ? 5 : 3, tbMode == "מלאה" ? 38 : 16, border_width = 1, border_color = color.new(#363a45, 0), frame_width = 1, frame_color = color.new(#363a45, 0))
+var table tb = table.new(tbP, tbMode == "מלאה" ? 5 : 3, tbMode == "מלאה" ? 38 : 15, border_width = 1, border_color = color.new(#363a45, 0), frame_width = 1, frame_color = color.new(#363a45, 0))
 var bool merged = false
 
 f_p(int n, int d) =>
@@ -722,29 +722,27 @@ f_best() =>
 if barstate.islast and tbMode == "קומפקטית"
     if not merged
         tb.merge_cells(0, 0, 2, 0)
-        tb.merge_cells(0, 7, 2, 7)
-        tb.merge_cells(0, 14, 1, 14)
-        tb.merge_cells(0, 15, 2, 15)
+        tb.merge_cells(0, 11, 1, 11)
+        tb.merge_cells(0, 12, 2, 12)
         merged := true
-    tb.cell(0, 0, "QT Refuel  ·  " + SUBN.get(lvl) + " מול " + SUBN.get(lvl) + " קודם  ·  " + T1, text_color = color.white, bgcolor = BGS, text_size = tsz)
+    tb.cell(0, 0, "QT · " + SUBN.get(lvl) + " · " + T1, text_color = color.white, bgcolor = BGS, text_size = tsz, tooltip = "⛽ = חזר לגאפ\nH / L = נלקח הגבוה/נמוך הקודם\nמלבן = גאפ שנבדק (מקווקו = רק בנכס אחד, אפור = IFVG)")
     tb.cell(2, 1, "", bgcolor = BGS, text_size = tsz)
     tb.cell(1, 1, "▲ שורי", text_color = cBull, bgcolor = BGS, text_size = tsz)
     tb.cell(0, 1, "▼ דובי", text_color = cBear, bgcolor = BGS, text_size = tsz)
-    f_cRow(2, "מחזורים שנבדקו", str.tostring(eA.stU.get(S_BASE)), str.tostring(eA.stD.get(S_BASE)))
-    f_cPct(3, "⛽ חזר לגאפ", S_RET, S_BASE)
-    f_cPct(4, "   חזר ואז לקח H/L", S_BEF, S_BASE)
-    f_cPct(5, "   לקח H/L ואז חזר", S_AFT, S_BASE)
-    f_cPct(6, "   חזר בלי לקחת H/L", S_RETNX, S_BASE)
-    tb.cell(0, 7, "ביקורת — על אותם מחזורים בדיוק:", text_color = color.white, bgcolor = BGS, text_size = tsz, text_halign = text.align_right)
-    f_cPct(8, "   נגע בגאפ מהמחזור הקודם", S_CA, S_CB)
-    f_cPct(9, "   נגע בגאפ מלפני 2 מחזורים", S_CR, S_CB)
-    f_cPct(10, "הגאפ הראשון הספיק", S_HELD, S_RET)
-    f_cPct(11, "המשיך עד הקיצון הנגדי", S_OPP, S_RET)
-    f_cPct(12, "⛽2 פספס ← חזר ב-N+2", S_N2R, S_N2B)
-    f_cRow(13, "שני הנכסים חזרו", f_pc(crossU.get(0), int(crossU.sum())), f_pc(crossD.get(0), int(crossD.sum())))
-    tb.cell(2, 14, "הכי אמין", text_color = TXT, bgcolor = BG, text_size = tsz, text_halign = text.align_right)
-    tb.cell(0, 14, f_best(), text_color = color.white, bgcolor = BG, text_size = tsz)
-    tb.cell(0, 15, "⛽ חזר לגאפ  ·  H / L = נלקח הגבוה/נמוך הקודם  ·  מלבן = גאפ שנבדק (מקווקו = רק בנכס אחד, אפור = IFVG)", text_color = DIM, bgcolor = BG, text_size = size.tiny)
+    f_cRow(2, "מחזורים", str.tostring(eA.stU.get(S_BASE)), str.tostring(eA.stD.get(S_BASE)))
+    f_cPct(3, "⛽ חזר", S_RET, S_BASE)
+    f_cPct(4, "↳ ואז H/L", S_BEF, S_BASE)
+    f_cPct(5, "↳ אחרי H/L", S_AFT, S_BASE)
+    f_cPct(6, "↳ בלי H/L", S_RETNX, S_BASE)
+    f_cPct(7, "גאפ 1 הספיק", S_HELD, S_RET)
+    f_cPct(8, "עד הקיצון הנגדי", S_OPP, S_RET)
+    f_cPct(9, "⛽2 (N+2)", S_N2R, S_N2B)
+    f_cRow(10, "שניהם חזרו", f_pc(crossU.get(0), int(crossU.sum())), f_pc(crossD.get(0), int(crossD.sum())))
+    tb.cell(2, 11, "הכי אמין", text_color = TXT, bgcolor = BG, text_size = tsz, text_halign = text.align_right)
+    tb.cell(0, 11, f_best(), text_color = color.white, bgcolor = BG, text_size = tsz)
+    tb.cell(0, 12, "ביקורת (אותם מחזורים)", text_color = color.white, bgcolor = BGS, text_size = tsz, text_halign = text.align_right)
+    f_cPct(13, "גאפ קודם", S_CA, S_CB)
+    f_cPct(14, "גאפ לפני 2", S_CR, S_CB)
 
 if barstate.islast and tbMode == "מלאה"
     if not merged
