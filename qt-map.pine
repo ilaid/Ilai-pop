@@ -3,7 +3,7 @@
 // כל תת-מחזור צפוי לחזור לגאפ של תת-המחזור הקודם באותו מיכל (80–90% בבדיקות,
 // מול 25–45% לגאפ מלפני שני מחזורים). המפה מראה לכל רמה, במבט אחד:
 //   ✓  — המחזור הנוכחי כבר חזר לגאפ של הקודם (והחץ = לאיזה צד)
-//   ▼/▲ מחיר · מרחק — עוד לא חזר: הגאפ הקרוב של המחזור הקודם, מתחת או מעל
+//   ▼/▲ מתי — עוד לא חזר: הגאפ הקרוב של המחזור הקודם, מתחת או מעל, ומתי נוצר
 //   —  — אין מול מה להשוות (תת-מחזור ראשון במיכל, או זמן חסום)
 //   ∅  — למחזור הקודם לא נשאר גאפ פתוח
 // הגאפ זהה ל-SSMT Fill (FVG + VI + הרחבה לגופים), שייך לתת-המחזור של הנר
@@ -28,8 +28,7 @@ posV   = input.string("למטה", "גובה", options = ["למעלה", "באמצ
 posH   = input.string("שמאל", "צד", options = ["שמאל", "מרכז", "ימין"], group = G2)
 pad    = input.int(1, "הרחקה מהקצה (שורות)", minval = 0, maxval = 12, group = G2, tooltip = "שורות ריקות בין המפה לקצה הגרף — כדי לא לעלות על שורה של אינדיקטור אחר באותה פינה.")
 txtSz  = input.string("קטן", "גודל כתב", options = ["זעיר", "קטן", "רגיל", "גדול"], group = G2)
-showD  = input.bool(true, "הצג מרחק בנקודות", group = G2)
-showP  = input.bool(true, "הצג מחיר המטרה", group = G2)
+showT  = input.bool(true, "הצג את שעת הגאפ", group = G2, tooltip = "ליד המטרה כתוב מתי הגאפ נוצר (הנר האמצעי), בשעון ניו יורק. המחיר והמרחק מופיעים בנגיעה בתא.")
 lineLv = input.string("כבוי", "קו על הגרף למטרה של", options = ["כבוי", "90 דק'", "סשן", "יום", "שבוע", "רבע-רבעון"], group = G2, tooltip = "קו אחד בלבד, מהנר הנוכחי ימינה, לקצה הקרוב של הגאפ שהוא המטרה של הרמה הזו.")
 cDn    = input.color(#ef5350, "מטרה מתחת", group = G2)
 cUp    = input.color(#26a69a, "מטרה מעל", group = G2)
@@ -160,6 +159,7 @@ type MG
     float bot
     int   sub
     int   bar
+    int   bt              // זמן הפתיחה של הנר שהגאפ שייך אליו
     bool  dead = false
 
 type Lv
@@ -198,7 +198,7 @@ method feed(Lv s, int t1, int t2, float o1, float h1, float l1, float c1, float 
             [b, t, f, m, v] = f_leg(d, ok, o1, h1, l1, c1, o2, c2, h3, l3, c3, o3, syminfo.mintick, edge)
             if not na(t) and not na(b) and t > b
                 bool tagNow = (edge and m) or not f
-                s.gaps.push(MG.new(d, t, b, tagNow ? s3 : sM, bar_index))
+                s.gaps.push(MG.new(d, t, b, tagNow ? s3 : sM, bar_index, tagNow ? t1 : t2))
         while s.gaps.size() > 150
             s.gaps.shift()
     s.lastT
@@ -239,6 +239,7 @@ method target(Lv s, float px) =>
     float lvl  = na
     float dist = na
     bool  any  = false
+    int   bt   = na
     for g in s.gaps
         if g.sub == s.pS and not g.dead
             any := true
@@ -247,7 +248,8 @@ method target(Lv s, float px) =>
                 dist := dd
                 d    := g.dir == 1 ? -1 : 1
                 lvl  := g.dir == 1 ? g.top : g.bot
-    [d, lvl, dist, any]
+                bt   := g.bt
+    [d, lvl, dist, any, bt]
 
 // ══════════════════════════════════════════════════════════════
 // נתונים — רק רמות שהמסגרת שלהן לא קטנה מהגרף
@@ -321,8 +323,26 @@ CLR   = color.new(color.black, 100)
 // שורה: עמודה לכל רמה (כותרת + 5) · עמודה: שורה לכל רמה
 var table mp = table.new(tPos, isRow ? 6 : 1, isRow ? 1 + pad : 6 + pad, border_width = 0)
 
+// מתי הגאפ נוצר — באנגלית, בשעון ניו יורק
+f_born(int lv, int t) =>
+    string r = ""
+    if not na(t)
+        [a1_, a2_, a3_, a4_, nmL] = f_cyc(lv, t)
+        [b1_, b2_, b3_, b4_, nmD] = f_cyc(4, t)
+        string hm = str.format_time(t, "HH:mm", TZ)
+        if lv == 2 or lv == 3
+            r := nmL + " " + hm
+        else if lv == 4
+            r := nmD + " " + hm
+        else if lv == 5
+            r := nmL + " " + nmD + " " + hm
+        else
+            r := nmL + " " + str.format_time(t + 21600000, "dd/MM", TZ)
+    r
+
 f_cell(Lv s) =>
     string tx = ""
+    string tp = ""
     color  c  = cDone
     if s.on
         if not s.valid
@@ -330,22 +350,23 @@ f_cell(Lv s) =>
         else if s.done
             tx := s.cN + " ✓" + (s.doneDir == 1 ? "▼" : "▲")
         else
-            [d, lvl, dist, any] = s.target(close)
+            [d, lvl, dist, any, bt] = s.target(close)
             if not any
                 tx := s.cN + " ∅"
             else if d == 0
                 tx := s.cN + " •"
             else
-                tx := s.cN + " " + (d < 0 ? "▼" : "▲") + (showP ? " " + str.tostring(lvl, format.mintick) : "") + (showD ? " · " + str.tostring(math.round(dist / syminfo.mintick) * syminfo.mintick, format.mintick) : "")
+                tx := s.cN + " " + (d < 0 ? "▼" : "▲") + (showT ? " " + f_born(s.lv, bt) : "")
+                tp := "גאפ " + (d < 0 ? "מתחת" : "מעל") + ": " + str.tostring(lvl, format.mintick) + "\nמרחק: " + str.tostring(math.round(dist / syminfo.mintick) * syminfo.mintick, format.mintick) + " נק'"
                 c  := d < 0 ? cDn : cUp
-    [tx, c]
+    [tx, c, tp]
 
-f_put(int k, string tx, color c) =>
+f_put(int k, string tx, color c, string tp) =>
     int row = isRow ? (atTop ? pad : 0) : (atTop ? pad + k : k)
     if isRow
-        mp.cell(k, row, tx, text_color = c, text_size = tSz, bgcolor = CLR)
+        mp.cell(k, row, tx, text_color = c, text_size = tSz, bgcolor = CLR, tooltip = tp)
     else
-        mp.cell(0, row, tx, text_color = c, text_size = tSz, bgcolor = CLR, text_halign = text.align_left)
+        mp.cell(0, row, tx, text_color = c, text_size = tSz, bgcolor = CLR, text_halign = text.align_left, tooltip = tp)
     0
 
 if barstate.islast
@@ -355,12 +376,12 @@ if barstate.islast
         for k = 0 to pad - 1
             int r = isRow ? (atTop ? k : 1 + k) : (atTop ? k : 6 + k)
             mp.cell(0, r, " ", text_size = tSz, bgcolor = CLR)
-    f_put(0, "QT", cHead)
+    f_put(0, "QT", cHead, "")
     int k = 1
     for s in array.from(L6, L5, L4, L3, L2)
         if s.on
-            [tx, c] = f_cell(s)
-            f_put(k, tx, c)
+            [tx, c, tp] = f_cell(s)
+            f_put(k, tx, c, tp)
             k += 1
 
 // קו אחד למטרה של רמה נבחרת
@@ -371,7 +392,7 @@ if barstate.islast
     line.delete(tl)
     label.delete(tlb)
     if not na(selLv) and selLv.on and selLv.valid and not selLv.done
-        [d, lvl, dist, any] = selLv.target(close)
+        [d, lvl, dist, any, bt] = selLv.target(close)
         if d != 0
             color c = d < 0 ? cDn : cUp
             tl  := line.new(bar_index, lvl, bar_index + 15, lvl, color = c, style = line.style_dashed, width = 1)
