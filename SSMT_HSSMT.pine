@@ -62,6 +62,10 @@ lineWidth  = input.int(1, "עובי קו", minval = 1, maxval = 4, group = grpVi
 closedMode = input.string("הצג", "שבירות שכולם סגרו (closed)", options = ["הצג", "האפר", "הסתר"], group = grpVis, tooltip = "(all closed) / (core closed) = SSMT שבה רק חלק מהנכסים לקחו את הרמה בפתיל, אבל כולם (או שני החזקים) כבר סגרו מעבר לסגירה הקיצונית.\n• הצג = מוצגת כמו כל שבירה, ומדורגת מתחת ל-SSMT רגילה.\n• האפר = מוצגת באפור.\n• הסתר = לא קיימת: לא על הגרף, לא בפינה ולא בהתראות, ולא נחשבת כראשית.")
 hideC = closedMode == "הסתר"
 greyC = closedMode == "האפר"
+// אזהרה: השבירה עומדת להתבטל — הנכס שחסר כדי לבטל אותה קרוב לרמה שלו.
+// השבירה לא נעלמת ולא משתנה; רק נוסף לתווית טקסט קצר עם שם הנכס.
+nearOn  = input.bool(true, "סמן שבירה שעומדת להתבטל", group = grpVis, tooltip = "בתווית על הגרף נוסף  ! YM  (שם הנכס שאם ייקח את הרמה — השבירה תתבטל), כשהוא קרוב אליה.\nHSSMT נמדד לפי הסגירה מול הסגירה הקיצונית, SSMT לפי הפתיל.\nקרוב = במרחק של פחות מהמכפיל כפול ה-ATR(14) של אותו נכס. נבדק בזמן אמת, על הנר החי.\nרק במסגרת הגרף.")
+nearATR = input.float(0.3, "קרוב = פחות מ-X פעמים ATR של הנכס", minval = 0.05, maxval = 3.0, step = 0.05, group = grpVis)
 
 // QS = חלון זמן חם: שלוש רמות **רצופות** בסולם המחזורים יוצרות יחד רצף חם.
 // הסולם: חודש (1–3 ברבעון QT) ← שבוע (1–4 בחודש) ← יום (שני 1 .. חמישי 4) ←
@@ -385,10 +389,10 @@ if isTrueOpenBar
 // משיכת נתוני ארבעת הנכסים
 // ═══════════════════════════════════════════════════════════════════
 
-[x1h, x1l, x1c] = request.security(s1, timeframe.period, [high, low, close], lookahead = barmerge.lookahead_off)
-[x2h, x2l, x2c] = request.security(s2, timeframe.period, [high, low, close], lookahead = barmerge.lookahead_off)
-[x3h, x3l, x3c] = request.security(s3, timeframe.period, [high, low, close], lookahead = barmerge.lookahead_off)
-[x4h, x4l, x4c] = request.security(s4, timeframe.period, [high, low, close], lookahead = barmerge.lookahead_off)
+[x1h, x1l, x1c, x1a] = request.security(s1, timeframe.period, [high, low, close, ta.atr(14)], lookahead = barmerge.lookahead_off)
+[x2h, x2l, x2c, x2a] = request.security(s2, timeframe.period, [high, low, close, ta.atr(14)], lookahead = barmerge.lookahead_off)
+[x3h, x3l, x3c, x3a] = request.security(s3, timeframe.period, [high, low, close, ta.atr(14)], lookahead = barmerge.lookahead_off)
+[x4h, x4l, x4c, x4a] = request.security(s4, timeframe.period, [high, low, close, ta.atr(14)], lookahead = barmerge.lookahead_off)
 
 // ═══════════════════════════════════════════════════════════════════
 // מצבר לכל נכס: הקיצונים של תת-המחזור הנוכחי, ומערך של הקיצונים של כל
@@ -1053,6 +1057,49 @@ f_taker(string s, int aLo, int aHi) =>
             f := true
     r
 
+// המחיר החי וה-ATR של כל נכס
+f_hi(int a)  => a == 0 ? x1h : a == 1 ? x2h : a == 2 ? x3h : x4h
+f_lo(int a)  => a == 0 ? x1l : a == 1 ? x2l : a == 2 ? x3l : x4l
+f_cl(int a)  => a == 0 ? x1c : a == 1 ? x2c : a == 2 ? x3c : x4c
+f_atr(int a) => a == 0 ? x1a : a == 1 ? x2a : a == 2 ? x3a : x4a
+
+// שבירה שעומדת להתבטל: מחזיר את שמות הנכסים שחסרים כדי לבטל אותה — רק אם
+// כולם כבר קרובים לרמה שלהם (פחות מ-nearATR × ATR של אותו נכס). אחרת "".
+//   שלישייה דובית — מתבטלת כש-NQ ו-ES שניהם לקחו (YM לא משנה).
+//   שלישייה שורית — מתבטלת כשכל השלושה לקחו.
+//   זוג 3–4       — מתבטלת כששניהם לקחו.
+// HSSMT נמדד בסגירה מול הסגירה הקיצונית, SSMT בפתיל מול הפתיל.
+f_danger(int k, Brk b) =>
+    string out = ""
+    if nearOn and b.typ != 0 and b.refI >= 0
+        isBull = k % 2 == 1
+        isPair = k >= 2
+        isH    = b.typ == 2
+        aLo    = isPair ? 2 : 0
+        aHi    = isPair ? 3 : 2
+        bool   allNear = true
+        int    nNeed   = 0
+        string names   = ""
+        for a = aLo to aHi
+            if isPair or isBull or a != 2
+                acc  = f_acc(a)
+                extA = f_accA(acc, isBull, isH)
+                posA = f_accPA(acc, isBull, isH)
+                if b.refI <= array.size(extA) - 1
+                    ref = array.get(extA, b.refI)
+                    [ex, exB] = f_take(isBull, extA, posA, b.refI, f_accV(acc, isBull, isH), f_accP(acc, isBull, isH))
+                    // הנכס עוד לא לקח את הרמה — הוא אחד מאלה שחסרים לביטול
+                    if not f_beyond(isBull, ex, ref)
+                        nNeed += 1
+                        cur  = isH ? f_cl(a) : isBull ? f_lo(a) : f_hi(a)
+                        dist = isBull ? cur - ref : ref - cur
+                        if na(dist) or na(f_atr(a)) or dist > nearATR * f_atr(a)
+                            allNear := false
+                        names := names + (names == "" ? "" : " ") + f_nm(a)
+        if nNeed > 0 and allNear
+            out := names
+    out
+
 // ציור שבירה אחת. כשנכס הגרף חלק ממנה — קו (על נכס הגרף) ותווית בסוף הקו.
 // אחרת — רק תווית, מעל/מתחת לנר שבו הנכס שלקח עשה את השבירה.
 f_draw(int k, Brk b, bool weak, array<label> L, array<line> N) =>
@@ -1086,7 +1133,8 @@ f_draw(int k, Brk b, bool weak, array<label> L, array<line> N) =>
         lB = low[bar_index - b2]
         pd = atr * 0.15
         yl = isBull ? math.min(lB, nz(y2, lB)) - pd : math.max(hB, nz(y2, hB)) + pd
-        array.push(L, label.new(b2, yl, f_lblTxt(b), style = isBull ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = cFin, size = lSize, textalign = text.align_center))
+        dz = f_danger(k, b)
+        array.push(L, label.new(b2, yl, f_lblTxt(b) + (dz != "" ? "  ! " + dz : ""), style = isBull ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = cFin, size = lSize, textalign = text.align_center))
     ok
 
 // רק המצב הנוכחי מצויר, ולכן מציירים רק בנר האחרון: מוחקים הכול ומציירים מחדש
