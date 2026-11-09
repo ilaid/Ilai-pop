@@ -359,6 +359,9 @@ type Eng
     int  riB     = -1
     int  tyU     = 0
     int  riU     = -1
+    int  nSteps  = 0
+    int  nRef    = 0
+    int  nBrk    = 0
 
 f_newEng(int cls) =>
     Eng.new(cls = cls, a1 = f_newAcc(), a2 = f_newAcc(), a3 = f_newAcc())
@@ -386,6 +389,7 @@ f_add(Eng e, bool isBull, int typ, int mask, int t, float hx, float lx) =>
 method step(Eng e, int t, float h1, float l1, float c1, float h2, float l2, float c2, float h3, float l3, float c3, float hx, float lx) =>
     if not na(t) and t != e.lastT and not na(c1) and not na(c2) and not na(c3)
         e.lastT := t
+        e.nSteps += 1
         [rId, lId, kL, blk] = f_cycT(e.cls, t)
         bool newRef  = e.started and rId != e.refId
         bool newLife = e.started and lId != e.lifeId
@@ -399,6 +403,8 @@ method step(Eng e, int t, float h1, float l1, float c1, float h2, float l2, floa
             e.sAct := kL and canP
         else if newRef
             e.sAct := false
+        if newRef
+            e.nRef += 1
         e.started := true
         e.refId   := rId
         e.lifeId  := lId
@@ -425,6 +431,8 @@ method step(Eng e, int t, float h1, float l1, float c1, float h2, float l2, floa
             nTU := y1
             nIU := y2
             nMU := y3
+        if nTB != 0 or nTU != 0
+            e.nBrk += 1
         if nTB != 0
             if e.tyB == 0 or nIB != e.riB
                 f_add(e, false, nTB, nMB, t, hx, lx)
@@ -508,4 +516,5 @@ if barstate.islast
 var table dbg = table.new(position.bottom_right, 1, 1)
 if barstate.islast and showDbg
     string st = tfClass == 0 ? "QS Lv: מסגרת לא נתמכת" : "QS Lv · " + f_tfName(tfClass) + (useU1 ? "+" + f_tfName(cU1) : "") + (useU2 ? "+" + f_tfName(cU2) : "") + " · שבירות " + str.tostring(cnt.get(0)) + " · ב-QS " + str.tostring(cnt.get(1)) + " · רמות " + str.tostring(cnt.get(2)) + " · פתוחות " + str.tostring(lvls.size()) + " · נכס הגרף " + (cA >= 0 ? str.tostring(cA + 1) : "?")
-    dbg.cell(0, 0, st, text_color = color.gray, text_size = size.tiny, bgcolor = color.new(color.black, 100))
+    string st2 = "e0 " + str.tostring(eg0.nSteps) + "/" + str.tostring(eg0.nRef) + "/" + str.tostring(eg0.a1.hiA.size()) + "/" + str.tostring(eg0.nBrk) + "  e1 " + str.tostring(eg1.nSteps) + "/" + str.tostring(eg1.nRef) + "/" + str.tostring(eg1.a1.hiA.size()) + "/" + str.tostring(eg1.nBrk) + "  t=" + str.tostring(c0t) + " c3=" + str.tostring(c0c3)
+    dbg.cell(0, 0, st + "\n" + st2, text_color = color.gray, text_size = size.tiny, bgcolor = color.new(color.black, 100))
