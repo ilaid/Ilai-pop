@@ -527,7 +527,8 @@ durMs = tfSec * 1000
 // ═══════════════════════════════════════════════════════════════════
 
 // רמה אחת. done = החלון נגמר והרמה קפואה; עד אז היא עדיין מתעדכנת.
-// x = bar_index בגרף, זמן במסגרות הגבוהות.
+// x = הזמן של הנר שעשה את הקיצון. זמן ולא bar_index, כי רמה יכולה לחיות יותר
+// מ-10,000 נרות, ו-TradingView לא מצייר קו שמתחיל רחוק כל כך לפי bar_index.
 type Lvl
     float  p
     int    x
@@ -673,15 +674,15 @@ if barstate.isconfirmed and qsOn
                                     aB2  := b2
         // ערך ההתחלה של רמה חדשה: הקיצון של הגרף מנר השבירה ועד עכשיו
         float iP = na
-        int   iX = bar_index
+        int   iX = time
         if act and f_idx(lvC, isBull, false, aKey) < 0
             n0 = math.min(bar_index - aB2, 500)
             for o = 0 to n0
                 v = isBull ? low[o] : high[o]
                 if na(iP) or f_beyond(isBull, v, iP)
                     iP := v
-                    iX := bar_index - o
-        f_lvlStep(lvC, isBull, act, aKey, aPat, aK, iP, iX, tfClass, time, durMs, high, low, bar_index, tfClass)
+                    iX := time[o]
+        f_lvlStep(lvC, isBull, act, aKey, aPat, aK, iP, iX, tfClass, time, durMs, high, low, time, tfClass)
     f_chk(lvC, high, low)
     f_trim(lvC, maxLvl)
 
@@ -875,12 +876,9 @@ f_draw(Lvl L, bool htf, array<line> N, array<label> B) =>
     if not taken
         c   = L.bull ? colL : colH
         txt = (htf ? f_tfName(L.tf) + " " : "") + L.pat + (L.bull ? " L" : " H")
-        if htf
-            array.push(N, line.new(L.x, L.p, time, L.p, xloc = xloc.bar_time, color = c, width = htfWidth))
-            array.push(B, label.new(time, L.p, txt, xloc = xloc.bar_time, style = label.style_label_left, color = color.new(color.black, 100), textcolor = c, size = lblSize))
-        else
-            array.push(N, line.new(L.x, L.p, bar_index, L.p, color = c, width = lineWidth))
-            array.push(B, label.new(bar_index, L.p, txt, style = label.style_label_left, color = color.new(color.black, 100), textcolor = c, size = lblSize))
+        // לפי זמן (xloc.bar_time) — בלי מגבלת המרחק של bar_index
+        array.push(N, line.new(L.x, L.p, time, L.p, xloc = xloc.bar_time, color = c, width = htf ? htfWidth : lineWidth))
+        array.push(B, label.new(time, L.p, txt, xloc = xloc.bar_time, style = label.style_label_left, color = color.new(color.black, 100), textcolor = c, size = lblSize))
     taken
 
 if barstate.islast
