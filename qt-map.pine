@@ -1,0 +1,378 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0
+// QT Map — לאן המחיר צריך ללכת בכל רמה
+// כל תת-מחזור צפוי לחזור לגאפ של תת-המחזור הקודם באותו מיכל (80–90% בבדיקות,
+// מול 25–45% לגאפ מלפני שני מחזורים). המפה מראה לכל רמה, במבט אחד:
+//   ✓  — המחזור הנוכחי כבר חזר לגאפ של הקודם (והחץ = לאיזה צד)
+//   ▼/▲ מחיר · מרחק — עוד לא חזר: הגאפ הקרוב של המחזור הקודם, מתחת או מעל
+//   —  — אין מול מה להשוות (תת-מחזור ראשון במיכל, או זמן חסום)
+//   ∅  — למחזור הקודם לא נשאר גאפ פתוח
+// הגאפ זהה ל-SSMT Fill (FVG + VI + הרחבה לגופים), שייך לתת-המחזור של הנר
+// האמצעי, ומת ב-IFVG — סגירה מעבר אליו במסגרת שלו.
+//@version=6
+indicator("QT Map", shorttitle = "QT Map", overlay = true, max_lines_count = 2, max_labels_count = 2)
+
+// ══════════════════════════════════════════════════════════════
+// הגדרות
+// ══════════════════════════════════════════════════════════════
+G1 = "רמות"
+use2 = input.bool(true, "90 דק' (גאפים של 5m)", group = G1)
+use3 = input.bool(true, "סשן (גאפים של 15m)", group = G1)
+use4 = input.bool(true, "יום (גאפים של 1H)", group = G1)
+use5 = input.bool(true, "שבוע (גאפים של 4H)", group = G1)
+use6 = input.bool(true, "רבע-רבעון (גאפים של יומי)", group = G1)
+seed2 = input.bool(true, "זרע ב-90 דק': המיקרו הראשון של סשן מול האחרון של הקודם", group = G1)
+
+G2 = "תצוגה"
+lay    = input.string("שורה", "פריסה", options = ["שורה", "עמודה"], group = G2)
+posV   = input.string("למטה", "גובה", options = ["למעלה", "באמצע", "למטה"], group = G2)
+posH   = input.string("שמאל", "צד", options = ["שמאל", "מרכז", "ימין"], group = G2)
+pad    = input.int(1, "הרחקה מהקצה (שורות)", minval = 0, maxval = 12, group = G2, tooltip = "שורות ריקות בין המפה לקצה הגרף — כדי לא לעלות על שורה של אינדיקטור אחר באותה פינה.")
+txtSz  = input.string("קטן", "גודל כתב", options = ["זעיר", "קטן", "רגיל", "גדול"], group = G2)
+showD  = input.bool(true, "הצג מרחק בנקודות", group = G2)
+showP  = input.bool(true, "הצג מחיר המטרה", group = G2)
+lineLv = input.string("כבוי", "קו על הגרף למטרה של", options = ["כבוי", "90 דק'", "סשן", "יום", "שבוע", "רבע-רבעון"], group = G2, tooltip = "קו אחד בלבד, מהנר הנוכחי ימינה, לקצה הקרוב של הגאפ שהוא המטרה של הרמה הזו.")
+cDn    = input.color(#ef5350, "מטרה מתחת", group = G2)
+cUp    = input.color(#26a69a, "מטרה מעל", group = G2)
+cDone  = input.color(#9598a1, "כבר חזר ✓", group = G2)
+cHead  = input.color(#d1d4dc, "כותרת", group = G2)
+alertOn = input.bool(true, "התראה כשרמה חוזרת לגאפ", group = G2, tooltip = "ב-TradingView: ליצור התראה על האינדיקטור עם 'Any alert() function call'.")
+
+G3 = "הגדרת גאפ (זהה ל-SSMT Fill)"
+fvgOn        = input.bool(true, "זהה FVG (שלושה נרות)", group = G3)
+volImbOn     = input.bool(true, "זהה VI — גאפ סגירה/פתיחה בין שני נרות", group = G3)
+extendBodies = input.bool(true, "הרחב גאפים לגופי הנרות", group = G3)
+viMinTicks   = input.int(4, "VI לבד — מינימום טיקים", minval = 1, maxval = 100, group = G3)
+viMergeTicks = input.int(1, "הרחבה — מינימום טיקים", minval = 1, maxval = 100, group = G3)
+
+// ══════════════════════════════════════════════════════════════
+// מחזורי QT מתוך חותמת זמן
+// רמות: 2 = 90 דק' · 3 = סשן · 4 = יום · 5 = שבוע · 6 = רבע-רבעון
+// מחזיר [תת-מחזור, מיכל, מיקום, חסום, שם]
+// ══════════════════════════════════════════════════════════════
+TZ = "America/New_York"
+
+f_ser(int y, int m, int d) =>
+    int(math.floor(timestamp("UTC", y, m, d, 0, 0) / 86400000.0))
+f_y(int s) =>
+    year(s * 86400000, "UTC")
+f_m(int s) =>
+    month(s * 86400000, "UTC")
+f_d(int s) =>
+    dayofmonth(s * 86400000, "UTC")
+
+SES = array.from("Asia", "London", "AM", "PM")
+DAY = array.from("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
+
+f_cyc(int lv, int t) =>
+    int    sub  = na
+    int    cont = na
+    int    pos  = na
+    bool   blk  = false
+    string nm   = ""
+    if not na(t)
+        int td   = t + 21600000
+        int dS   = f_ser(year(td, TZ), month(td, TZ), dayofmonth(td, TZ))
+        int sod  = ((hour(t, TZ) * 3600 + minute(t, TZ) * 60 + second(t, TZ)) - 64800 + 86400) % 86400
+        int dw   = (dS + 4) % 7
+        int mon  = dw == 0 ? dS - 6 : dS - (dw - 1)
+        int tue  = mon + 1
+        int tM   = f_m(tue)
+        bool dead = f_m(mon + 3) != tM
+        int wk   = int(math.floor((f_d(tue) - 1) / 7.0)) + 1
+        int se   = int(math.floor(sod / 21600.0))
+        if lv == 2
+            int mi = int(math.floor(sod / 5400.0))
+            sub  := dS * 16 + mi
+            cont := dS * 4 + se
+            pos  := mi % 4
+            nm   := SES.get(se) + " " + str.tostring(mi % 4 + 1)
+        else if lv == 3
+            sub  := dS * 4 + se
+            cont := dS
+            pos  := se
+            nm   := SES.get(se)
+        else if lv == 4
+            sub  := dS
+            cont := mon
+            pos  := math.max(0, math.min(4, dw - 1))
+            blk  := dw == 5 or dw == 6 or dw == 0
+            nm   := DAY.get(dw)
+        else if lv == 5
+            bool own = dead or wk == 5
+            sub  := mon
+            cont := own ? -mon : f_y(tue) * 12 + tM
+            pos  := own ? 0 : wk - 1
+            blk  := own
+            nm   := dead ? "DW" : "W" + str.tostring(wk)
+        else
+            int y  = f_y(dS)
+            int m  = f_m(dS)
+            int qm = m >= 10 ? 10 : m >= 7 ? 7 : m >= 4 ? 4 : 1
+            int qS = f_ser(y, qm, 1)
+            int qE = qm == 10 ? f_ser(y + 1, 1, 1) : f_ser(y, qm + 3, 1)
+            int k  = math.max(0, math.min(3, int(math.floor((dS - qS) * 4.0 / (qE - qS)))))
+            cont := y * 12 + qm
+            sub  := cont * 4 + k
+            pos  := k
+            nm   := "QQ" + str.tostring(k + 1)
+    [sub, cont, pos, blk, nm]
+
+// ══════════════════════════════════════════════════════════════
+// רגל של גאפ — העתק של f_leg מ-SSMT Fill
+// נרות: 1 = (o2,h2,l2,cX2) · 2 = (o1,c1) · 3 = (o0,h0,l0,c0)
+// ══════════════════════════════════════════════════════════════
+f_leg(int d, bool ok, float o0, float h0, float l0, float c0, float o1, float c1, float h2, float l2, float cX2, float o2, float tk, bool edge) =>
+    float b  = na
+    float t  = na
+    int   ti = math.round(math.abs(o0 - c1) / tk)
+    int   pi = math.round(math.abs(o1 - cX2) / tk)
+    bool  f  = fvgOn and ok and (d == 1 ? l0 > h2 : h0 < l2)
+    bool  r  = ok and (d == 1 ? (o0 > c1 and (edge or (c1 > o1 and c0 > o0))) : (o0 < c1 and (edge or (c1 < o1 and c0 < o0))))
+    bool  m  = extendBodies and r and ti >= viMergeTicks
+    bool  p  = extendBodies and pi >= viMergeTicks and (d == 1 ? (o1 > cX2 and cX2 > o2 and c1 > o1) : (o1 < cX2 and cX2 < o2 and c1 < o1))
+    bool  v  = volImbOn and r and ti >= viMinTicks
+    if f
+        if d == 1
+            b := (extendBodies and o1 > h2 and pi >= viMergeTicks) ? cX2 : h2
+            t := (extendBodies and l0 > c1 and ti >= viMergeTicks) ? o0 : l0
+            if p
+                b := math.min(b, cX2)
+        else
+            t := (extendBodies and o1 < l2 and pi >= viMergeTicks) ? cX2 : l2
+            b := (extendBodies and h0 < c1 and ti >= viMergeTicks) ? o0 : h0
+            if p
+                t := math.max(t, cX2)
+    if (f and m) or (v and (not f or extendBodies))
+        if d == 1
+            b := na(b) ? c1 : math.min(b, c1)
+            t := na(t) ? o0 : math.max(t, o0)
+        else
+            t := na(t) ? c1 : math.max(t, c1)
+            b := na(b) ? o0 : math.min(b, o0)
+    [b, t, f, m, v]
+
+// ══════════════════════════════════════════════════════════════
+// מצב לכל רמה
+// ══════════════════════════════════════════════════════════════
+type MG
+    int   dir
+    float top
+    float bot
+    int   sub
+    int   bar
+    bool  dead = false
+
+type Lv
+    int       lv
+    bool      on
+    array<MG> gaps
+    int       lastT   = 0
+    int       cS
+    int       cC
+    int       cP
+    bool      cB      = false
+    string    cN      = ""
+    int       pS
+    int       pC
+    int       pP
+    bool      pB      = false
+    bool      valid   = false
+    bool      done    = false
+    int       doneDir = 0
+
+f_newLv(int lv, bool on) =>
+    Lv.new(lv = lv, on = on, gaps = array.new<MG>())
+
+// נר סגור חדש במסגרת של הרמה: IFVG ואז גאפים חדשים
+method feed(Lv s, int t1, int t2, float o1, float h1, float l1, float c1, float o2, float c2, float h3, float l3, float c3, float o3) =>
+    if s.on and not na(t1) and t1 != s.lastT and not na(c1)
+        s.lastT := t1
+        for g in s.gaps
+            if not g.dead and (g.dir == 1 ? c1 < g.bot : c1 > g.top)
+                g.dead := true
+        [s3, x1, x2, x3, x4] = f_cyc(s.lv, t1)
+        [sM, y1, y2, y3, y4] = f_cyc(s.lv, t2)
+        bool ok   = not na(o2) and not na(h3) and not na(o3)
+        bool edge = s3 != sM
+        for d in array.from(1, -1)
+            [b, t, f, m, v] = f_leg(d, ok, o1, h1, l1, c1, o2, c2, h3, l3, c3, o3, syminfo.mintick, edge)
+            if not na(t) and not na(b) and t > b
+                bool tagNow = (edge and m) or not f
+                s.gaps.push(MG.new(d, t, b, tagNow ? s3 : sM, bar_index))
+        while s.gaps.size() > 150
+            s.gaps.shift()
+    s.lastT
+
+// הנר של הגרף: החלפת מחזור, ואז נגיעה בגאפ של הקודם
+method upd(Lv s, float h, float l) =>
+    bool fired = false
+    if s.on
+        [sub, cont, pos, blk, nm] = f_cyc(s.lv, time)
+        if not na(sub) and (na(s.cS) or sub != s.cS)
+            if not na(s.cS)
+                s.pS := s.cS
+                s.pC := s.cC
+                s.pP := s.cP
+                s.pB := s.cB
+            s.cS := sub
+            s.cC := cont
+            s.cP := pos
+            s.cB := blk
+            bool normal = not na(s.pS) and s.pC == cont and s.pP == pos - 1
+            bool seed   = s.lv == 2 and seed2 and pos == 0 and not na(s.pS) and s.pP == 3 and s.pC == cont - 1
+            s.valid   := not blk and not s.pB and (normal or seed)
+            s.done    := false
+            s.doneDir := 0
+        s.cN := nm
+        if s.valid and not s.done
+            for g in s.gaps
+                if not s.done and g.sub == s.pS and not g.dead and g.bar < bar_index
+                    if g.dir == 1 ? l <= g.top : h >= g.bot
+                        s.done    := true
+                        s.doneDir := g.dir
+                        fired     := true
+    fired
+
+// המטרה: הגאפ הפתוח הקרוב של המחזור הקודם. מחזיר [כיוון, מחיר, מרחק, יש גאפ]
+method target(Lv s, float px) =>
+    int   d    = 0
+    float lvl  = na
+    float dist = na
+    bool  any  = false
+    for g in s.gaps
+        if g.sub == s.pS and not g.dead
+            any := true
+            float dd = g.dir == 1 ? px - g.top : g.bot - px
+            if dd >= 0 and (na(dist) or dd < dist)
+                dist := dd
+                d    := g.dir == 1 ? -1 : 1
+                lvl  := g.dir == 1 ? g.top : g.bot
+    [d, lvl, dist, any]
+
+// ══════════════════════════════════════════════════════════════
+// נתונים — רק רמות שהמסגרת שלהן לא קטנה מהגרף
+// ══════════════════════════════════════════════════════════════
+chS = timeframe.in_seconds()
+on2 = use2 and chS <= 300
+on3 = use3 and chS <= 900
+on4 = use4 and chS <= 3600
+on5 = use5 and chS <= 14400
+on6 = use6 and chS <= 86400
+
+tf2 = on2 ? "5" : timeframe.period
+tf3 = on3 ? "15" : timeframe.period
+tf4 = on4 ? "60" : timeframe.period
+tf5 = on5 ? "240" : timeframe.period
+tf6 = on6 ? "D" : timeframe.period
+
+[a1, a2, ao1, ah1, al1, ac1, ao2, ac2, ah3, al3, ac3, ao3] = request.security(syminfo.tickerid, tf2, [time[1], time[2], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]])
+[b1, b2, bo1, bh1, bl1, bc1, bo2, bc2, bh3, bl3, bc3, bo3] = request.security(syminfo.tickerid, tf3, [time[1], time[2], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]])
+[d1, d2, do1, dh1, dl1, dc1, do2, dc2, dh3, dl3, dc3, do3] = request.security(syminfo.tickerid, tf4, [time[1], time[2], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]])
+[w1, w2, wo1, wh1, wl1, wc1, wo2, wc2, wh3, wl3, wc3, wo3] = request.security(syminfo.tickerid, tf5, [time[1], time[2], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]])
+[q1, q2, qo1, qh1, ql1, qc1, qo2, qc2, qh3, ql3, qc3, qo3] = request.security(syminfo.tickerid, tf6, [time[1], time[2], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]])
+
+var Lv L2 = f_newLv(2, on2)
+var Lv L3 = f_newLv(3, on3)
+var Lv L4 = f_newLv(4, on4)
+var Lv L5 = f_newLv(5, on5)
+var Lv L6 = f_newLv(6, on6)
+
+// קודם הגאפים של הנר שנסגר, אחר כך החלפת המחזור — כך גאפ של הנר האמצעי
+// נכנס למחזור הקודם לפני שבודקים מולו
+L2.feed(a1, a2, ao1, ah1, al1, ac1, ao2, ac2, ah3, al3, ac3, ao3)
+L3.feed(b1, b2, bo1, bh1, bl1, bc1, bo2, bc2, bh3, bl3, bc3, bo3)
+L4.feed(d1, d2, do1, dh1, dl1, dc1, do2, dc2, dh3, dl3, dc3, do3)
+L5.feed(w1, w2, wo1, wh1, wl1, wc1, wo2, wc2, wh3, wl3, wc3, wo3)
+L6.feed(q1, q2, qo1, qh1, ql1, qc1, qo2, qc2, qh3, ql3, qc3, qo3)
+
+f2 = L2.upd(high, low)
+f3 = L3.upd(high, low)
+f4 = L4.upd(high, low)
+f5 = L5.upd(high, low)
+f6 = L6.upd(high, low)
+
+// ══════════════════════════════════════════════════════════════
+// התראה — רק בזמן אמת, רק כשרמה חוזרת עכשיו לגאפ
+// ══════════════════════════════════════════════════════════════
+PREV = array.from("", "", "המיקרו הקודם", "הסשן הקודם", "היום הקודם", "השבוע הקודם", "רבע-הרבעון הקודם")
+
+f_alTxt(Lv s, bool fired) =>
+    fired ? s.cN + " חזר לגאפ של " + PREV.get(s.lv) + (s.doneDir == 1 ? " (מתחת)" : " (מעל)") : ""
+
+f_join(string a, string b) =>
+    a == "" ? b : b == "" ? a : a + " · " + b
+
+alTx = f_join(f_join(f_join(f_join(f_alTxt(L6, f6), f_alTxt(L5, f5)), f_alTxt(L4, f4)), f_alTxt(L3, f3)), f_alTxt(L2, f2))
+if alertOn and barstate.isrealtime and alTx != ""
+    alert("QT Map: " + alTx, alert.freq_once_per_bar)
+
+// ══════════════════════════════════════════════════════════════
+// התצוגה
+// ══════════════════════════════════════════════════════════════
+pTop = posH == "שמאל" ? position.top_left : posH == "מרכז" ? position.top_center : position.top_right
+pMid = posH == "שמאל" ? position.middle_left : posH == "מרכז" ? position.middle_center : position.middle_right
+pBot = posH == "שמאל" ? position.bottom_left : posH == "מרכז" ? position.bottom_center : position.bottom_right
+tPos = posV == "למעלה" ? pTop : posV == "באמצע" ? pMid : pBot
+tSz  = txtSz == "זעיר" ? size.tiny : txtSz == "קטן" ? size.small : txtSz == "גדול" ? size.large : size.normal
+isRow = lay == "שורה"
+atTop = posV == "למעלה"
+CLR   = color.new(color.black, 100)
+
+// שורה: עמודה לכל רמה (כותרת + 5) · עמודה: שורה לכל רמה
+var table mp = table.new(tPos, isRow ? 6 : 1, isRow ? 1 + pad : 6 + pad, border_width = 0)
+
+f_cell(Lv s) =>
+    string tx = ""
+    color  c  = cDone
+    if s.on
+        if not s.valid
+            tx := s.cN + " —"
+        else if s.done
+            tx := s.cN + " ✓" + (s.doneDir == 1 ? "▼" : "▲")
+        else
+            [d, lvl, dist, any] = s.target(close)
+            if not any
+                tx := s.cN + " ∅"
+            else if d == 0
+                tx := s.cN + " •"
+            else
+                tx := s.cN + " " + (d < 0 ? "▼" : "▲") + (showP ? " " + str.tostring(lvl, format.mintick) : "") + (showD ? " · " + str.tostring(math.round(dist / syminfo.mintick) * syminfo.mintick, format.mintick) : "")
+                c  := d < 0 ? cDn : cUp
+    [tx, c]
+
+f_put(int k, string tx, color c) =>
+    int row = isRow ? (atTop ? pad : 0) : (atTop ? pad + k : k)
+    if isRow
+        mp.cell(k, row, tx, text_color = c, text_size = tSz, bgcolor = CLR)
+    else
+        mp.cell(0, row, tx, text_color = c, text_size = tSz, bgcolor = CLR, text_halign = text.align_left)
+    0
+
+if barstate.islast
+    mp.clear(0, 0, isRow ? 5 : 0, isRow ? pad : 5 + pad)
+    // ריווח מהקצה
+    if pad > 0
+        for k = 0 to pad - 1
+            int r = isRow ? (atTop ? k : 1 + k) : (atTop ? k : 6 + k)
+            mp.cell(0, r, " ", text_size = tSz, bgcolor = CLR)
+    f_put(0, "QT", cHead)
+    int k = 1
+    for s in array.from(L6, L5, L4, L3, L2)
+        if s.on
+            [tx, c] = f_cell(s)
+            f_put(k, tx, c)
+            k += 1
+
+// קו אחד למטרה של רמה נבחרת
+var line tl = na
+var label tlb = na
+selLv = lineLv == "90 דק'" ? L2 : lineLv == "סשן" ? L3 : lineLv == "יום" ? L4 : lineLv == "שבוע" ? L5 : lineLv == "רבע-רבעון" ? L6 : na
+if barstate.islast
+    line.delete(tl)
+    label.delete(tlb)
+    if not na(selLv) and selLv.on and selLv.valid and not selLv.done
+        [d, lvl, dist, any] = selLv.target(close)
+        if d != 0
+            color c = d < 0 ? cDn : cUp
+            tl  := line.new(bar_index, lvl, bar_index + 15, lvl, color = c, style = line.style_dashed, width = 1)
+            tlb := label.new(bar_index + 15, lvl, selLv.cN, style = label.style_label_left, color = color.new(c, 100), textcolor = c, size = size.small)
