@@ -2,6 +2,22 @@
 indicator("SSMT + HSSMT | Quarterly Theory", overlay = true, max_labels_count = 20, max_lines_count = 20)
 
 // ═══════════════════════════════════════════════════════════════════
+// שינויים בגרסה הזו
+// 1. גרף במסגרת לא נתמכת (8H, 12H, 2D...) כבר לא מבקש נתוני 15 שניות —
+//    זה הפיל את הסקריפט (RE10063) למי שאין לו Premium.
+// 2. המסגרות שמתחת לגרף מקבלות רק תת-נרות **סגורים**. קודם הנר החי נכנס
+//    לחישוב, ושבירה יכלה להתריע ואז להיעלם.
+// 3. הסינון לפי True Open חל עכשיו על כל המסגרות — הגרף, הפינה וההתראות —
+//    כל מסגרת מול ה-True Open שלה, על הסימבול של הגרף. עד שנפתח ה-Q2 של
+//    המחזור, נמדד מול ה-True Open הקודם (כמו בגרף).
+// 4. תוקן RE10052 (array על na) — מסגרת נמוכה לא חוקית מחזירה na.
+// 5. שבירה משנית (לא הראשית): צבע, שקיפות, סגנון קו וגודל תווית משלה,
+//    נפרדים מהראשית.
+// 6. פינה מינימלית (ברירת מחדל): בפינה רק מסגרת, חץ ו-H/S — בלי כוכבים
+//    ובלי שמות נכסים, בטקסט קטן. התוויות על הגרף נשארות המלאות.
+// ═══════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════
 // הגדרות משתמש
 // ═══════════════════════════════════════════════════════════════════
 
@@ -26,14 +42,21 @@ colBull    = input.color(#26a69a, "צבע שורי", group = grpVis)
 colBear    = input.color(#ef5350, "צבע דובי", group = grpVis)
 // שבירות בין נכס 3 לנכס 4 בצבע אחד — הכיוון ידוע ממילא מהמיקום מעל/מתחת לנר
 colPair    = input.color(#ff9800, "צבע שבירות נכס 3 מול נכס 4", group = grpVis)
+minimal    = input.bool(true, "פינה מינימלית", group = grpVis, tooltip = "דלוק = בפינה רק מסגרת, חץ ו-H/S — בלי כוכבים ובלי שמות נכסים. התוויות על הגרף לא משתנות.")
 labelSize  = input.string("small", "גודל תווית", options = ["tiny", "small", "normal"], group = grpVis)
 showLine   = input.bool(true, "הצג קו שבירה", group = grpVis)
 // "אופקי" = ברמת הייחוס, נמתח עד הנר הנוכחי.
 // "אלכסוני" = קו בין נר הייחוס לנר שקבע את הקיצון הנוכחי, מוזז כך שלא יחצה נרות.
 lineMode   = input.string("אלכסוני", "סוג הקו", options = ["אלכסוני", "אופקי", "שניהם"], group = grpVis)
 linePad    = input.float(0.1, "מרווח הקו האלכסוני מהנרות (ATR)", minval = 0.0, maxval = 3.0, step = 0.05, group = grpVis)
-// הראשית מוצגת בצבע המלא, וכל שבירה אחרת שעדיין חיה מקבלת את השקיפות הזאת
-weakFade   = input.int(45, "שקיפות השבירות שאינן הראשית", minval = 0, maxval = 90, group = grpVis)
+// השבירות שאינן הראשית (כשיש יותר משבירה אחת חיה) — צבע, שקיפות, סגנון קו
+// וגודל תווית משלהן, נפרדים לגמרי מהראשית. שינוי שלהן לא נוגע בראשית.
+colBullW   = input.color(#80cbc4, "שבירה משנית — שורי", group = grpVis)
+colBearW   = input.color(#ef9a9a, "שבירה משנית — דובי", group = grpVis)
+colPairW   = input.color(#ffcc80, "שבירה משנית — נכס 3 מול 4", group = grpVis)
+weakFade   = input.int(30, "שקיפות השבירות המשניות", minval = 0, maxval = 90, group = grpVis, tooltip = "חל רק על השבירות שאינן הראשית. הראשית נשארת כמו שהיא.")
+weakStyle  = input.string("מקווקו", "סגנון קו — שבירה משנית", options = ["רציף", "מקווקו", "נקודות"], group = grpVis)
+weakSmall  = input.bool(true, "תווית קטנה לשבירה משנית", group = grpVis)
 // הקו דק כברירת מחדל — הדגשה נעשית בצבע ולא בעובי, כדי שהגרף יישאר נקי.
 lineWidth  = input.int(1, "עובי קו", minval = 1, maxval = 4, group = grpVis)
 closedMode = input.string("הצג", "שבירות שכולם סגרו (closed)", options = ["הצג", "האפר", "הסתר"], group = grpVis, tooltip = "(all closed) / (core closed) = SSMT שבה רק חלק מהנכסים לקחו את הרמה בפתיל, אבל כולם (או שני החזקים) כבר סגרו מעבר לסגירה הקיצונית.\n• הצג = מוצגת כמו כל שבירה, ומדורגת מתחת ל-SSMT רגילה.\n• האפר = מוצגת באפור.\n• הסתר = לא קיימת: לא על הגרף, לא בפינה ולא בהתראות, ולא נחשבת כראשית.")
@@ -54,7 +77,7 @@ qsMode  = input.string("סמן ★ בשבירה ב-QS", "QS — חלונות ז�
 hotList = input.string("111,114,141,144,411,414,441,444,222,333", "רצפים חמים", group = grpQS, tooltip = "מופרדים בפסיקים. שלוש רמות רצופות שיוצרות אחד מהרצפים האלה = חלון QS.")
 
 grpLogic = "לוגיקה"
-requireTrueOpen = input.bool(false, "סנן לפי True Open (פרימיום/דיסקאונט)", group = grpLogic)
+requireTrueOpen = input.bool(false, "סנן לפי True Open (פרימיום/דיסקאונט)", group = grpLogic, tooltip = "חל על כל המסגרות — הגרף, הפינה וההתראות. כל מסגרת נמדדת מול ה-True Open שלה, על הסימבול של הגרף.\nעד שנפתח ה-Q2 של המחזור הנוכחי — נמדד מול ה-True Open של המחזור הקודם.")
 blockDeadWeek   = input.bool(true, "חסום שבירות בשבוע מת (4H בלבד)", group = grpLogic)
 
 grpMTF = "מסגרות זמן"
@@ -62,6 +85,7 @@ mtfOn      = input.bool(true,  "הצג מסגרות זמן אחרות", group = 
 mtfMark    = input.bool(true,  "הצג סימון זעיר משאר המסגרות", group = grpMTF)
 mtfMarkPos = input.string("שמאל למטה", "מיקום הסימון", options = ["שמאל למטה", "שמאל למעלה", "אמצע למטה", "ימין למטה"], group = grpMTF)
 mtfColor   = input.color(color.white, "צבע הסימון", group = grpMTF)
+cornerSz   = input.string("tiny", "גודל טקסט בפינה", options = ["tiny", "small", "normal"], group = grpMTF)
 mtfAlert   = input.bool(true,  "כלול שבירות ממסגרות אחרות בהתראה", group = grpMTF, tooltip = "ההתראה כותבת רק את המסגרת שבה קרתה שבירה חדשה וכיוונה, למשל QT SSMT: 5m ▼ (ושבירת נכס 3 מול 4: QT SSMT: 5m ▼ YM/RTY). שבירות 15 שניות לא מתריעות. כבוי = רק מסגרת הגרף.")
 // נתוני שניות כבויים כברירת מחדל: TradingView זורק שגיאת ריצה RE10063
 // ("seconds-based timeframes ... Premium and higher-tier plans") על עצם הבקשה
@@ -992,25 +1016,31 @@ f_clearShift(bool isBull, int b1, float p1, int b2, float p2, array<float> extA,
                     sh := math.max(sh, isBull ? ln - (ex - pad) : (ex + pad) - ln)
     sh
 
-// צבע השבירה — רך כברירת מחדל: HSSMT מעט שקוף, SSMT שקוף יותר. שבירה ב-QS
-// (★ או ☆) מקבלת צבע מלא. לשבירות שאינן הראשית מתווספת שקיפות נוספת.
+// צבע השבירה הראשית — רך כברירת מחדל: HSSMT מעט שקוף, SSMT שקוף יותר, ושבירה
+// ב-QS (★ או ☆) בצבע מלא. שבירה משנית מקבלת את השקיפות שלה בלבד (weakFade),
+// בלי קשר לראשית — כך שינוי שלה לא מעמעם את הכול.
 f_col(color base, int typ, bool weak, bool hot) =>
-    t = (hot ? 0 : typ == 2 ? 25 : 45) + (weak ? weakFade : 0)
+    t = weak ? weakFade : (hot ? 0 : typ == 2 ? 25 : 45)
     color.new(base, math.min(t, 95))
+
+wStyle = weakStyle == "מקווקו" ? line.style_dashed : weakStyle == "נקודות" ? line.style_dotted : line.style_solid
 
 // הכוכב: ★ = השבירה ב-QS על נכס הגרף, ☆ = על נכס אחר. אם הרצף שתפס את ה-QS
 // שונה מהרצף שכתוב בתווית, הוא נכתב צמוד לכוכב.
 f_starTxt(string sym, string pat, string chT) => pat == "" or pat == chT ? sym : sym + pat
 
-// הטקסט של התווית: שורה עליונה — מאיזה רצף עברנו לאיזה, וכוכב אם ב-QS;
+// הטקסט המלא של התווית: שורה עליונה — מאיזה רצף עברנו לאיזה, וכוכב אם ב-QS;
 // שורה תחתונה — המחזור, הסוג והנכסים. לזוג 3–4 אותה תווית בדיוק — הצבע מבדיל.
-f_lblTxt(Brk b) =>
+f_lblFull(Brk b) =>
     star = b.qH ? f_starTxt("★", b.qP, b.qT) : b.qX ? f_starTxt("☆", b.xP, b.qT != "" ? b.qT : b.xT) : ""
     cR   = b.qR != "" ? b.qR : b.xR
     cT   = b.qT != "" ? b.qT : b.xT
     top  = cR != "" ? cR + "-" + cT + (star != "" ? " " + star : "") : ""
     bot  = f_cycName(tfClass) + " " + (b.typ == 2 ? "HSSMT" : "SSMT") + " · " + f_assets(b.lbl)
     top == "" ? bot : top + "\n" + bot
+
+// התווית על הגרף — תמיד המלאה
+f_lblTxt(Brk b) => f_lblFull(b)
 
 // הנכס הראשון בקבוצה שלקח את הרמה — לעיגון התווית כשנכס הגרף לא חלק מהשבירה
 f_taker(string s, int aLo, int aHi) =>
@@ -1033,28 +1063,30 @@ f_draw(int k, Brk b, bool weak, array<label> L, array<line> N) =>
     aHi    = isPair ? 3 : 2
     onCh   = cA >= aLo and cA <= aHi
     grey   = greyC and f_closed(b.lbl)
-    base   = grey ? color.gray : isPair ? colPair : isBull ? colBull : colBear
+    base   = grey ? color.gray : weak ? (isPair ? colPairW : isBull ? colBullW : colBearW) : (isPair ? colPair : isBull ? colBull : colBear)
+    lSty   = weak ? wStyle : line.style_solid
+    lSize  = weak and weakSmall ? size.tiny : labelSize
     cFin   = f_col(base, b.typ, weak, f_inQS(b))
     aAnc   = onCh ? cA : f_taker(b.lbl, aLo, aHi)
     [b1, p1, b2, p2, ok] = f_pts(f_acc(aAnc), isBull, isH, b.refI)
     float y2 = na
     if onCh and showLine
         if lineMode != "אלכסוני" and not na(b.lvl) and b.refB > 0
-            array.push(N, line.new(b.refB, b.lvl, bar_index, b.lvl, color = cFin, width = lineWidth))
+            array.push(N, line.new(b.refB, b.lvl, bar_index, b.lvl, color = cFin, width = lineWidth, style = lSty))
         if lineMode != "אופקי" and ok
             acc = f_acc(cA)
             pad = atr * linePad
             sh  = f_clearShift(isBull, b1, p1, b2, p2, f_accA(acc, isBull, isH), f_accPA(acc, isBull, isH), b.refI, pad)
             y1  = isBull ? p1 - pad - sh : p1 + pad + sh
             y2 := isBull ? p2 - pad - sh : p2 + pad + sh
-            array.push(N, line.new(b1, y1, b2, y2, color = cFin, width = lineWidth))
+            array.push(N, line.new(b1, y1, b2, y2, color = cFin, width = lineWidth, style = lSty))
     // התווית מעל (או מתחת ל-) הנר שלקח את הרמה — מעל הפתיל, כדי שלא תעלה על הנר
     if ok
         hB = high[bar_index - b2]
         lB = low[bar_index - b2]
         pd = atr * 0.15
         yl = isBull ? math.min(lB, nz(y2, lB)) - pd : math.max(hB, nz(y2, hB)) + pd
-        array.push(L, label.new(b2, yl, f_lblTxt(b), style = isBull ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = cFin, size = labelSize, textalign = text.align_center))
+        array.push(L, label.new(b2, yl, f_lblTxt(b), style = isBull ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = cFin, size = lSize, textalign = text.align_center))
     ok
 
 // רק המצב הנוכחי מצויר, ולכן מציירים רק בנר האחרון: מוחקים הכול ומציירים מחדש
@@ -1082,7 +1114,7 @@ if barstate.islast
 // מעל הגרף — ההיסט נעשה בתוך הביטוי (high[1] וכו'), כלומר בזמן של אותה
 // מסגרת, ולכן אין ריפיינט: נר נכנס לחישוב רק כשהוא נסגר.
 // מתחת לגרף — אין נרות מוסטים, ולכן מושכים את כל תת-הנרות של נר הגרף
-// (request.security_lower_tf) ומזינים אותם למנוע אחד-אחד.
+// (request.security_lower_tf) ומזינים אותם למנוע אחד-אחד — רק תת-נרות שנסגרו.
 //
 // שים לב: לוגיקת המחזורים כאן משכפלת את החישוב הראשי שלמעלה. אם משנים
 // את מודל הסייקלים — חייבים לשנות בשני המקומות.
@@ -1156,7 +1188,9 @@ f_cycT(int cls, int t) =>
     // שישי: 1H תמיד חסום, 4H רק בשבוע 4. שבוע 5 ושבוע מת חסומים ב-4H.
     fri = dw == dayofweek.friday
     blk = (cls == 5 and fri) or (cls == 6 and ((fri and wkN == 4) or wkN == 5 or (blockDeadWeek and dead)))
-    [rId, lId, kL, blk]
+    // ה-Q2 של המחזור — הנר הראשון בו הוא ה-True Open. זהה ל-inXxxQ2 של הגרף.
+    q2  = cls == 9 ? ((yy - 2023) % 4 + 4) % 4 == 1 : cls == 8 ? qQtr == 1 : cls == 7 ? qsIdx == 1 : cls == 6 ? wkN == 2 : cls == 5 ? dw == dayofweek.tuesday : cls == 4 ? (mFD >= 360 and mFD < 720) : cls == 3 ? miIdx == 1 : cls == 2 ? qIdx == 1 : sqIdx == 1
+    [rId, lId, kL, blk, q2]
 
 // מנוע שלם למסגרת זמן אחת — כל המצב שלו מוקצה פעם אחת ומתעדכן במקום.
 // ארבע השבירות שלו באותו סדר כמו בגרף (0/1 שלישייה, 2/3 זוג 3–4).
@@ -1179,6 +1213,10 @@ type Eng
     bool   started = false
     bool   sAct    = false
     int    seqC    = 0
+    // True Open של המסגרת הזו, על הסימבול של הגרף
+    bool   pQ2     = false
+    float  toP     = na
+    float  cRef    = na
     // הראשית — לפינה ולהתראה
     string txt   = ""
     int    pk    = -1
@@ -1203,11 +1241,24 @@ f_engQS(Eng e, int k) =>
             xOn := true
     [oH, xOn]
 
-// צעד אחד: נר סגור אחד של המסגרת שהמנוע מייצג
-f_engStep(Eng e, int t, float h1, float l1, float c1, float h2, float l2, float c2, float h3, float l3, float c3, float h4, float l4, float c4) =>
+// צעד אחד: נר סגור אחד של המסגרת שהמנוע מייצג.
+// oR / cR = הפתיחה והסגירה של אותו נר על הסימבול של הגרף — בשביל ה-True Open.
+f_engStep(Eng e, int t, float oR, float cR, float h1, float l1, float c1, float h2, float l2, float c2, float h3, float l3, float c3, float h4, float l4, float c4) =>
     if not na(t) and t != e.lastT and not na(c1) and not na(c2) and not na(c3) and not na(c4)
         e.lastT := t
-        [rId, lId, kL, blk] = f_cycT(e.cls, t)
+        [rId, lId, kL, blk, q2] = f_cycT(e.cls, t)
+        // True Open: הפתיחה של הנר הראשון ב-Q2. אם חסר לו נתון — מנסים בנר הבא.
+        // עד ה-Q2 של המחזור הזה נשאר ה-True Open של המחזור הקודם.
+        if q2 and not e.pQ2
+            if not na(oR)
+                e.toP := oR
+                e.pQ2 := true
+        else
+            e.pQ2 := q2
+        if not na(cR)
+            e.cRef := cR
+        eBear = not requireTrueOpen or (not na(e.toP) and not na(e.cRef) and e.cRef > e.toP)
+        eBull = not requireTrueOpen or (not na(e.toP) and not na(e.cRef) and e.cRef < e.toP)
         newRef  = e.started and rId != e.refId
         newLife = e.started and lId != e.lifeId
         canP    = not na(e.a1.hi) and not na(e.a2.hi) and not na(e.a3.hi) and not na(e.a4.hi)
@@ -1234,7 +1285,7 @@ f_engStep(Eng e, int t, float h1, float l1, float c1, float h2, float l2, float 
                 ri = array.get(e.riA, k)
                 array.set(e.riA, k, ri > 0 ? ri - 1 : -1)
 
-        // אותה לוגיקת שבירה בדיוק כמו בגרף
+        // אותה לוגיקת שבירה בדיוק כמו בגרף, כולל הסינון לפי True Open
         for k = 0 to 3
             isBull = k % 2 == 1
             int    nT = 0
@@ -1251,6 +1302,8 @@ f_engStep(Eng e, int t, float h1, float l1, float c1, float h2, float l2, float 
                     nT := gt
                     nI := gi
                     nS := gs
+            if nT != 0 and not (isBull ? eBull : eBear)
+                nT := 0
             if nT != 0
                 if array.get(e.tyA, k) == 0 or nI != array.get(e.riA, k)
                     e.seqC := e.seqC + 1
@@ -1292,7 +1345,7 @@ f_engPick(Eng e) =>
     if best >= 0
         pl  = array.get(e.lbA, best)
         tag = array.get(e.qhA, best) ? " ★" : array.get(e.qsA, best) ? " ☆" : ""
-        e.txt   := (best % 2 == 1 ? "▲" : "▼") + pl + tag
+        e.txt   := (best % 2 == 1 ? "▲" : "▼") + (minimal ? (array.get(e.tyA, best) == 2 ? "H" : "S") : pl + tag)
         e.pSeq  := array.get(e.sqA, best)
         e.pGrey := greyC and f_closed(pl)
     else
@@ -1304,6 +1357,7 @@ f_engPick(Eng e) =>
 // חשוב: ב-Pine האופרטור and לא מובטח כ-short-circuit, ולכן אסור לכתוב
 // while k < n - 1 and array.get(ta, k + 1) <= t — ה-array.get יורץ גם
 // כשהתנאי הראשון שקרי ויזרוק Index out of range. לכן שני if מקוננים.
+// הקורא חייב לוודא שהמערך לא ריק.
 f_cur(array<int> ta, int t, int from) =>
     n = array.size(ta)
     k = from < 0 ? 0 : from > n - 1 ? n - 1 : from
@@ -1338,11 +1392,14 @@ cD2 = math.max(tfClass - 2, minCls)
 
 // המחרוזות חייבות להיות טרנרי ישיר ולא קריאה לפונקציה: פונקציה ב-Pine מחזירה
 // תמיד series string, ו-request.security דורש simple string בפרמטר הזמן.
-tU1 = cU1 == 1 ? "15S" : cU1 == 2 ? "1" : cU1 == 3 ? "5" : cU1 == 4 ? "15" : cU1 == 5 ? "60" : cU1 == 6 ? "240" : cU1 == 7 ? "D" : cU1 == 8 ? "W" : "M"
-tU2 = cU2 == 1 ? "15S" : cU2 == 2 ? "1" : cU2 == 3 ? "5" : cU2 == 4 ? "15" : cU2 == 5 ? "60" : cU2 == 6 ? "240" : cU2 == 7 ? "D" : cU2 == 8 ? "W" : "M"
-tU3 = cU3 == 1 ? "15S" : cU3 == 2 ? "1" : cU3 == 3 ? "5" : cU3 == 4 ? "15" : cU3 == 5 ? "60" : cU3 == 6 ? "240" : cU3 == 7 ? "D" : cU3 == 8 ? "W" : "M"
-tD1 = cD1 == 1 ? (use15s ? "15S" : "1") : cD1 == 2 ? "1" : cD1 == 3 ? "5" : cD1 == 4 ? "15" : cD1 == 5 ? "60" : cD1 == 6 ? "240" : cD1 == 7 ? "D" : cD1 == 8 ? "W" : "M"
-tD2 = cD2 == 1 ? (use15s ? "15S" : "1") : cD2 == 2 ? "1" : cD2 == 3 ? "5" : cD2 == 4 ? "15" : cD2 == 5 ? "60" : cD2 == 6 ? "240" : cD2 == 7 ? "D" : cD2 == 8 ? "W" : "M"
+// במסגרת לא נתמכת (tfClass = 0) — שום מסגרת אחרת לא נסרקת: למעלה מסגרת הגרף
+// (כבר טעונה), למטה "12M" (לא חוקי מתחת לגרף, ונזרק בלי למשוך נתונים).
+// בלי זה, גרף 8H / 2D היה מבקש נתוני 15 שניות ונופל בלי Premium.
+tU1 = tfClass == 0 ? timeframe.period : cU1 == 1 ? "15S" : cU1 == 2 ? "1" : cU1 == 3 ? "5" : cU1 == 4 ? "15" : cU1 == 5 ? "60" : cU1 == 6 ? "240" : cU1 == 7 ? "D" : cU1 == 8 ? "W" : "M"
+tU2 = tfClass == 0 ? timeframe.period : cU2 == 1 ? "15S" : cU2 == 2 ? "1" : cU2 == 3 ? "5" : cU2 == 4 ? "15" : cU2 == 5 ? "60" : cU2 == 6 ? "240" : cU2 == 7 ? "D" : cU2 == 8 ? "W" : "M"
+tU3 = tfClass == 0 ? timeframe.period : cU3 == 1 ? "15S" : cU3 == 2 ? "1" : cU3 == 3 ? "5" : cU3 == 4 ? "15" : cU3 == 5 ? "60" : cU3 == 6 ? "240" : cU3 == 7 ? "D" : cU3 == 8 ? "W" : "M"
+tD1 = tfClass == 0 ? "12M" : cD1 == 1 ? (use15s ? "15S" : "1") : cD1 == 2 ? "1" : cD1 == 3 ? "5" : cD1 == 4 ? "15" : cD1 == 5 ? "60" : cD1 == 6 ? "240" : cD1 == 7 ? "D" : cD1 == 8 ? "W" : "M"
+tD2 = tfClass == 0 ? "12M" : cD2 == 1 ? (use15s ? "15S" : "1") : cD2 == 2 ? "1" : cD2 == 3 ? "5" : cD2 == 4 ? "15" : cD2 == 5 ? "60" : cD2 == 6 ? "240" : cD2 == 7 ? "D" : cD2 == 8 ? "W" : "M"
 
 lkh = barmerge.lookahead_off
 
@@ -1359,7 +1416,7 @@ lkh = barmerge.lookahead_off
 [cH3, cL3, cC3]      = request.security(s3, tU3, [high[1], low[1], close[1]], lookahead = lkh)
 [cH4, cL4, cC4]      = request.security(s4, tU3, [high[1], low[1], close[1]], lookahead = lkh)
 
-// ignore_invalid_timeframe מחזיר ריק במקום להפיל את הסקריפט כשהמדרגה הזאת
+// ignore_invalid_timeframe מחזיר na במקום להפיל את הסקריפט כשהמדרגה הזאת
 // לא באמת מתחת לגרף (למשל גרף דקה, שאין מתחתיו כלום).
 // כל נכס מוחזר כמערך משלו, ודקה בלי עסקאות פשוט לא מייצרת נר. לכן חובה למשוך
 // גם time לכל נכס ולזווג לפי זמן — זיווג לפי אינדקס משווה דקות שונות.
@@ -1371,6 +1428,20 @@ lkh = barmerge.lookahead_off
 [fT2, fH2, fL2, fC2] = request.security_lower_tf(s2, tD2, [time, high, low, close], ignore_invalid_timeframe = true)
 [fT3, fH3, fL3, fC3] = request.security_lower_tf(s3, tD2, [time, high, low, close], ignore_invalid_timeframe = true)
 [fT4, fH4, fL4, fC4] = request.security_lower_tf(s4, tD2, [time, high, low, close], ignore_invalid_timeframe = true)
+
+// ── True Open של המסגרות האחרות: הפתיחה והסגירה על הסימבול של הגרף עצמו,
+//    בדיוק כמו ה-True Open של הגרף. כשהסינון כבוי, הבקשות העליונות מצביעות
+//    על מסגרת הגרף (כבר טעונה) והתחתונות על "12M" (לא חוקי — לא נמשך כלום).
+tUo1 = requireTrueOpen ? tU1 : timeframe.period
+tUo2 = requireTrueOpen ? tU2 : timeframe.period
+tUo3 = requireTrueOpen ? tU3 : timeframe.period
+tDo1 = requireTrueOpen ? tD1 : "12M"
+tDo2 = requireTrueOpen ? tD2 : "12M"
+[aOc, aCc] = request.security(syminfo.tickerid, tUo1, [open[1], close[1]], lookahead = lkh)
+[bOc, bCc] = request.security(syminfo.tickerid, tUo2, [open[1], close[1]], lookahead = lkh)
+[cOc, cCc] = request.security(syminfo.tickerid, tUo3, [open[1], close[1]], lookahead = lkh)
+[dTc, dOc, dCc] = request.security_lower_tf(syminfo.tickerid, tDo1, [time, open, close], ignore_invalid_timeframe = true)
+[fTc, fOc, fCc] = request.security_lower_tf(syminfo.tickerid, tDo2, [time, open, close], ignore_invalid_timeframe = true)
 
 // מדרגת 15 שניות בלי Premium מוזנת בנרות דקה, ולכן אורך הנר שלה הוא דקה
 f_inMs(int cls) => cls == 1 and not use15s ? 60000 : f_clsMs(cls)
@@ -1387,46 +1458,85 @@ useU3 = tfClass + 3 <= 6
 useD1 = tfClass - 1 >= minCls
 useD2 = tfClass - 2 >= minCls
 
+// גודל של מערך שעלול להיות na: מסגרת לא חוקית (ignore_invalid_timeframe)
+// מחזירה na ולא מערך ריק, ו-array.size על na מפיל את הסקריפט (RE10052).
+f_szF(array<float> a) =>
+    int n = 0
+    if not na(a)
+        n := array.size(a)
+    n
+
+f_szI(array<int> a) =>
+    int n = 0
+    if not na(a)
+        n := array.size(a)
+    n
+
+// כמה תת-נרות להזין: בזמן אמת, כל עוד נר הגרף לא נסגר, תת-הנר האחרון עדיין
+// נבנה — ולכן הוא לא נכנס. ברגע שהבא אחריו נפתח הוא כבר סגור ונכנס, כך
+// שהעיכוב הוא טיק אחד בלבד. בהיסטוריה כל הנרות סגורים ושום דבר לא משתנה.
+nD1 = barstate.isconfirmed ? f_szF(dC1) : f_szF(dC1) - 1
+nD2 = barstate.isconfirmed ? f_szF(fC1) : f_szF(fC1) - 1
+
 // הצעד רץ גם בתוך נר הגרף החי, ולא רק בסגירתו — כך שבירה של 5 דקות מופיעה
 // ברגע שנר ה-5 נסגר, בלי לחכות לסגירת נר ה-15. זה בטוח: בנר חי הסקריפט רץ
 // מחדש בכל טיק ומצב ה-var מוחזר אחורה לסגירת הנר הקודם, ולכן הצעדים פשוט
 // מחושבים מחדש מאותה נקודה ולא נספרים פעמיים.
 if mtfOn and tfClass != 0
     if useU1
-        f_engStep(egU1, aT,  aH1, aL1, aC1, aH2, aL2, aC2, aH3, aL3, aC3, aH4, aL4, aC4)
+        f_engStep(egU1, aT,  aOc, aCc, aH1, aL1, aC1, aH2, aL2, aC2, aH3, aL3, aC3, aH4, aL4, aC4)
     if useU2
-        f_engStep(egU2, bT_, bH1, bL1, bC1, bH2, bL2, bC2, bH3, bL3, bC3, bH4, bL4, bC4)
+        f_engStep(egU2, bT_, bOc, bCc, bH1, bL1, bC1, bH2, bL2, bC2, bH3, bL3, bC3, bH4, bL4, bC4)
     if useU3
-        f_engStep(egU3, cT_, cH1, cL1, cC1, cH2, cL2, cC2, cH3, cL3, cC3, cH4, cL4, cC4)
+        f_engStep(egU3, cT_, cOc, cCc, cH1, cL1, cC1, cH2, cL2, cC2, cH3, cL3, cC3, cH4, cL4, cC4)
     // תת-הנרות מזווגים לפי זמן: הזמנים של נכס 1 הם המפתח, וסמן רץ מוצא לכל נכס
     // את הנר שלו באותו זמן. נכס שחסרה לו הדקה הזאת נשאר על הנר הקודם שלו —
     // וזה בטוח, כי המצברים לוקחים מקסימום/מינימום וערך שכבר נכלל לא משנה כלום.
-    // בגרף דקה בלי Premium, מדרגת 15 השניות מוזנת ישירות בנרות הגרף עצמו.
+    // בגרף דקה בלי Premium, מדרגת 15 השניות מוזנת ישירות בנרות הגרף עצמו —
+    // רק בסגירת נר, כדי שנר דקה חי לא ייכנס.
     d1Direct = tfClass == 2 and cD1 == 1 and not use15s
-    if useD1 and d1Direct and not na(x1c) and not na(x2c) and not na(x3c) and not na(x4c)
-        f_engStep(egD1, time, x1h, x1l, x1c, x2h, x2l, x2c, x3h, x3l, x3c, x4h, x4l, x4c)
-    if useD1 and not d1Direct and array.size(dC1) > 0 and array.size(dC2) > 0 and array.size(dC3) > 0 and array.size(dC4) > 0
+    if useD1 and d1Direct and barstate.isconfirmed and not na(x1c) and not na(x2c) and not na(x3c) and not na(x4c)
+        f_engStep(egD1, time, open, close, x1h, x1l, x1c, x2h, x2l, x2c, x3h, x3l, x3c, x4h, x4l, x4c)
+    if useD1 and not d1Direct and nD1 > 0 and f_szF(dC2) > 0 and f_szF(dC3) > 0 and f_szF(dC4) > 0
         int k2 = 0
         int k3 = 0
         int k4 = 0
-        for j = 0 to array.size(dC1) - 1
+        int kc = 0
+        nDc = f_szI(dTc)
+        for j = 0 to nD1 - 1
             tj = array.get(dT1, j)
             k2 := f_cur(dT2, tj, k2)
             k3 := f_cur(dT3, tj, k3)
             k4 := f_cur(dT4, tj, k4)
+            float oR = na
+            float cR = na
+            if nDc > 0
+                kc := f_cur(dTc, tj, kc)
+                if array.get(dTc, kc) == tj
+                    oR := array.get(dOc, kc)
+                    cR := array.get(dCc, kc)
             if array.get(dT2, k2) <= tj and array.get(dT3, k3) <= tj and array.get(dT4, k4) <= tj
-                f_engStep(egD1, tj, array.get(dH1, j), array.get(dL1, j), array.get(dC1, j), array.get(dH2, k2), array.get(dL2, k2), array.get(dC2, k2), array.get(dH3, k3), array.get(dL3, k3), array.get(dC3, k3), array.get(dH4, k4), array.get(dL4, k4), array.get(dC4, k4))
-    if useD2 and array.size(fC1) > 0 and array.size(fC2) > 0 and array.size(fC3) > 0 and array.size(fC4) > 0
+                f_engStep(egD1, tj, oR, cR, array.get(dH1, j), array.get(dL1, j), array.get(dC1, j), array.get(dH2, k2), array.get(dL2, k2), array.get(dC2, k2), array.get(dH3, k3), array.get(dL3, k3), array.get(dC3, k3), array.get(dH4, k4), array.get(dL4, k4), array.get(dC4, k4))
+    if useD2 and nD2 > 0 and f_szF(fC2) > 0 and f_szF(fC3) > 0 and f_szF(fC4) > 0
         int m2 = 0
         int m3 = 0
         int m4 = 0
-        for j = 0 to array.size(fC1) - 1
+        int mc = 0
+        nFc = f_szI(fTc)
+        for j = 0 to nD2 - 1
             tj = array.get(fT1, j)
             m2 := f_cur(fT2, tj, m2)
             m3 := f_cur(fT3, tj, m3)
             m4 := f_cur(fT4, tj, m4)
+            float oR = na
+            float cR = na
+            if nFc > 0
+                mc := f_cur(fTc, tj, mc)
+                if array.get(fTc, mc) == tj
+                    oR := array.get(fOc, mc)
+                    cR := array.get(fCc, mc)
             if array.get(fT2, m2) <= tj and array.get(fT3, m3) <= tj and array.get(fT4, m4) <= tj
-                f_engStep(egD2, tj, array.get(fH1, j), array.get(fL1, j), array.get(fC1, j), array.get(fH2, m2), array.get(fL2, m2), array.get(fC2, m2), array.get(fH3, m3), array.get(fL3, m3), array.get(fC3, m3), array.get(fH4, m4), array.get(fL4, m4), array.get(fC4, m4))
+                f_engStep(egD2, tj, oR, cR, array.get(fH1, j), array.get(fL1, j), array.get(fC1, j), array.get(fH2, m2), array.get(fL2, m2), array.get(fC2, m2), array.get(fH3, m3), array.get(fL3, m3), array.get(fC3, m3), array.get(fH4, m4), array.get(fL4, m4), array.get(fC4, m4))
 
 // ═══════════════════════════════════════════════════════════════════
 // הפינה + התראה
@@ -1459,7 +1569,7 @@ if barstate.islast and tfClass != 0
     if prim >= 0
         pb  = array.get(bk, prim)
         tag = pb.qH ? " ★" : pb.qX ? " ☆" : ""
-        sC    := (prim % 2 == 1 ? "▲" : "▼") + pb.lbl + tag
+        sC    := (prim % 2 == 1 ? "▲" : "▼") + (minimal ? (pb.typ == 2 ? "H" : "S") : pb.lbl + tag)
         cSeq  := pb.seq
         cGrey := greyC and f_closed(pb.lbl)
 
@@ -1484,16 +1594,16 @@ if barstate.islast and tfClass != 0
         if array.get(useArr, i) and c != prevC   // הרשימה יורדת, אז די בהשוואה לקודם כדי לנקות כפילויות בקצוות
             // את מסגרת הגרף עצמה לא כותבים בפינה — היא כבר מצוירת על הגרף
             if st != "" and mtfOn and mtfMark and c != tfClass and mcol <= 11
-                table.cell(markTbl, mcol, 0, f_tfName(c) + " " + st, text_color = f_rowCol(k, array.get(gArr, i)), text_size = size.small, bgcolor = bg)
+                table.cell(markTbl, mcol, 0, f_tfName(c) + " " + st, text_color = f_rowCol(k, array.get(gArr, i)), text_size = cornerSz, bgcolor = bg)
                 mcol := mcol + 1
-            // התראה: רק המסגרת והכיוון (וזוג 3–4 בשמו). 15 שניות לא מתריעות.
+            // התראה: רק המסגרת והכיוון (וזוג 3–4 בשמו). 15 שניות לא מתריעות — בשום גרף.
             if st != "" and sq > array.get(alSeq, i) and c != 1 and ((mtfOn and mtfAlert) or c == tfClass)
                 alTxt := alTxt + (alTxt == "" ? "" : " · ") + f_tfName(c) + " " + (k % 2 == 1 ? "▲" : "▼") + (k >= 2 ? " " + nmP : "")
             prevC := c
         if sq > array.get(alSeq, i)
             array.set(alSeq, i, sq)
     if mcol > 1
-        table.cell(markTbl, 0, 0, "QT", text_color = mtfColor, text_size = size.small, bgcolor = bg)
+        table.cell(markTbl, 0, 0, "QT", text_color = mtfColor, text_size = cornerSz, bgcolor = bg)
     if alReady and alTxt != ""
         alert("QT SSMT: " + alTxt, alert.freq_once_per_bar)
     alReady := true
