@@ -33,6 +33,8 @@ colBull = input.color(#26a69a, "רמה מתחת (משבירה שורית)", grou
 lnStyle = input.string("מקווקו", "סגנון קו", options = ["רציף", "מקווקו", "נקודות"], group = grpVis)
 lbSize  = input.string("זעיר", "גודל כתב", options = ["זעיר", "קטן", "רגיל"], group = grpVis)
 fade    = input.int(0, "שקיפות", minval = 0, maxval = 90, group = grpVis)
+showTk  = input.bool(false, "הצג גם רמות שכבר נלקחו (אפור)", group = grpVis)
+showDbg = input.bool(true, "שורת בדיקה (כמה שבירות נמצאו)", group = grpVis)
 
 // ══════════════════════════════════════════════════════════════
 // נכס הגרף — לפי השם, כמו ב-SSMT
@@ -333,8 +335,12 @@ type QL
     float  price
     int    t        // זמן הפתיחה של נר השבירה
     string txt
+    int    tk = na  // מתי נלקחה (na = עדיין פתוחה)
 
 var array<QL> lvls = array.new<QL>()
+var array<QL> took = array.new<QL>()
+// מונים: 0 שבירות חדשות · 1 מהן ב-QS · 2 נוספו כרמה
+var array<int> cnt = array.new_int(3, 0)
 
 // ══════════════════════════════════════════════════════════════
 // מנוע למסגרת אחת
@@ -362,13 +368,16 @@ f_bit(int m, int b) =>
 
 // שבירה חדשה ב-QS → רמה חדשה
 f_add(Eng e, bool isBull, int typ, int mask, int t, float hx, float lx) =>
+    cnt.set(0, cnt.get(0) + 1)
     if typ == 2 or typesIn == "SSMT וגם HSSMT"
         [hot, pat] = f_qsAt(e.cls, t, f_clsMs(e.cls))
         if hot
+            cnt.set(1, cnt.get(1) + 1)
             bool own = cA >= 0 and f_bit(mask, cA == 0 ? 1 : cA == 1 ? 2 : 4)
             if own or starsIn == "★ וגם ☆"
                 float px = isBull ? lx : hx
                 if not na(px)
+                    cnt.set(2, cnt.get(2) + 1)
                     lvls.push(QL.new(isBull ? 1 : -1, px, t, f_tfName(e.cls) + " " + pat + (own ? "★" : "☆") + (typ == 2 ? " H" : "")))
                     while lvls.size() > maxLv
                         lvls.shift()
@@ -467,6 +476,10 @@ if lvls.size() > 0
     for i = lvls.size() - 1 to 0
         QL q = lvls.get(i)
         if time > q.t and (q.dir == -1 ? high > q.price : low < q.price)
+            q.tk := time
+            took.push(q)
+            while took.size() > maxLv
+                took.shift()
             lvls.remove(i)
 
 // ══════════════════════════════════════════════════════════════
@@ -486,3 +499,13 @@ if barstate.islast
         color c = color.new(q.dir == -1 ? colBear : colBull, fade)
         dLn.push(line.new(q.t, q.price, time, q.price, xloc = xloc.bar_time, color = c, style = lSty, width = 1))
         dLb.push(label.new(time, q.price, q.txt, xloc = xloc.bar_time, style = label.style_label_left, color = color.new(color.black, 100), textcolor = c, size = lSz))
+    if showTk
+        for q in took
+            color g = color.new(color.gray, 40)
+            dLn.push(line.new(q.t, q.price, q.tk, q.price, xloc = xloc.bar_time, color = g, style = lSty, width = 1))
+            dLb.push(label.new(q.tk, q.price, q.txt, xloc = xloc.bar_time, style = label.style_label_left, color = color.new(color.black, 100), textcolor = g, size = lSz))
+
+var table dbg = table.new(position.bottom_right, 1, 1)
+if barstate.islast and showDbg
+    string st = tfClass == 0 ? "QS Lv: מסגרת לא נתמכת" : "QS Lv · " + f_tfName(tfClass) + (useU1 ? "+" + f_tfName(cU1) : "") + (useU2 ? "+" + f_tfName(cU2) : "") + " · שבירות " + str.tostring(cnt.get(0)) + " · ב-QS " + str.tostring(cnt.get(1)) + " · רמות " + str.tostring(cnt.get(2)) + " · פתוחות " + str.tostring(lvls.size()) + " · נכס הגרף " + (cA >= 0 ? str.tostring(cA + 1) : "?")
+    dbg.cell(0, 0, st, text_color = color.gray, text_size = size.tiny, bgcolor = color.new(color.black, 100))
