@@ -1,0 +1,488 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0
+// QS Levels — רמות של שבירות SSMT / HSSMT שקרו בחלון QS ועוד לא נלקחו
+// הרמה = הקיצון של נר השבירה על הנכס של הגרף (בשבירה דובית הגבוה, בשורית
+// הנמוך). על הנכס שלקח זה הקיצון החדש, ועל הנכס שלא לקח זה הקיצון הנמוך/גבוה
+// יותר שהוא השאיר באותו נר. רמה חיה עד שפתיל על הנכס של הגרף עובר אותה.
+//
+// השבירות וה-QS מועתקים מ-"SSMT + HSSMT | Quarterly Theory":
+//   f_cycT · f_accStep · f_findTri (השלישייה 1–2–3, כולל כללי YM) ·
+//   f_qsDigits · f_qsDay · f_qsAt
+// רץ על מסגרת הגרף ושתי מדרגות מעליה (עד יומי), בנרות סגורים בלבד.
+//@version=6
+indicator("QS Levels", shorttitle = "QS Lv", overlay = true, max_lines_count = 200, max_labels_count = 200)
+
+// ══════════════════════════════════════════════════════════════
+// הגדרות
+// ══════════════════════════════════════════════════════════════
+grpSym = "נכסים"
+sym1 = input.symbol("CME_MINI:MNQ1!",  "נכס 1 — חזק", group = grpSym)
+sym2 = input.symbol("CME_MINI:MES1!",  "נכס 2 — חזק", group = grpSym)
+sym3 = input.symbol("CBOT_MINI:MYM1!", "נכס 3 — חלש", group = grpSym)
+
+grpQS = "QS"
+hotList   = input.string("111,114,141,144,411,414,441,444,222,333", "רצפים חמים", group = grpQS)
+starsIn   = input.string("★ וגם ☆", "אילו שבירות", options = ["★ וגם ☆", "רק ★"], group = grpQS, tooltip = "★ = הנכס של הגרף לקח בחלון ה-QS. ☆ = נכס אחר בשבירה לקח בחלון.")
+typesIn   = input.string("SSMT וגם HSSMT", "סוג", options = ["SSMT וגם HSSMT", "רק HSSMT"], group = grpQS)
+levelsIn  = input.string("הגרף + 2 מדרגות מעל", "מסגרות", options = ["הגרף + 2 מדרגות מעל", "הגרף + מדרגה אחת מעל", "רק הגרף"], group = grpQS)
+blockDeadWeek = input.bool(true, "חסום שבירות בשבוע מת (4H)", group = grpQS)
+
+grpVis = "תצוגה"
+maxLv   = input.int(40, "כמה רמות לזכור", minval = 5, maxval = 150, group = grpVis)
+colBear = input.color(#ef5350, "רמה מעל (משבירה דובית)", group = grpVis)
+colBull = input.color(#26a69a, "רמה מתחת (משבירה שורית)", group = grpVis)
+lnStyle = input.string("מקווקו", "סגנון קו", options = ["רציף", "מקווקו", "נקודות"], group = grpVis)
+lbSize  = input.string("זעיר", "גודל כתב", options = ["זעיר", "קטן", "רגיל"], group = grpVis)
+fade    = input.int(0, "שקיפות", minval = 0, maxval = 90, group = grpVis)
+
+// ══════════════════════════════════════════════════════════════
+// נכס הגרף — לפי השם, כמו ב-SSMT
+// ══════════════════════════════════════════════════════════════
+f_name(string s) =>
+    p = str.split(s, ":")
+    string t = p.get(p.size() - 1)
+    if str.endswith(t, "!") and str.length(t) > 2
+        t := str.substring(t, 0, str.length(t) - 2)
+    t == "MNQ" ? "NQ" : t == "MES" ? "ES" : t == "MYM" ? "YM" : t == "M2K" ? "RTY" : t == "MGC" ? "GC" : t
+
+nm1 = f_name(sym1)
+nm2 = f_name(sym2)
+nm3 = f_name(sym3)
+chN1 = f_name(syminfo.root)
+chN2 = f_name(syminfo.ticker)
+f_isChart(string nm) =>
+    nm == chN1 or nm == chN2
+cA = f_isChart(nm1) ? 0 : f_isChart(nm2) ? 1 : f_isChart(nm3) ? 2 : -1
+
+// ══════════════════════════════════════════════════════════════
+// מדרגות (כמו ב-SSMT): 1=15s 2=1m 3=5m 4=15m 5=1H 6=4H 7=1D
+// ══════════════════════════════════════════════════════════════
+tfSec   = timeframe.in_seconds()
+tfMin   = tfSec / 60
+isD1    = timeframe.isdaily and timeframe.multiplier == 1
+tfClass = isD1 ? 7 : timeframe.isdwm ? 0 : tfSec <= 15 ? 1 : tfMin <= 1 ? 2 : tfMin <= 5 ? 3 : tfMin <= 15 ? 4 : tfMin <= 60 ? 5 : tfMin <= 240 ? 6 : 0
+nUp     = levelsIn == "הגרף + 2 מדרגות מעל" ? 2 : levelsIn == "הגרף + מדרגה אחת מעל" ? 1 : 0
+cU1     = math.min(tfClass + 1, 7)
+cU2     = math.min(tfClass + 2, 7)
+useU1   = tfClass != 0 and nUp >= 1 and tfClass + 1 <= 7
+useU2   = tfClass != 0 and nUp >= 2 and tfClass + 2 <= 7
+
+tU1 = not useU1 ? timeframe.period : cU1 == 2 ? "1" : cU1 == 3 ? "5" : cU1 == 4 ? "15" : cU1 == 5 ? "60" : cU1 == 6 ? "240" : "D"
+tU2 = not useU2 ? timeframe.period : cU2 == 2 ? "1" : cU2 == 3 ? "5" : cU2 == 4 ? "15" : cU2 == 5 ? "60" : cU2 == 6 ? "240" : "D"
+
+f_tfName(int cls) =>
+    cls == 1 ? "15s" : cls == 2 ? "1m" : cls == 3 ? "5m" : cls == 4 ? "15m" : cls == 5 ? "1H" : cls == 6 ? "4H" : "1D"
+f_clsMs(int cls) =>
+    (cls == 1 ? 15 : cls == 2 ? 60 : cls == 3 ? 300 : cls == 4 ? 900 : cls == 5 ? 3600 : cls == 6 ? 14400 : 86400) * 1000
+
+TZ = "America/New_York"
+
+// ══════════════════════════════════════════════════════════════
+// מחזורים — העתק של f_cycT מ-SSMT (בלי True Open)
+// ══════════════════════════════════════════════════════════════
+f_cycT(int cls, int t) =>
+    eH   = hour(t, TZ)
+    eM   = minute(t, TZ)
+    eS   = second(t, TZ)
+    mOD  = eH * 60 + eM
+    post = mOD >= 1080
+    mFD  = post ? mOD - 1080 : mOD + 360
+    tdt  = post ? t + 86400000 : t
+    yy = year(tdt, TZ)
+    mm = month(tdt, TZ)
+    dd = dayofmonth(tdt, TZ)
+    dw = dayofweek(tdt, TZ)
+    sFD   = mFD * 60 + eS
+    sIdx  = math.floor(sFD / 21600)
+    sIS   = sFD % 21600
+    miIdx = math.floor(sIS / 5400)
+    sIM   = sIS % 5400
+    qIdx  = math.floor(sIM / 1350)
+    sIQ   = sIM % 1350
+    sqIdx = math.floor(sIQ / 337.5)
+    dsm = dw == dayofweek.sunday ? 6 : dw - 2
+    mon = tdt - dsm * 86400000
+    tue = mon + 86400000
+    thu = mon + 3 * 86400000
+    moM = month(mon, TZ)
+    moD = dayofmonth(mon, TZ)
+    moY = year(mon, TZ)
+    tuM = month(tue, TZ)
+    tuY = year(tue, TZ)
+    dead = tuM != month(thu, TZ)
+    wkN  = dead ? 0 : math.floor((dayofmonth(tue, TZ) - 1) / 7) + 1
+    ownW = dead or wkN == 5
+    qMonIdx = mm >= 4 ? mm - 4 : mm + 8
+    qYear   = mm >= 4 ? yy : yy - 1
+    qQtr    = math.floor(qMonIdx / 3) + 1
+    tdId = yy * 10000 + mm * 100 + dd
+    wkId = moY * 10000 + moM * 100 + moD
+    moId = ownW ? wkId : tuY * 100 + tuM
+    seId = tdId * 10 + sIdx
+    miId = seId * 10 + miIdx
+    quId = miId * 10 + qIdx
+    sqId = quId * 10 + sqIdx
+    qrId = qYear * 10 + qQtr
+    int qsIdx = 0
+    if cls == 7
+        qsMon  = qQtr == 1 ? 4 : qQtr == 2 ? 7 : qQtr == 3 ? 10 : 1
+        qsYear = qQtr == 4 ? qYear + 1 : qYear
+        nsMon  = qsMon == 10 ? 1 : qsMon + 3
+        nsYear = qsMon == 10 ? qsYear + 1 : qsYear
+        qsT  = timestamp(TZ, qsYear, qsMon, 1, 12, 0)
+        nsT  = timestamp(TZ, nsYear, nsMon, 1, 12, 0)
+        tdNT = timestamp(TZ, yy, mm, dd, 12, 0)
+        qLn  = math.round((nsT - qsT) / 86400000)
+        dSnc = math.round((tdNT - qsT) / 86400000)
+        qsIdx := qLn > 0 ? math.min(3, math.max(0, math.floor(dSnc * 4 / qLn))) : 0
+    qsId = qrId * 10 + qsIdx
+    rId = cls == 7 ? qsId : cls == 6 ? wkId : cls == 5 ? tdId : cls == 4 ? seId : cls == 3 ? miId : cls == 2 ? quId : sqId
+    lId = cls == 7 ? qrId : cls == 6 ? moId : cls == 5 ? wkId : cls == 4 ? tdId : cls == 3 ? seId : cls == 2 ? miId : quId
+    kL  = cls == 1 or cls == 2 or cls == 3 or cls == 5
+    fri = dw == dayofweek.friday
+    blk = (cls == 5 and fri) or (cls == 6 and ((fri and wkN == 4) or wkN == 5 or (blockDeadWeek and dead)))
+    [rId, lId, kL, blk]
+
+// ══════════════════════════════════════════════════════════════
+// QS — העתק מ-SSMT
+// ══════════════════════════════════════════════════════════════
+hotKey = "," + str.replace_all(hotList, " ", "") + ","
+
+f_qsDigits(int t) =>
+    mOD  = hour(t, TZ) * 60 + minute(t, TZ)
+    post = mOD >= 1080
+    mFD  = post ? mOD - 1080 : mOD + 360
+    sFD  = mFD * 60 + second(t, TZ)
+    tdt  = post ? t + 86400000 : t
+    sI   = math.floor(sFD / 21600)
+    sIS  = sFD % 21600
+    mI   = math.floor(sIS / 5400)
+    sIM  = sIS % 5400
+    qI   = math.floor(sIM / 1350)
+    sqI  = math.floor((sIM % 1350) / 337.5)
+    dw   = dayofweek(tdt, TZ)
+    dN   = dw == dayofweek.monday ? 1 : dw == dayofweek.tuesday ? 2 : dw == dayofweek.wednesday ? 3 : dw == dayofweek.thursday ? 4 : 0
+    dsm  = dw == dayofweek.sunday ? 6 : dw - 2
+    mon  = tdt - dsm * 86400000
+    tue  = mon + 86400000
+    thu  = mon + 3 * 86400000
+    tM   = month(tue, TZ)
+    dead = tM != month(thu, TZ)
+    wk   = dead ? 0 : math.floor((dayofmonth(tue, TZ) - 1) / 7) + 1
+    mQ   = (tM >= 4 ? tM - 4 : tM + 8) % 3 + 1
+    str.tostring(mQ) + (wk == 0 ? "·" : str.tostring(wk)) + (dN == 0 ? "·" : str.tostring(dN)) + str.tostring(sI + 1) + str.tostring(mI + 1) + str.tostring(qI + 1) + str.tostring(sqI + 1)
+
+f_qsDay(int t) =>
+    post = hour(t, TZ) * 60 + minute(t, TZ) >= 1080
+    tdt  = post ? t + 86400000 : t
+    yy   = year(tdt, TZ)
+    mm   = month(tdt, TZ)
+    dd   = dayofmonth(tdt, TZ)
+    qMI  = mm >= 4 ? mm - 4 : mm + 8
+    qY   = mm >= 4 ? yy : yy - 1
+    qQ   = math.floor(qMI / 3) + 1
+    qsM  = qQ == 1 ? 4 : qQ == 2 ? 7 : qQ == 3 ? 10 : 1
+    qsY  = qQ == 4 ? qY + 1 : qY
+    nsM  = qsM == 10 ? 1 : qsM + 3
+    nsY  = qsM == 10 ? qsY + 1 : qsY
+    qsT  = timestamp(TZ, qsY, qsM, 1, 12, 0)
+    nsT  = timestamp(TZ, nsY, nsM, 1, 12, 0)
+    tdNT = timestamp(TZ, yy, mm, dd, 12, 0)
+    qLn  = math.round((nsT - qsT) / 86400000)
+    dSnc = math.round((tdNT - qsT) / 86400000)
+    qq   = qLn > 0 ? math.min(3, math.max(0, math.floor(dSnc * 4 / qLn))) : 0
+    str.tostring(((yy - 2023) % 4 + 4) % 4 + 1) + str.tostring(qQ) + str.tostring(qq + 1)
+
+f_qsK(int cls) =>
+    cls <= 2 ? 4 : cls == 3 ? 3 : cls == 4 ? 2 : cls == 5 ? 1 : 0
+f_qsLvl(int cls) =>
+    cls <= 1 ? 6 : cls == 2 ? 5 : cls == 3 ? 4 : cls == 4 ? 3 : cls == 5 ? 2 : 1
+f_qsHot(string s) =>
+    str.length(s) == 3 and str.contains(hotKey, "," + s + ",")
+
+f_qsAt(int cls, int t, int durMs) =>
+    bool   found = false
+    string pat   = ""
+    if cls == 7
+        s = f_qsDay(t)
+        if f_qsHot(s)
+            found := true
+            pat   := s
+    else if cls >= 1 and cls <= 6
+        d1   = f_qsDigits(t)
+        d2   = f_qsDigits(t + durMs - 1)
+        kOwn = f_qsK(cls)
+        lvl  = f_qsLvl(cls)
+        kLo  = math.max(lvl - 2, 0)
+        kHi  = math.min(lvl, 4)
+        for i = 0 to kHi - kLo + 1
+            k = i == 0 ? kOwn : kLo + i - 1
+            if not found
+                s1 = str.substring(d1, k, k + 3)
+                s2 = str.substring(d2, k, k + 3)
+                h  = f_qsHot(s1) ? s1 : f_qsHot(s2) ? s2 : ""
+                if h != ""
+                    found := true
+                    pat   := h
+    [found, pat]
+
+// ══════════════════════════════════════════════════════════════
+// מצבר ו-f_findTri — העתק מ-SSMT (השלישייה). מחזיר גם מי לקח.
+// ══════════════════════════════════════════════════════════════
+type Acc
+    float hi
+    float lo
+    float hc
+    float lc
+    array<float> hiA
+    array<float> loA
+    array<float> hcA
+    array<float> lcA
+
+f_newAcc() =>
+    Acc.new(na, na, na, na, array.new_float(), array.new_float(), array.new_float(), array.new_float())
+
+f_accA(Acc a, bool isBull, bool isH) =>
+    isBull ? (isH ? a.lcA : a.loA) : (isH ? a.hcA : a.hiA)
+f_accV(Acc a, bool isBull, bool isH) =>
+    isBull ? (isH ? a.lc : a.lo) : (isH ? a.hc : a.hi)
+
+f_accStep(Acc a, bool newRef, bool clr, bool push, bool drop, float h, float l, float c) =>
+    if newRef
+        if clr
+            a.hiA.clear()
+            a.loA.clear()
+            a.hcA.clear()
+            a.lcA.clear()
+        if push
+            a.hiA.push(a.hi)
+            a.loA.push(a.lo)
+            a.hcA.push(a.hc)
+            a.lcA.push(a.lc)
+        if drop and a.hiA.size() > 0
+            a.hiA.remove(0)
+            a.loA.remove(0)
+            a.hcA.remove(0)
+            a.lcA.remove(0)
+        a.hi := h
+        a.lo := l
+        a.hc := c
+        a.lc := c
+    else
+        if na(a.hi) or h > a.hi
+            a.hi := h
+        if na(a.lo) or l < a.lo
+            a.lo := l
+        if na(a.hc) or c > a.hc
+            a.hc := c
+        if na(a.lc) or c < a.lc
+            a.lc := c
+    0
+
+f_beyond(bool isBull, float v, float r) =>
+    isBull ? v < r : v > r
+f_ext(bool isBull, float v, float r) =>
+    isBull ? math.min(v, r) : math.max(v, r)
+
+// [סוג 0/1/2, אינדקס תת-מחזור הייחוס, מי לקח: ביט 1 = נכס 1, 2 = נכס 2, 4 = נכס 3]
+f_findTri(bool isBull, Acc n, Acc e, Acc y) =>
+    int bT = 0
+    int bI = -1
+    int bM = 0
+    nA  = f_accA(n, isBull, false)
+    eA  = f_accA(e, isBull, false)
+    yA  = f_accA(y, isBull, false)
+    nCA = f_accA(n, isBull, true)
+    eCA = f_accA(e, isBull, true)
+    yCA = f_accA(y, isBull, true)
+    int cnt = nA.size()
+    if cnt > 0 and eA.size() == cnt and yA.size() == cnt
+        float nM  = f_accV(n, isBull, false)
+        float eM  = f_accV(e, isBull, false)
+        float yM  = f_accV(y, isBull, false)
+        float nMc = f_accV(n, isBull, true)
+        float eMc = f_accV(e, isBull, true)
+        float yMc = f_accV(y, isBull, true)
+        for i = cnt - 1 to 0
+            if bT == 0
+                bool nw = f_beyond(isBull, nM,  nA.get(i))
+                bool ew = f_beyond(isBull, eM,  eA.get(i))
+                bool yw = f_beyond(isBull, yM,  yA.get(i))
+                bool nc = f_beyond(isBull, nMc, nCA.get(i))
+                bool ec = f_beyond(isBull, eMc, eCA.get(i))
+                bool yc = f_beyond(isBull, yMc, yCA.get(i))
+                bool hValid = isBull ? (nc or ec) and not (nc and ec and yc) : (nc or ec or yc) and not (nc and ec)
+                bool wValid = isBull ? (nw or ew) and not (nw and ew and yw) : (nw or ew or yw) and not (nw and ew)
+                if hValid or wValid
+                    bT := hValid ? 2 : 1
+                    bI := i
+                    // בשבירה שורית נכס 3 לא נכתב — כמו בתווית של SSMT
+                    bM := ((nw or nc) ? 1 : 0) + ((ew or ec) ? 2 : 0) + ((not isBull and (yw or yc)) ? 4 : 0)
+            nM  := f_ext(isBull, nM,  nA.get(i))
+            eM  := f_ext(isBull, eM,  eA.get(i))
+            yM  := f_ext(isBull, yM,  yA.get(i))
+            nMc := f_ext(isBull, nMc, nCA.get(i))
+            eMc := f_ext(isBull, eMc, eCA.get(i))
+            yMc := f_ext(isBull, yMc, yCA.get(i))
+    [bT, bI, bM]
+
+// ══════════════════════════════════════════════════════════════
+// רמות
+// ══════════════════════════════════════════════════════════════
+type QL
+    int    dir      // -1 = מעל (משבירה דובית) · 1 = מתחת (משבירה שורית)
+    float  price
+    int    t        // זמן הפתיחה של נר השבירה
+    string txt
+
+var array<QL> lvls = array.new<QL>()
+
+// ══════════════════════════════════════════════════════════════
+// מנוע למסגרת אחת
+// ══════════════════════════════════════════════════════════════
+type Eng
+    int  cls
+    Acc  a1
+    Acc  a2
+    Acc  a3
+    int  lastT   = 0
+    int  refId   = 0
+    int  lifeId  = 0
+    bool started = false
+    bool sAct    = false
+    int  tyB     = 0
+    int  riB     = -1
+    int  tyU     = 0
+    int  riU     = -1
+
+f_newEng(int cls) =>
+    Eng.new(cls = cls, a1 = f_newAcc(), a2 = f_newAcc(), a3 = f_newAcc())
+
+f_bit(int m, int b) =>
+    int(math.floor(m / b)) % 2 == 1
+
+// שבירה חדשה ב-QS → רמה חדשה
+f_add(Eng e, bool isBull, int typ, int mask, int t, float hx, float lx) =>
+    if typ == 2 or typesIn == "SSMT וגם HSSMT"
+        [hot, pat] = f_qsAt(e.cls, t, f_clsMs(e.cls))
+        if hot
+            bool own = cA >= 0 and f_bit(mask, cA == 0 ? 1 : cA == 1 ? 2 : 4)
+            if own or starsIn == "★ וגם ☆"
+                float px = isBull ? lx : hx
+                if not na(px)
+                    lvls.push(QL.new(isBull ? 1 : -1, px, t, f_tfName(e.cls) + " " + pat + (own ? "★" : "☆") + (typ == 2 ? " H" : "")))
+                    while lvls.size() > maxLv
+                        lvls.shift()
+    0
+
+method step(Eng e, int t, float h1, float l1, float c1, float h2, float l2, float c2, float h3, float l3, float c3, float hx, float lx) =>
+    if not na(t) and t != e.lastT and not na(c1) and not na(c2) and not na(c3)
+        e.lastT := t
+        [rId, lId, kL, blk] = f_cycT(e.cls, t)
+        bool newRef  = e.started and rId != e.refId
+        bool newLife = e.started and lId != e.lifeId
+        bool canP    = not na(e.a1.hi) and not na(e.a2.hi) and not na(e.a3.hi)
+        bool push    = newRef and ((not newLife) or kL) and canP
+        bool sDrop   = newRef and (not newLife) and e.sAct
+        f_accStep(e.a1, newRef, newLife, push, sDrop, h1, l1, c1)
+        f_accStep(e.a2, newRef, newLife, push, sDrop, h2, l2, c2)
+        f_accStep(e.a3, newRef, newLife, push, sDrop, h3, l3, c3)
+        if newRef and newLife
+            e.sAct := kL and canP
+        else if newRef
+            e.sAct := false
+        e.started := true
+        e.refId   := rId
+        e.lifeId  := lId
+        if newLife
+            e.tyB := 0
+            e.riB := -1
+            e.tyU := 0
+            e.riU := -1
+        if sDrop
+            e.riB := e.riB > 0 ? e.riB - 1 : -1
+            e.riU := e.riU > 0 ? e.riU - 1 : -1
+        int nTB = 0
+        int nIB = -1
+        int nMB = 0
+        int nTU = 0
+        int nIU = -1
+        int nMU = 0
+        if e.a1.hiA.size() > 0 and not blk
+            [x1, x2, x3] = f_findTri(false, e.a1, e.a2, e.a3)
+            [y1, y2, y3] = f_findTri(true,  e.a1, e.a2, e.a3)
+            nTB := x1
+            nIB := x2
+            nMB := x3
+            nTU := y1
+            nIU := y2
+            nMU := y3
+        if nTB != 0
+            if e.tyB == 0 or nIB != e.riB
+                f_add(e, false, nTB, nMB, t, hx, lx)
+            e.tyB := nTB
+            e.riB := nIB
+        else
+            e.tyB := 0
+            e.riB := -1
+        if nTU != 0
+            if e.tyU == 0 or nIU != e.riU
+                f_add(e, true, nTU, nMU, t, hx, lx)
+            e.tyU := nTU
+            e.riU := nIU
+        else
+            e.tyU := 0
+            e.riU := -1
+    e.started
+
+// ══════════════════════════════════════════════════════════════
+// נתונים — נרות סגורים בלבד ([1]). hx/lx = הנר של הנכס שבגרף.
+// ══════════════════════════════════════════════════════════════
+[c0t, c0h1, c0l1, c0c1] = request.security(sym1, timeframe.period, [time[1], high[1], low[1], close[1]])
+[c0h2, c0l2, c0c2]      = request.security(sym2, timeframe.period, [high[1], low[1], close[1]])
+[c0h3, c0l3, c0c3]      = request.security(sym3, timeframe.period, [high[1], low[1], close[1]])
+[u1t, u1h1, u1l1, u1c1] = request.security(sym1, tU1, [time[1], high[1], low[1], close[1]])
+[u1h2, u1l2, u1c2]      = request.security(sym2, tU1, [high[1], low[1], close[1]])
+[u1h3, u1l3, u1c3]      = request.security(sym3, tU1, [high[1], low[1], close[1]])
+[u1hx, u1lx]            = request.security(syminfo.tickerid, tU1, [high[1], low[1]])
+[u2t, u2h1, u2l1, u2c1] = request.security(sym1, tU2, [time[1], high[1], low[1], close[1]])
+[u2h2, u2l2, u2c2]      = request.security(sym2, tU2, [high[1], low[1], close[1]])
+[u2h3, u2l3, u2c3]      = request.security(sym3, tU2, [high[1], low[1], close[1]])
+[u2hx, u2lx]            = request.security(syminfo.tickerid, tU2, [high[1], low[1]])
+
+var Eng eg0 = f_newEng(tfClass)
+var Eng eg1 = f_newEng(cU1)
+var Eng eg2 = f_newEng(cU2)
+
+if tfClass != 0
+    eg0.step(c0t, c0h1, c0l1, c0c1, c0h2, c0l2, c0c2, c0h3, c0l3, c0c3, high[1], low[1])
+    if useU1
+        eg1.step(u1t, u1h1, u1l1, u1c1, u1h2, u1l2, u1c2, u1h3, u1l3, u1c3, u1hx, u1lx)
+    if useU2
+        eg2.step(u2t, u2h1, u2l1, u2c1, u2h2, u2l2, u2c2, u2h3, u2l3, u2c3, u2hx, u2lx)
+
+// ══════════════════════════════════════════════════════════════
+// רמה שנלקחה (פתיל על הנכס של הגרף) — נמחקת
+// ══════════════════════════════════════════════════════════════
+if lvls.size() > 0
+    for i = lvls.size() - 1 to 0
+        QL q = lvls.get(i)
+        if time > q.t and (q.dir == -1 ? high > q.price : low < q.price)
+            lvls.remove(i)
+
+// ══════════════════════════════════════════════════════════════
+// ציור — רק בנר האחרון: מוחקים הכול ומציירים מחדש
+// ══════════════════════════════════════════════════════════════
+lSty = lnStyle == "רציף" ? line.style_solid : lnStyle == "נקודות" ? line.style_dotted : line.style_dashed
+lSz  = lbSize == "זעיר" ? size.tiny : lbSize == "קטן" ? size.small : size.normal
+
+var array<line>  dLn = array.new<line>()
+var array<label> dLb = array.new<label>()
+if barstate.islast
+    while dLn.size() > 0
+        line.delete(dLn.pop())
+    while dLb.size() > 0
+        label.delete(dLb.pop())
+    for q in lvls
+        color c = color.new(q.dir == -1 ? colBear : colBull, fade)
+        dLn.push(line.new(q.t, q.price, time, q.price, xloc = xloc.bar_time, color = c, style = lSty, width = 1))
+        dLb.push(label.new(time, q.price, q.txt, xloc = xloc.bar_time, style = label.style_label_left, color = color.new(color.black, 100), textcolor = c, size = lSz))
