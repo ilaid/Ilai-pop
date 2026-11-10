@@ -1375,6 +1375,18 @@ f_engStep(Eng e, int t, float oR, float cR, float h1, float l1, float c1, float 
                 array.set(e.riA, k, -1)
     e.started
 
+// מתי השבירה נוצרה, לפינה: ה-Q של תת-המחזור שבו הנר שלקח את הרמה נמצא, והשעה
+// שלו (שעון ניו יורק). למשל 1H ביום שלישי = Q2. ה-Q הוא הספרה של רמת הייחוס של
+// המסגרת: 15s = תת-רבע, 1m = רבע, 5m = 90 דק', 15m = סשן, 1H = יום, 4H = שבוע.
+// בלי מספר (שישי, שבוע מת) — רק השעה.
+f_when(Acc acc, int cls, bool isBull, int typ, int refI) =>
+    string s = ""
+    [b1, p1, b2, p2, ok] = f_pts(acc, isBull, typ == 2, refI)
+    if ok
+        qc = cls == 7 ? str.substring(f_qsDay(b2), 2, 3) : cls >= 1 and cls <= 6 ? str.substring(f_qsDigits(b2), f_qsLvl(cls), f_qsLvl(cls) + 1) : ""
+        s := (qc != "" and qc != "·" ? "Q" + qc + " " : "") + str.format_time(b2, cls >= 7 ? "dd.MM" : "HH:mm", TZ)
+    s
+
 // QS ובחירת הראשית של מנוע — כמו בגרף. רץ רק בנר האחרון (בשביל הפינה
 // וההתראה), ולא בכל תת-נר בהיסטוריה: התוצאה תלויה רק במצב הנוכחי של המנוע.
 f_engPick(Eng e) =>
@@ -1404,7 +1416,12 @@ f_engPick(Eng e) =>
     if best >= 0
         pl  = array.get(e.lbA, best)
         tag = array.get(e.qhA, best) ? " ★" : array.get(e.qsA, best) ? " ☆" : ""
-        e.txt   := (best % 2 == 1 ? "▲" : "▼") + (minimal ? (array.get(e.tyA, best) == 2 ? "H" : "S") : pl + tag)
+        // הנכס שלפיו נמדד הזמן: נכס הגרף אם הוא לקח, אחרת הראשון שלקח
+        bLo  = best >= 2 ? 2 : 0
+        bHi  = best >= 2 ? 3 : 2
+        aW   = cA >= bLo and cA <= bHi and str.contains(" " + pl + " ", " " + f_nm(cA) + " ") ? cA : f_taker(pl, bLo, bHi)
+        when = f_when(f_engAcc(e, aW), e.cls, best % 2 == 1, array.get(e.tyA, best), array.get(e.riA, best))
+        e.txt   := (best % 2 == 1 ? "▲" : "▼") + (minimal ? (array.get(e.tyA, best) == 2 ? "H" : "S") : pl + tag) + (when != "" ? " " + when : "")
         e.pSeq  := array.get(e.sqA, best)
         e.pGrey := greyC and f_closed(pl)
     else
