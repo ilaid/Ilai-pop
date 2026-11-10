@@ -18,7 +18,9 @@ indicator("SSMT Fill | Quarterly Theory", overlay = true, max_labels_count = 20,
 // 7. בפינה — השלישייה והזוג בנפרד: שבירת זוג מוצגת גם כשיש שבירת שלישייה
 //    באותה מסגרת, וגם כש-NQ/ES הפכו את הגאפ של השלישייה ל-IFVG.
 // 8. סדר התצוגה לבחירה: החזקה ראשונה · החדשה ראשונה · שלישייה ואז זוג —
-//    על הגרף (מי ראשית) ובפינה (מי קודם). ובפינה גם שעת השבירה.
+//    על הגרף (מי ראשית).
+// 9. בפינה: במקום שעה — ה-Q של השבירה בתוך המיכל (שלישי ב-1H = Q2), ולכל
+//    מסגרת רק השבירה האחרונה (שלישייה או זוג — לא שתיהן).
 //
 // ארבעה נכסים, התפקיד לפי המיקום: 1 ו-2 = חזקים · 3 = חלש · 4 = בן הזוג של 3.
 // שתי קבוצות נפרדות, וכל אחת יוצרת שבירות משלה באותם חוקים:
@@ -153,7 +155,7 @@ flashLift    = input.int(1, "הרם את הסימון (שורות)", minval = 0,
 flashTag     = input.string("SF", "תווית פתיחה לשורה", group = grpMtf)
 flashTagCol  = input.color(color.gray, "צבע התווית", group = grpMtf)
 flashSz      = input.string("tiny", "גודל טקסט בפינה", options = ["tiny", "small", "normal"], group = grpMtf)
-flashHour    = input.bool(true, "שעת השבירה בפינה", tooltip = "שעת הנר שעשה את השבירה (שעון ניו יורק). עד 1H — HH:mm · 4H — dd/MM HH:mm · מהיומי — dd/MM.", group = grpMtf)
+flashHour    = input.bool(true, "Q של השבירה בפינה", tooltip = "איזה רבע של המיכל עשה את השבירה. 1m — רבע במיקרו · 5m — מיקרו בסשן · 15m — סשן ביום (אסיה Q1 … PM Q4) · 1H — יום בשבוע (שני Q1 … חמישי Q4, שישי Q5) · 4H — שבוע בחודש · 1D — רבע-רבעון ברבעון · 1W — רבעון בשנת QT (אפריל = Q1) · Mo — שנה במחזור.", group = grpMtf)
 flashMin     = input.bool(true, "פינה מינימלית", tooltip = "דלוק = בפינה רק מסגרת, חץ ודרגה — בלי שמות הזוג (הצבע מבדיל).", group = grpMtf)
 mtfAlert     = input.bool(true, "כלול שבירות ממסגרות אחרות בהתראה", group = grpMtf)
 // המסגרות האחרות מחושבות רק על הנרות האחרונים שלהן. 2000 מכסה בכל מסגרת יותר
@@ -735,11 +737,13 @@ type Engine
     int          jDeg       = 0
     string       jLead      = ""
     int          jT         = 0
+    int          jSq        = 0
     bool         pFired     = false // נרשמה שבירת זוג בנר הגרף הזה
     int          pjDir      = 0
     int          pjDeg      = 0
     string       pjLead     = ""
     int          pjT        = 0
+    int          pjSq       = 0
 
 // כל מזהי המחזורים מתוך חותמת זמן, נכתבים לתוך המנוע. זהה לחישוב של הגרף.
 f_setCycles(Engine e, int t) =>
@@ -929,12 +933,14 @@ f_step(Engine e, int tOpen, array<float> q1, array<float> q2, array<float> q3, a
                         e.jDeg      := gr.fDeg
                         e.jLead     := gr.fLead
                         e.jT        := tOpen
+                        e.jSq       := e.seqCounter
                     else
                         e.pFired    := true
                         e.pjDir     := gr.dir
                         e.pjDeg     := gr.fDeg
                         e.pjLead    := gr.fLead
                         e.pjT       := tOpen
+                        e.pjSq      := e.seqCounter
 
         // ── השבירה המוצגת — שלישייה וזוג כל אחד בנפרד ──
         // שבירת הזוג חיה כל עוד YM/RTY לא הפכו את הגאפ שלהם ל-IFVG, בלי קשר
@@ -1401,9 +1407,52 @@ if mtfOn and barstate.islast
 f_pairTag(int kind) =>
     kind == 1 and not flashMin ? " · " + nm3 + "/" + nm4 : ""
 
-// הטקסט של תא אחד: מסגרת · כיוון ודרגה · (זוג) · שעת השבירה
+// איזה רבע של המיכל — המיקום של תת-המחזור שבו נרשמה השבירה בתוך המיכל שלו.
+// 1H: שני Q1 · שלישי Q2 · רביעי Q3 · חמישי Q4 · שישי Q5.
+f_qTxt(int c, int t) =>
+    int  eh   = hour(t, TZ)
+    int  mnd  = eh * 60 + minute(t, TZ)
+    bool post = mnd >= 1080
+    int  tdt  = post ? t + 86400000 : t
+    int  mfd  = post ? mnd - 1080 : mnd + 360
+    int  sIdx = math.floor(mfd / 360)
+    int  mInS = mfd % 360
+    int  uIdx = math.floor(mInS / 90)
+    int  qIdx = math.floor((mInS % 90) / 22.5)
+    int  dw   = dayofweek(tdt, TZ)
+    int  yy   = year(tdt, TZ)
+    int  mm   = month(tdt, TZ)
+    int  dd   = dayofmonth(tdt, TZ)
+    int  n    = 0
+    if c == 1
+        n := qIdx + 1
+    else if c == 2
+        n := uIdx + 1
+    else if c == 3
+        n := sIdx + 1
+    else if c == 4
+        n := dw == dayofweek.monday ? 1 : dw == dayofweek.tuesday ? 2 : dw == dayofweek.wednesday ? 3 : dw == dayofweek.thursday ? 4 : dw == dayofweek.friday ? 5 : 0
+    else if c == 5
+        int dsm  = dw == dayofweek.sunday ? 6 : dw - 2
+        int tueT = tdt - dsm * 86400000 + 86400000
+        n := month(tueT, TZ) != month(tueT + 2 * 86400000, TZ) ? 0 : int(math.floor((dayofmonth(tueT, TZ) - 1) / 7)) + 1
+    else if c == 6
+        int qOf  = int(math.ceil(mm / 3.0))
+        int qsM  = (qOf - 1) * 3 + 1
+        int qLn  = f_dim(yy, qsM) + f_dim(yy, qsM + 1) + f_dim(yy, qsM + 2)
+        int qDiQ = (dd - 1) + (mm > qsM ? f_dim(yy, qsM) : 0) + (mm > qsM + 1 ? f_dim(yy, qsM + 1) : 0)
+        n := math.min(3, math.max(0, int(math.floor(qDiQ * 4.0 / qLn)))) + 1
+    else if c == 7
+        int q = int(math.ceil(mm / 3.0))
+        n := q >= 2 ? q - 1 : 4
+    else if c == 8
+        n := (yy - 2023) % 4 + 1
+    n > 0 ? "Q" + str.tostring(n) : ""
+
+// הטקסט של תא אחד: מסגרת · כיוון ודרגה · (זוג) · Q של השבירה
 f_cellTxt(int cls, int dir, int deg, int kind, int t) =>
-    f_clsName(cls) + (dir == 1 ? " ▲" : " ▼") + str.tostring(deg) + f_pairTag(kind) + (flashHour and t > 0 ? " " + f_bornTxt(cls, t) : "")
+    string q = flashHour and t > 0 ? f_qTxt(cls, t) : ""
+    f_clsName(cls) + (dir == 1 ? " ▲" : " ▼") + str.tostring(deg) + f_pairTag(kind) + (q != "" ? " " + q : "")
 
 // האם הזוג מוצג לפני השלישייה — לפי מצב הסדר
 f_pairFirst(int degT, int seqT, int degP, int seqP) =>
@@ -1416,12 +1465,14 @@ var int    flashTime = 0
 var int    flashCls  = 0
 var int    flashLife = 0
 var int    flashDeg  = 0
+var int    flashSq   = 0
 var string flashTxtP  = ""
 var int    flashDirP  = 0
 var int    flashTimeP = 0
 var int    flashClsP  = 0
 var int    flashLifeP = 0
 var int    flashDegP  = 0
+var int    flashSqP   = 0
 
 if mtfOn and barstate.isconfirmed
     for k = 0 to array.size(allEng) - 1
@@ -1432,6 +1483,7 @@ if mtfOn and barstate.isconfirmed
             flashTxt  := f_cellTxt(ek.cls, ek.jDir, ek.jDeg, 0, ek.jT)
             flashDir  := ek.jDir
             flashDeg  := ek.jDeg
+            flashSq   := ek.jSq
             flashTime := fNow
             flashCls  := ek.cls
             flashLife := ek.lifeId
@@ -1442,6 +1494,7 @@ if mtfOn and barstate.isconfirmed
             flashTxtP  := f_cellTxt(ek.cls, ek.pjDir, ek.pjDeg, 1, ek.pjT)
             flashDirP  := ek.pjDir
             flashDegP  := ek.pjDeg
+            flashSqP   := ek.pjSq
             flashTimeP := fNow
             flashClsP  := ek.cls
             flashLifeP := ek.lifeId
@@ -1469,25 +1522,25 @@ if barstate.islast
     if mtfFlash and mtfOn
         int cx = 1
         if flashMode == "כל עוד יש שבירה חיה"
-            // כל המסגרות האחרות שיש עליהן שבירה חיה, מהגבוהה לנמוכה —
-            // השלישייה ואחריה הזוג, כל אחד בתא משלו
+            // כל המסגרות האחרות שיש עליהן שבירה חיה, מהגבוהה לנמוכה. תא אחד
+            // לכל מסגרת: השבירה האחרונה מבין השלישייה והזוג.
             for cc = 8 to 1
                 if cc != tfClass
                     for k = 0 to array.size(allEng) - 1
                         Engine ep = array.get(allEng, k)
-                        if f_useSlot(k) and ep.cls == cc
-                            bool pF = ep.fDir != 0 and ep.pDir != 0 and f_pairFirst(ep.fDeg, ep.fSq, ep.pDeg, ep.pSq)
-                            // שני סבבים: 0 = הראשון לפי הסדר, 1 = השני
-                            for r = 0 to 1
-                                bool isP = (r == 0) == pF
-                                int  dD  = isP ? ep.pDir : ep.fDir
-                                if dD != 0 and cx <= 16
-                                    table.cell(flashT, cx, flashRow, f_cellTxt(cc, dD, isP ? ep.pDeg : ep.fDeg, isP ? 1 : 0, isP ? ep.pT : ep.fT) + "  ", bgcolor = color.new(color.black, 100), text_color = f_flashCol(dD, isP ? 1 : 0), text_size = flashSz)
-                                    cx := cx + 1
+                        if f_useSlot(k) and ep.cls == cc and (ep.fDir != 0 or ep.pDir != 0) and cx <= 16
+                            bool isP = ep.pDir != 0 and (ep.fDir == 0 or ep.pSq > ep.fSq)
+                            int  dD  = isP ? ep.pDir : ep.fDir
+                            table.cell(flashT, cx, flashRow, f_cellTxt(cc, dD, isP ? ep.pDeg : ep.fDeg, isP ? 1 : 0, isP ? ep.pT : ep.fT) + "  ", bgcolor = color.new(color.black, 100), text_color = f_flashCol(dD, isP ? 1 : 0), text_size = flashSz)
+                            cx := cx + 1
         else
             bool showT = flashTxt != "" and timenow - flashTime <= mtfFlashSec * 1000 and flashLife == f_lifeId(flashCls, time)
             bool showP = flashTxtP != "" and timenow - flashTimeP <= mtfFlashSec * 1000 and flashLifeP == f_lifeId(flashClsP, time)
-            // "החדשה" כאן = זו שנסגרה מאוחר יותר (לפי השעון של הסימון)
+            // אותה מסגרת — רק האחרונה
+            if showT and showP and flashCls == flashClsP
+                bool pLast = flashTimeP > flashTime or (flashTimeP == flashTime and flashSqP > flashSq)
+                showT := not pLast
+                showP := pLast
             bool pF = showT and showP and f_pairFirst(flashDeg, flashTime, flashDegP, flashTimeP)
             for r = 0 to 1
                 bool isP = (r == 0) == pF
