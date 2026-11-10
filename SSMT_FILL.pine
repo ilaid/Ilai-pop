@@ -20,8 +20,8 @@ indicator("SSMT Fill | Quarterly Theory", overlay = true, max_labels_count = 20,
 //    באותה מסגרת, וגם כש-NQ/ES הפכו את הגאפ של השלישייה ל-IFVG.
 // 8. סדר התצוגה לבחירה: החזקה ראשונה · החדשה ראשונה · שלישייה ואז זוג —
 //    על הגרף (מי ראשית).
-// 9. בפינה: במקום שעה — ה-Q של השבירה בתוך המיכל (שלישי ב-1H = Q2), ולכל
-//    מסגרת רק השבירה האחרונה (שלישייה או זוג — לא שתיהן).
+// 9. בפינה: ה-Q של השבירה בתוך המיכל (שלישי ב-1H = Q2) ולידו השעה שבה
+//    נוצרה (5m ▼3 Q1 12:35), ולכל מסגרת רק השבירה האחרונה (שלישייה או זוג).
 //
 // ארבעה נכסים, התפקיד לפי המיקום: 1 ו-2 = חזקים · 3 = חלש · 4 = בן הזוג של 3.
 // שתי קבוצות נפרדות, וכל אחת יוצרת שבירות משלה באותם חוקים:
@@ -160,6 +160,7 @@ flashTag     = input.string("SF", "תווית פתיחה לשורה", group = gr
 flashTagCol  = input.color(color.gray, "צבע התווית", group = grpMtf)
 flashSz      = input.string("tiny", "גודל טקסט בפינה", options = ["tiny", "small", "normal"], group = grpMtf)
 flashHour    = input.bool(true, "Q של השבירה בפינה", tooltip = "איזה רבע של המיכל עשה את השבירה. 1m — רבע במיקרו · 5m — מיקרו בסשן · 15m — סשן ביום (אסיה Q1 … PM Q4) · 1H — יום בשבוע (שני Q1 … חמישי Q4, שישי Q5) · 4H — שבוע בחודש · 1D — רבע-רבעון ברבעון · 1W — רבעון בשנת QT (אפריל = Q1) · Mo — שנה במחזור.", group = grpMtf)
+cornerTime   = input.bool(true, "שעת השבירה בפינה (ליד ה-Q)", tooltip = "שעת הפתיחה של הנר שעשה את השבירה, בשעון ניו יורק. עד 4H — HH:mm · מהיומי — dd/MM.", group = grpMtf)
 flashMin     = input.bool(true, "פינה מינימלית", tooltip = "דלוק = בפינה רק מסגרת, חץ ודרגה — בלי שמות הזוג (הצבע מבדיל).", group = grpMtf)
 mtfAlert     = input.bool(true, "כלול שבירות ממסגרות אחרות בהתראה", group = grpMtf)
 // המסגרות האחרות מחושבות רק על הנרות האחרונים שלהן. 2000 מכסה בכל מסגרת יותר
@@ -1453,10 +1454,11 @@ f_qTxt(int c, int t) =>
         n := (yy - 2023) % 4 + 1
     n > 0 ? "Q" + str.tostring(n) : ""
 
-// הטקסט של תא אחד: מסגרת · כיוון ודרגה · (זוג) · Q של השבירה
+// הטקסט של תא אחד: מסגרת · כיוון ודרגה · (זוג) · Q · שעה — "5m ▼3 Q1 12:35"
 f_cellTxt(int cls, int dir, int deg, int kind, int t) =>
-    string q = flashHour and t > 0 ? f_qTxt(cls, t) : ""
-    f_clsName(cls) + (dir == 1 ? " ▲" : " ▼") + str.tostring(deg) + f_pairTag(kind) + (q != "" ? " " + q : "")
+    string q  = flashHour and t > 0 ? f_qTxt(cls, t) : ""
+    string hm = cornerTime and t > 0 ? str.format_time(t, cls <= 5 ? "HH:mm" : "dd/MM", TZ) : ""
+    f_clsName(cls) + (dir == 1 ? " ▲" : " ▼") + str.tostring(deg) + f_pairTag(kind) + (q != "" ? " " + q : "") + (hm != "" ? " " + hm : "")
 
 // האם הזוג מוצג לפני השלישייה — לפי מצב הסדר
 f_pairFirst(int degT, int seqT, int degP, int seqP) =>
