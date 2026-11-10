@@ -66,6 +66,9 @@ greyC = closedMode == "האפר"
 // השבירה לא נעלמת ולא משתנה; רק נוסף לתווית טקסט קצר עם שם הנכס.
 nearOn  = input.bool(true, "סמן שבירה שעומדת להתבטל", group = grpVis, tooltip = "בתווית על הגרף נוסף  ! YM  (שם הנכס שאם ייקח את הרמה — השבירה תתבטל), כשהוא קרוב אליה.\nHSSMT נמדד לפי הסגירה מול הסגירה הקיצונית, SSMT לפי הפתיל.\nקרוב = במרחק של פחות מהמכפיל כפול ה-ATR(14) של אותו נכס. נבדק בזמן אמת, על הנר החי.\nרק במסגרת הגרף.")
 nearATR = input.float(0.3, "קרוב = פחות מ-X פעמים ATR של הנכס", minval = 0.05, maxval = 3.0, step = 0.05, group = grpVis)
+// שעת השבירה (שעון ניו יורק) — טקסט זעיר ודהוי צמוד לתווית, בצד שפונה לנר.
+// ביומי ומעלה — תאריך במקום שעה.
+showTime = input.bool(true, "הצג שעת השבירה", group = grpVis)
 
 // QS = חלון זמן חם: שלוש רמות **רצופות** בסולם המחזורים יוצרות יחד רצף חם.
 // הסולם: חודש (1–3 ברבעון QT) ← שבוע (1–4 בחודש) ← יום (שני 1 .. חמישי 4) ←
@@ -1133,8 +1136,16 @@ f_draw(int k, Brk b, bool weak, array<label> L, array<line> N) =>
         lB = low[bar_index - b2]
         pd = atr * 0.15
         yl = isBull ? math.min(lB, nz(y2, lB)) - pd : math.max(hB, nz(y2, hB)) + pd
-        dz = f_danger(k, b)
-        array.push(L, label.new(b2, yl, f_lblTxt(b) + (dz != "" ? "  ! " + dz : ""), style = isBull ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = cFin, size = lSize, textalign = text.align_center))
+        dz   = f_danger(k, b)
+        mTxt = f_lblTxt(b) + (dz != "" ? "  ! " + dz : "")
+        // השעה של הנר שלקח את הרמה. בתווית הראשית נשארת שורה ריקה בצד שפונה לנר,
+        // ושם יושבת תווית זעירה עם השעה — כך היא קטנה מהטקסט הראשי ולא עולה עליו.
+        tStr = showTime ? str.format_time(time[bar_index - b2], tfClass >= 7 ? "dd.MM" : "HH:mm", TZ) : ""
+        lTxt = tStr == "" ? mTxt : isBull ? "\n" + mTxt : mTxt + "\n"
+        lSty2 = isBull ? label.style_label_up : label.style_label_down
+        array.push(L, label.new(b2, yl, lTxt, style = lSty2, color = color.new(color.black, 100), textcolor = cFin, size = lSize, textalign = text.align_center))
+        if tStr != ""
+            array.push(L, label.new(b2, yl, tStr, style = lSty2, color = color.new(color.black, 100), textcolor = color.new(cFin, math.min(color.t(cFin) + 30, 85)), size = size.tiny, textalign = text.align_center))
     ok
 
 // רק המצב הנוכחי מצויר, ולכן מציירים רק בנר האחרון: מוחקים הכול ומציירים מחדש
