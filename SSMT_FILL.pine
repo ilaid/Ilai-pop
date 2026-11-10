@@ -17,6 +17,8 @@ indicator("SSMT Fill | Quarterly Theory", overlay = true, max_labels_count = 20,
 // 6. חץ על הנר שרשם את שבירת הזוג 3·4 (YM/RTY) — לכניסה אחרי ה-fill.
 // 7. בפינה — השלישייה והזוג בנפרד: שבירת זוג מוצגת גם כשיש שבירת שלישייה
 //    באותה מסגרת, וגם כש-NQ/ES הפכו את הגאפ של השלישייה ל-IFVG.
+// 8. סדר התצוגה לבחירה: החזקה ראשונה · החדשה ראשונה · שלישייה ואז זוג —
+//    על הגרף (מי ראשית) ובפינה (מי קודם). ובפינה גם שעת השבירה.
 //
 // ארבעה נכסים, התפקיד לפי המיקום: 1 ו-2 = חזקים · 3 = חלש · 4 = בן הזוג של 3.
 // שתי קבוצות נפרדות, וכל אחת יוצרת שבירות משלה באותם חוקים:
@@ -92,6 +94,8 @@ colPairW  = input.color(#ce93d8, "שבירה משנית — זוג 3·4", group 
 weakFade  = input.int(30, "שקיפות השבירה המשנית", minval = 0, maxval = 90, group = grpVis, tooltip = "חל רק על השבירה המשנית. הראשית נשארת כמו שהיא.")
 weakStyle = input.string("מקווקו", "מסגרת — שבירה משנית", options = ["רציף", "מקווקו", "נקודות"], group = grpVis)
 weakSmall = input.bool(true, "טקסט קטן לשבירה משנית", group = grpVis)
+// כששבורות גם השלישייה וגם הזוג — מי ראשית על הגרף ומי קודם בפינה
+orderMode = input.string("החזקה ראשונה", "סדר: שלישייה מול זוג", options = ["החזקה ראשונה", "החדשה ראשונה", "שלישייה ואז זוג"], group = grpVis, tooltip = "החזקה = דרגה גבוהה יותר (בשוויון — החדשה). החדשה = זו שנרשמה אחרונה. שלישייה ואז זוג = השלישייה תמיד ראשונה.")
 capSize   = input.string("tiny", "גודל הכיתוב", options = ["tiny", "small", "normal"], group = grpVis)
 offsetMlt = input.float(1.5, "מרחק התווית מהנר (ATR)", minval = 0.1, maxval = 6.0, step = 0.1, group = grpVis)
 // חץ על הנר שרשם את שבירת הזוג 3·4 — כדי לדעת בדיוק איזה נר עשה את ה-fill.
@@ -149,6 +153,7 @@ flashLift    = input.int(1, "הרם את הסימון (שורות)", minval = 0,
 flashTag     = input.string("SF", "תווית פתיחה לשורה", group = grpMtf)
 flashTagCol  = input.color(color.gray, "צבע התווית", group = grpMtf)
 flashSz      = input.string("tiny", "גודל טקסט בפינה", options = ["tiny", "small", "normal"], group = grpMtf)
+flashHour    = input.bool(true, "שעת השבירה בפינה", tooltip = "שעת הנר שעשה את השבירה (שעון ניו יורק). עד 1H — HH:mm · 4H — dd/MM HH:mm · מהיומי — dd/MM.", group = grpMtf)
 flashMin     = input.bool(true, "פינה מינימלית", tooltip = "דלוק = בפינה רק מסגרת, חץ ודרגה — בלי שמות הזוג (הצבע מבדיל).", group = grpMtf)
 mtfAlert     = input.bool(true, "כלול שבירות ממסגרות אחרות בהתראה", group = grpMtf)
 // המסגרות האחרות מחושבות רק על הנרות האחרונים שלהן. 2000 מכסה בכל מסגרת יותר
@@ -346,6 +351,7 @@ type Gap
     // תיקון באותו ביקור: fVis = הביקור שבו נרשמה/עלתה, fPrev = הדרגה מקודם
     int    fVis     = 0
     int    fPrev    = 0
+    int    fTime    = 0       // זמן הפתיחה של הנר שרשם את השבירה
 
 var array<Gap> gaps = array.new<Gap>()
 var int gapCounter  = 0
@@ -717,17 +723,23 @@ type Engine
     int          fDir       = 0     // השבירה המוצגת — שלישייה
     int          fDeg       = 0
     string       fLead      = ""
+    int          fT         = 0     // שעת השבירה ומספר הרישום שלה — לפינה
+    int          fSq        = 0
     int          pDir       = 0     // השבירה המוצגת — זוג 3·4, בנפרד
     int          pDeg       = 0
     string       pLead      = ""
+    int          pT         = 0
+    int          pSq        = 0
     bool         justFired  = false // נרשמה שבירת שלישייה בנר הגרף הזה
     int          jDir       = 0
     int          jDeg       = 0
     string       jLead      = ""
+    int          jT         = 0
     bool         pFired     = false // נרשמה שבירת זוג בנר הגרף הזה
     int          pjDir      = 0
     int          pjDeg      = 0
     string       pjLead     = ""
+    int          pjT        = 0
 
 // כל מזהי המחזורים מתוך חותמת זמן, נכתבים לתוך המנוע. זהה לחישוב של הגרף.
 f_setCycles(Engine e, int t) =>
@@ -910,16 +922,19 @@ f_step(Engine e, int tOpen, array<float> q1, array<float> q2, array<float> q3, a
                 if gr.register(canReg)
                     e.seqCounter := e.seqCounter + 1
                     gr.fSeq      := e.seqCounter
+                    gr.fTime     := tOpen
                     if gr.kind == 0
                         e.justFired := true
                         e.jDir      := gr.dir
                         e.jDeg      := gr.fDeg
                         e.jLead     := gr.fLead
+                        e.jT        := tOpen
                     else
                         e.pFired    := true
                         e.pjDir     := gr.dir
                         e.pjDeg     := gr.fDeg
                         e.pjLead    := gr.fLead
+                        e.pjT       := tOpen
 
         // ── השבירה המוצגת — שלישייה וזוג כל אחד בנפרד ──
         // שבירת הזוג חיה כל עוד YM/RTY לא הפכו את הגאפ שלהם ל-IFVG, בלי קשר
@@ -936,11 +951,15 @@ f_step(Engine e, int tOpen, array<float> q1, array<float> q2, array<float> q3, a
             e.fDir  := gd.dir
             e.fDeg  := gd.fDeg
             e.fLead := gd.fLead
+            e.fT    := gd.fTime
+            e.fSq   := gd.fSeq
         if sP != -1
             Gap gp = array.get(e.gaps, sP)
             e.pDir  := gp.dir
             e.pDeg  := gp.fDeg
             e.pLead := gp.fLead
+            e.pT    := gp.fTime
+            e.pSq   := gp.fSeq
     e.fDeg
 
 // המנוע מחזיק בעצמו את שני הנרות הקודמים של כל נכס — מעל הגרף ומתחתיו.
@@ -1138,6 +1157,7 @@ if barstate.isconfirmed and tfClass != 0 and array.size(gaps) > 0
         if gr.register(canReg)
             seqCounter += 1
             gr.fSeq  := seqCounter
+            gr.fTime := time
             gr.fYPos := gr.dir == 1 ? low - atr * offsetMlt : high + atr * offsetMlt
             if alertOn and gr.fDeg >= alertMinDeg
                 string one = "[" + f_clsName(tfClass) + "] " + syminfo.ticker + " · שבירה " + (gr.dir == 1 ? "שורית" : "דובית") + " " + f_degTxt(gr.fDeg) + " · " + gr.fLead
@@ -1381,17 +1401,27 @@ if mtfOn and barstate.islast
 f_pairTag(int kind) =>
     kind == 1 and not flashMin ? " · " + nm3 + "/" + nm4 : ""
 
+// הטקסט של תא אחד: מסגרת · כיוון ודרגה · (זוג) · שעת השבירה
+f_cellTxt(int cls, int dir, int deg, int kind, int t) =>
+    f_clsName(cls) + (dir == 1 ? " ▲" : " ▼") + str.tostring(deg) + f_pairTag(kind) + (flashHour and t > 0 ? " " + f_bornTxt(cls, t) : "")
+
+// האם הזוג מוצג לפני השלישייה — לפי מצב הסדר
+f_pairFirst(int degT, int seqT, int degP, int seqP) =>
+    orderMode == "שלישייה ואז זוג" ? false : orderMode == "החדשה ראשונה" ? seqP > seqT : (degP > degT or (degP == degT and seqP > seqT))
+
 // סימון "נולדה" נפרד לשלישייה ולזוג — שבירת זוג לא נדרסת ע"י שבירת שלישייה
 var string flashTxt  = ""
 var int    flashDir  = 0
 var int    flashTime = 0
 var int    flashCls  = 0
 var int    flashLife = 0
+var int    flashDeg  = 0
 var string flashTxtP  = ""
 var int    flashDirP  = 0
 var int    flashTimeP = 0
 var int    flashClsP  = 0
 var int    flashLifeP = 0
+var int    flashDegP  = 0
 
 if mtfOn and barstate.isconfirmed
     for k = 0 to array.size(allEng) - 1
@@ -1399,8 +1429,9 @@ if mtfOn and barstate.isconfirmed
         // שעון הסימון: timenow בזמן אמת, time_close בהיסטוריה
         int fNow = barstate.isrealtime ? timenow : time_close
         if f_useSlot(k) and ek.justFired
-            flashTxt  := f_clsName(ek.cls) + " " + (ek.jDir == 1 ? "▲" : "▼") + str.tostring(ek.jDeg)
+            flashTxt  := f_cellTxt(ek.cls, ek.jDir, ek.jDeg, 0, ek.jT)
             flashDir  := ek.jDir
+            flashDeg  := ek.jDeg
             flashTime := fNow
             flashCls  := ek.cls
             flashLife := ek.lifeId
@@ -1408,8 +1439,9 @@ if mtfOn and barstate.isconfirmed
                 string one = "[" + f_clsName(ek.cls) + "] " + syminfo.ticker + " · שבירה " + (ek.jDir == 1 ? "שורית" : "דובית") + " " + f_degTxt(ek.jDeg) + " · " + ek.jLead
                 alertMsg := alertMsg == "" ? one : alertMsg + "\n" + one
         if f_useSlot(k) and ek.pFired
-            flashTxtP  := f_clsName(ek.cls) + " " + (ek.pjDir == 1 ? "▲" : "▼") + str.tostring(ek.pjDeg) + f_pairTag(1)
+            flashTxtP  := f_cellTxt(ek.cls, ek.pjDir, ek.pjDeg, 1, ek.pjT)
             flashDirP  := ek.pjDir
+            flashDegP  := ek.pjDeg
             flashTimeP := fNow
             flashClsP  := ek.cls
             flashLifeP := ek.lifeId
@@ -1444,19 +1476,24 @@ if barstate.islast
                     for k = 0 to array.size(allEng) - 1
                         Engine ep = array.get(allEng, k)
                         if f_useSlot(k) and ep.cls == cc
-                            if ep.fDir != 0 and cx <= 16
-                                table.cell(flashT, cx, flashRow, f_clsName(cc) + (ep.fDir == 1 ? " ▲" : " ▼") + str.tostring(ep.fDeg) + "  ", bgcolor = color.new(color.black, 100), text_color = f_flashCol(ep.fDir, 0), text_size = flashSz)
-                                cx := cx + 1
-                            if ep.pDir != 0 and cx <= 16
-                                table.cell(flashT, cx, flashRow, f_clsName(cc) + (ep.pDir == 1 ? " ▲" : " ▼") + str.tostring(ep.pDeg) + f_pairTag(1) + "  ", bgcolor = color.new(color.black, 100), text_color = f_flashCol(ep.pDir, 1), text_size = flashSz)
-                                cx := cx + 1
+                            bool pF = ep.fDir != 0 and ep.pDir != 0 and f_pairFirst(ep.fDeg, ep.fSq, ep.pDeg, ep.pSq)
+                            // שני סבבים: 0 = הראשון לפי הסדר, 1 = השני
+                            for r = 0 to 1
+                                bool isP = (r == 0) == pF
+                                int  dD  = isP ? ep.pDir : ep.fDir
+                                if dD != 0 and cx <= 16
+                                    table.cell(flashT, cx, flashRow, f_cellTxt(cc, dD, isP ? ep.pDeg : ep.fDeg, isP ? 1 : 0, isP ? ep.pT : ep.fT) + "  ", bgcolor = color.new(color.black, 100), text_color = f_flashCol(dD, isP ? 1 : 0), text_size = flashSz)
+                                    cx := cx + 1
         else
-            if flashTxt != "" and timenow - flashTime <= mtfFlashSec * 1000 and flashLife == f_lifeId(flashCls, time)
-                table.cell(flashT, cx, flashRow, flashTxt + "  ", bgcolor = color.new(color.black, 100), text_color = f_flashCol(flashDir, 0), text_size = flashSz)
-                cx := cx + 1
-            if flashTxtP != "" and timenow - flashTimeP <= mtfFlashSec * 1000 and flashLifeP == f_lifeId(flashClsP, time)
-                table.cell(flashT, cx, flashRow, flashTxtP, bgcolor = color.new(color.black, 100), text_color = f_flashCol(flashDirP, 1), text_size = flashSz)
-                cx := cx + 1
+            bool showT = flashTxt != "" and timenow - flashTime <= mtfFlashSec * 1000 and flashLife == f_lifeId(flashCls, time)
+            bool showP = flashTxtP != "" and timenow - flashTimeP <= mtfFlashSec * 1000 and flashLifeP == f_lifeId(flashClsP, time)
+            // "החדשה" כאן = זו שנסגרה מאוחר יותר (לפי השעון של הסימון)
+            bool pF = showT and showP and f_pairFirst(flashDeg, flashTime, flashDegP, flashTimeP)
+            for r = 0 to 1
+                bool isP = (r == 0) == pF
+                if isP ? showP : showT
+                    table.cell(flashT, cx, flashRow, (isP ? flashTxtP : flashTxt) + "  ", bgcolor = color.new(color.black, 100), text_color = f_flashCol(isP ? flashDirP : flashDir, isP ? 1 : 0), text_size = flashSz)
+                    cx := cx + 1
         // תווית הפתיחה מופיעה רק כשיש מה להגיד
         if cx > 1
             table.cell(flashT, 0, flashRow, flashTag + "  ", bgcolor = color.new(color.black, 100), text_color = flashTagCol, text_size = flashSz)
@@ -1464,8 +1501,8 @@ if barstate.islast
 // ═══════════════════════════════════════════════════════════════════
 // ציור — השבירה של השלישייה ושל הזוג 3·4, יחד
 //
-// החזקה מבין השתיים (דרגה גבוהה יותר, ובשוויון — החדשה) היא הראשית ומצוירת
-// בצבע המלא. השנייה היא משנית: צבע, שקיפות, מסגרת וגודל טקסט משלה.
+// הראשית לפי "סדר: שלישייה מול זוג" (ברירת מחדל: החזקה — דרגה גבוהה יותר,
+// ובשוויון החדשה), ומצוירת בצבע המלא. השנייה היא משנית: צבע, שקיפות, מסגרת וגודל טקסט משלה.
 // לנכס של הגרף יש רגל בגאפ → קופסה, והכיתוב בתוכה. אין → רק תווית ליד הנר.
 // ═══════════════════════════════════════════════════════════════════
 
@@ -1514,7 +1551,7 @@ if barstate.islast
     if selT != -1 and selP != -1
         Gap gT = array.get(gaps, selT)
         Gap gP = array.get(gaps, selP)
-        bool tPrim = gT.fDeg > gP.fDeg or (gT.fDeg == gP.fDeg and gT.fSeq >= gP.fSeq)
+        bool tPrim = not f_pairFirst(gT.fDeg, gT.fSeq, gP.fDeg, gP.fSeq)
         f_drawGap(gT, not tPrim)
         f_drawGap(gP, tPrim)
     else if selT != -1
