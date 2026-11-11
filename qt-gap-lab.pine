@@ -338,6 +338,22 @@ var float pLoB = na
 var int   cStart = na
 var bool  act = false
 
+f_dep(G g, float h, float l) =>
+    float d = 0.0
+    if not na(g) and not na(h) and g.top > g.bot
+        d := math.max(0.0, g.dir == 1 ? (g.top - l) / (g.top - g.bot) : (h - g.bot) / (g.top - g.bot))
+    d
+
+f_degree(float dLead, float dLag) =>
+    int deg = 0
+    if dLead >= 1.0 and dLag < 1.0
+        deg := 3
+    else if dLead >= 0.5 and dLag < 0.5
+        deg := 2
+    else if dLead > 0.0 and dLag <= 0.0
+        deg := 1
+    deg
+
 method fin(S s) =>
     if s.avail and s.inR and not na(s.tG)
         float rng  = pHi - pLo
@@ -458,21 +474,6 @@ pcp1    = not na(bc1) and f_dr(open[1], close[1]) != f_dr(bo1, bc1)
 pspBull = pcp1 and ((low[1] < low[2] and low[1] < low) or (not na(bl) and bl[1] < bl[2] and bl[1] < bl))
 pspBear = pcp1 and ((high[1] > high[2] and high[1] > high) or (not na(bh) and bh[1] > bh[2] and bh[1] > bh))
 
-f_dep(G g, float h, float l) =>
-    float d = 0.0
-    if not na(g) and not na(h) and g.top > g.bot
-        d := math.max(0.0, g.dir == 1 ? (g.top - l) / (g.top - g.bot) : (h - g.bot) / (g.top - g.bot))
-    d
-
-f_degree(float dLead, float dLag) =>
-    int deg = 0
-    if dLead >= 1.0 and dLag < 1.0
-        deg := 3
-    else if dLead >= 0.5 and dLag < 0.5
-        deg := 2
-    else if dLead > 0.0 and dLag <= 0.0
-        deg := 1
-    deg
 cLo := na(cLo) ? low : math.min(cLo, low)
 
 // ══════════════════════════════════════════════════════════════
