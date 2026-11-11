@@ -645,6 +645,8 @@ if barstate.islast
         f_c(5, 1, "מאפיין", DIM, BGS)
         f_c(2, 1, "הכי טוב", GOOD, BGS)
         f_c(0, 1, "הכי חלש", BAD, BGS)
+        f_mg(0, 2, 1, 2, doM)
+        f_mg(2, 2, 4, 2, doM)
         f_lbl(2, "כל החזרות")
         f_c(2, 2, "החזיק " + f_p(ah, an) + " · תגובה ≥½ " + f_p(ag, an), TXT, BG)
         f_c(0, 2, "קיצון " + f_p(as_, an) + " · ממוצע " + (an > 0 ? str.tostring(math.round(arx / an)) + "%" : "–"), TXT, BG)
