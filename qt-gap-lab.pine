@@ -17,8 +17,9 @@ indicator("QT Gap Lab", shorttitle = "Gap Lab", overlay = true, max_labels_count
 // הגדרות
 // ══════════════════════════════════════════════════════════════
 G1 = "בדיקה"
-viewIn = input.string("סיכום", "מה להציג", options = ["סיכום", "גודל הגאפ", "סוג הגאפ", "משותף לשני הנכסים", "מיקום בטווח הקודם", "מתי נוצר במחזור הקודם", "מתי חזר במחזור הנוכחי", "לקיחת הקיצון לפני החזרה", "נגע בגאפ כבר במחזור שלו", "נר תזוזה חזק", "הנכס השני ברגע הנגיעה", "עומק בנר הנגיעה", "כמה גאפים פתוחים בצד", "מיקום המחזור במיכל"], group = G1)
+viewIn = input.string("סיכום", "מה להציג", options = ["סיכום", "חזרה לגאפ — מבט כללי", "מתי הגאפ נשבר", "גודל הגאפ", "סוג הגאפ", "משותף לשני הנכסים", "מיקום בטווח הקודם", "מתי נוצר במחזור הקודם", "מתי חזר במחזור הנוכחי", "לקיחת הקיצון לפני החזרה", "נגע בגאפ כבר במחזור שלו", "נר תזוזה חזק", "הנכס השני ברגע הנגיעה", "עומק בנר הנגיעה", "כמה גאפים פתוחים בצד", "מיקום המחזור במיכל"], group = G1)
 sideIn = input.string("שני הצדדים", "צד", options = ["שני הצדדים", "גאפ מתחת (שורי)", "גאפ מעל (דובי)"], group = G1)
+rankIn = input.string("החזיק", "בסיכום — לדרג לפי", options = ["החזיק", "תגובה חזקה (≥½)", "לקח קיצון"], group = G1)
 minN   = input.int(15, "מינימום מקרים להשוואה בסיכום", minval = 3, maxval = 200, group = G1)
 sym2   = input.symbol("CME_MINI:MES1!", "הנכס השני", group = G1, tooltip = "על גרף NQ — ES, ועל גרף ES — NQ.")
 tol    = input.int(1, "גאפ משותף: סטייה בנרות", minval = 0, maxval = 3, group = G1)
@@ -188,6 +189,8 @@ type G
     bool  pre   = false // נגע בו כבר במחזור שלו
     int   pid   = 0     // הגאפ המשותף בנכס השני
     int   lastT = -1    // הנר האחרון שבו הנכס נגע בו (לנכס השני)
+    int   dBar          // מתי הפך ל-IFVG
+    int   dT
 
 var array<G> gA = array.new<G>()
 var array<G> gB = array.new<G>()
@@ -294,6 +297,10 @@ var array<bool>  evHeld = array.new_bool()
 var array<bool>  evBig  = array.new_bool()
 var array<bool>  evSucc = array.new_bool()
 var array<float> evRx   = array.new_float()
+var array<bool>  evRet  = array.new_bool()   // חזר לגאפ
+var array<bool>  evExt  = array.new_bool()   // לקח את הקיצון בלי לחזור
+var array<int>   evBrkS = array.new_int()    // נשבר: 0 באותו נר · 1 תוך 1–3 נרות · 2 אחרי 4+ · -1 לא נשבר
+var array<int>   evBrkQ = array.new_int()    // נשבר באיזה רבע של המחזור
 
 var int   cS  = na
 var int   cC  = na
@@ -323,10 +330,28 @@ method fin(S s) =>
         evBig.push(rx >= 50)
         evSucc.push(s.succ)
         evRx.push(rx)
+        evRet.push(true)
+        evExt.push(false)
+        int bars = held ? -1 : s.fg.dBar - s.tG
+        evBrkS.push(held ? -1 : bars <= 0 ? 0 : bars <= 3 ? 1 : 2)
+        int bq = held ? na : f_inQ(s.fg.dT)
+        evBrkQ.push(na(bq) ? -1 : bq)
         if not na(s.lb)
             s.lb.set_text((held ? "✓" : "✗") + " " + str.tostring(math.round(rx)) + "%")
             s.lb.set_color(held ? (s.dir == 1 ? cBull : cBear) : color.gray)
             s.lb.set_tooltip((held ? "הגאפ החזיק" : "הגאפ נשבר (IFVG)") + "\nתגובה: " + str.tostring(math.round(rx)) + "% מטווח המחזור הקודם" + (s.succ ? "\nלקח את הקיצון של המחזור הקודם" : ""))
+    if s.avail and s.inR and na(s.tG)
+        evDir.push(s.dir)
+        for k = 0 to NF - 1
+            evF.push(-1)
+        evHeld.push(false)
+        evBig.push(false)
+        evSucc.push(false)
+        evRx.push(0.0)
+        evRet.push(false)
+        evExt.push(not na(s.tExt))
+        evBrkS.push(-1)
+        evBrkQ.push(-1)
     0
 
 method reset(S s, bool inR) =>
@@ -452,6 +477,8 @@ sUp.onBar()
 for g in gA
     if not g.dead and g.bar < bar_index and (g.dir == 1 ? close < g.bot : close > g.top)
         g.dead := true
+        g.dBar := bar_index
+        g.dT   := time
 if not na(bc)
     for g in gB
         if not g.dead and g.bar < bar_index and (g.dir == 1 ? bc < g.bot : bc > g.top)
@@ -515,7 +542,7 @@ f_stat(int k, int b) =>
     int ne = evDir.size()
     if ne > 0
         for i = 0 to ne - 1
-            if f_sideOk(evDir.get(i)) and (b == -2 or evF.get(i * NF + k) == b)
+            if evRet.get(i) and f_sideOk(evDir.get(i)) and (b == -2 or evF.get(i * NF + k) == b)
                 n += 1
                 h += evHeld.get(i) ? 1 : 0
                 g += evBig.get(i) ? 1 : 0
@@ -535,7 +562,7 @@ DIM = #9598a1
 GOOD = #26a69a
 BAD  = #ef5350
 
-var table tb = table.new(tbP, 5, 17, border_width = 1, border_color = color.new(#363a45, 0), frame_width = 1, frame_color = color.new(#363a45, 0))
+var table tb = table.new(tbP, 6, 17, border_width = 1, border_color = color.new(#363a45, 0), frame_width = 1, frame_color = color.new(#363a45, 0))
 
 f_c(int c, int r, string t, color fg, color bg) =>
     tb.cell(c, r, t, text_color = fg, bgcolor = bg, text_size = tsz)
@@ -543,21 +570,84 @@ f_c(int c, int r, string t, color fg, color bg) =>
 
 SUBN = array.from("", "22.5 דק'", "90 דק'", "סשן", "יום", "שבוע", "רבע-רבעון", "רבעון QT", "שנה")
 
+// מדד לדירוג: 0 החזיק · 1 תגובה חזקה · 2 לקח קיצון
+rk = rankIn == "החזיק" ? 0 : rankIn == "תגובה חזקה (≥½)" ? 1 : 2
+f_pick(int h, int g, int s) =>
+    rk == 0 ? h : rk == 1 ? g : s
+
+// מבט כללי: [מחזורים, חזר, קיצון→חזר, חזר→קיצון, חזר בלי קיצון, קיצון בלי לחזור, כלום]
+f_over() =>
+    int tot = 0
+    int ret = 0
+    int eb  = 0
+    int ra  = 0
+    int rn  = 0
+    int xo  = 0
+    int no  = 0
+    int ne = evDir.size()
+    if ne > 0
+        for i = 0 to ne - 1
+            if f_sideOk(evDir.get(i))
+                tot += 1
+                if evRet.get(i)
+                    ret += 1
+                    if evF.get(i * NF + 6) == 0
+                        eb += 1
+                    else if evSucc.get(i)
+                        ra += 1
+                    else
+                        rn += 1
+                else if evExt.get(i)
+                    xo += 1
+                else
+                    no += 1
+    [tot, ret, eb, ra, rn, xo, no]
+
+// שבירות: [חזרות, נשברו, לפי מהירות 0..2, לפי רבע 0..4]
+f_brk() =>
+    int ret = 0
+    int brk = 0
+    array<int> sp = array.new_int(3, 0)
+    array<int> qq = array.new_int(5, 0)
+    int ne = evDir.size()
+    if ne > 0
+        for i = 0 to ne - 1
+            if evRet.get(i) and f_sideOk(evDir.get(i))
+                ret += 1
+                int bs = evBrkS.get(i)
+                if bs >= 0
+                    brk += 1
+                    sp.set(bs, sp.get(bs) + 1)
+                    int bq = evBrkQ.get(i)
+                    if bq >= 0
+                        qq.set(math.min(bq, 4), qq.get(math.min(bq, 4)) + 1)
+    [ret, brk, sp, qq]
+
+f_lbl(int r, string t) =>
+    tb.cell(5, r, t, text_color = TXT, bgcolor = BG, text_size = tsz, text_halign = text.align_right)
+    0
+
+f_mg(int c1, int r1, int c2, int r2, bool doM) =>
+    if doM
+        tb.merge_cells(c1, r1, c2, r2)
+    0
+
 var bool merged = false
 if barstate.islast
     [an, ah, ag, as_, arx] = f_stat(0, -2)
-    string ttl = "Gap Lab · " + SUBN.get(L) + " מול " + SUBN.get(L) + " קודם · " + str.tostring(an) + " חזרות"
+    string ttl = "Gap Lab · " + SUBN.get(L) + " מול " + SUBN.get(L) + " קודם"
+    bool doM = not merged
+    f_mg(0, 0, 5, 0, doM)
     if viewIn == "סיכום"
-        if not merged
-            tb.merge_cells(0, 0, 2, 0)
-            merged := true
-        f_c(0, 0, ttl, color.white, BGS)
-        f_c(2, 1, "מאפיין", DIM, BGS)
-        f_c(1, 1, "החזיק הכי הרבה", GOOD, BGS)
-        f_c(0, 1, "החזיק הכי מעט", BAD, BGS)
-        f_c(2, 2, "כל החזרות", TXT, BG)
-        f_c(1, 2, "החזיק " + f_p(ah, an), TXT, BG)
-        f_c(0, 2, "תגובה ≥½ " + f_p(ag, an) + " · קיצון " + f_p(as_, an), TXT, BG)
+        f_c(0, 0, ttl + " · " + str.tostring(an) + " חזרות · דירוג לפי: " + rankIn, color.white, BGS)
+        f_mg(0, 1, 1, 1, doM)
+        f_mg(2, 1, 4, 1, doM)
+        f_c(5, 1, "מאפיין", DIM, BGS)
+        f_c(2, 1, "הכי טוב", GOOD, BGS)
+        f_c(0, 1, "הכי חלש", BAD, BGS)
+        f_lbl(2, "כל החזרות")
+        f_c(2, 2, "החזיק " + f_p(ah, an) + " · תגובה ≥½ " + f_p(ag, an), TXT, BG)
+        f_c(0, 2, "קיצון " + f_p(as_, an) + " · ממוצע " + (an > 0 ? str.tostring(math.round(arx / an)) + "%" : "–"), TXT, BG)
         for k = 0 to NF - 1
             float bestP = -1.0
             float worstP = 2.0
@@ -566,39 +656,68 @@ if barstate.islast
             for b = 0 to NB.get(k) - 1
                 [n, h, g, s, rx] = f_stat(k, b)
                 if n >= minN
-                    float pr = float(h) / n
+                    int   v  = f_pick(h, g, s)
+                    float pr = float(v) / n
+                    string tx = f_bName(k, b) + "  " + f_p(v, n) + " (" + str.tostring(n) + ")"
                     if pr > bestP
                         bestP := pr
-                        bestT := f_bName(k, b) + "  " + f_p(h, n) + " (" + str.tostring(n) + ")"
+                        bestT := tx
                     if pr < worstP
                         worstP := pr
-                        worstT := f_bName(k, b) + "  " + f_p(h, n) + " (" + str.tostring(n) + ")"
-            tb.cell(2, 3 + k, FNAMES.get(k), text_color = TXT, bgcolor = BG, text_size = tsz, text_halign = text.align_right)
-            f_c(1, 3 + k, bestT, GOOD, BG)
+                        worstT := tx
+            f_mg(0, 3 + k, 1, 3 + k, doM)
+            f_mg(2, 3 + k, 4, 3 + k, doM)
+            f_lbl(3 + k, FNAMES.get(k))
+            f_c(2, 3 + k, bestT, GOOD, BG)
             f_c(0, 3 + k, worstT, BAD, BG)
+    else if viewIn == "חזרה לגאפ — מבט כללי"
+        [tot, ret, eb, ra, rn, xo, no] = f_over()
+        f_c(0, 0, ttl + " · " + str.tostring(tot) + " מחזורים עם גאפ זמין", color.white, BGS)
+        array<string> nm = array.from("חזר לגאפ", "↳ קודם לקח את הקיצון ואז חזר", "↳ חזר ואז לקח את הקיצון", "↳ חזר בלי לקחת את הקיצון", "לקח את הקיצון בלי לחזור", "לא לקח ולא חזר", "אחרי החזרה: הגאפ החזיק", "אחרי החזרה: תגובה ≥½ טווח", "תגובה ממוצעת")
+        array<int> vv = array.from(ret, eb, ra, rn, xo, no, ah, ag)
+        array<int> dd = array.from(tot, tot, tot, tot, tot, tot, an, an)
+        for r = 0 to 8
+            f_mg(0, 1 + r, 4, 1 + r, doM)
+            f_lbl(1 + r, nm.get(r))
+            f_c(0, 1 + r, r < 8 ? f_p(vv.get(r), dd.get(r)) + "  (" + str.tostring(vv.get(r)) + ")" : (an > 0 ? str.tostring(math.round(arx / an)) + "% מטווח המחזור הקודם" : "–"), TXT, BG)
+    else if viewIn == "מתי הגאפ נשבר"
+        [ret, brk, sp, qq] = f_brk()
+        f_c(0, 0, ttl + " · נשברו " + str.tostring(brk) + " מתוך " + str.tostring(ret) + " חזרות (" + f_p(brk, ret) + ")", color.white, BGS)
+        array<string> nm = array.from("באותו נר של הנגיעה", "1–3 נרות אחרי הנגיעה", "4+ נרות אחרי הנגיעה")
+        for r = 0 to 2
+            f_mg(0, 1 + r, 4, 1 + r, doM)
+            f_lbl(1 + r, nm.get(r))
+            f_c(0, 1 + r, f_p(sp.get(r), brk) + "  (" + str.tostring(sp.get(r)) + ")", TXT, BG)
+        if L >= 2 and L <= 5
+            for r = 0 to (L == 5 ? 4 : 3)
+                f_mg(0, 4 + r, 4, 4 + r, doM)
+                f_lbl(4 + r, "נשבר ב-" + f_qName(r))
+                f_c(0, 4 + r, f_p(qq.get(r), brk) + "  (" + str.tostring(qq.get(r)) + ")", TXT, BG)
     else
         int k = FNAMES.indexof(viewIn)
-        if not merged
-            tb.merge_cells(0, 0, 4, 0)
-            merged := true
-        f_c(0, 0, ttl + " · לפי " + viewIn, color.white, BGS)
-        f_c(4, 1, "", DIM, BGS)
-        f_c(3, 1, "מקרים", DIM, BGS)
-        f_c(2, 1, "החזיק", DIM, BGS)
-        f_c(1, 1, "תגובה ≥½", DIM, BGS)
-        f_c(0, 1, "לקח קיצון", DIM, BGS)
-        f_c(4, 2, "כל החזרות", TXT, BG)
-        f_c(3, 2, str.tostring(an), TXT, BG)
-        f_c(2, 2, f_p(ah, an), TXT, BG)
-        f_c(1, 2, f_p(ag, an), TXT, BG)
-        f_c(0, 2, f_p(as_, an), TXT, BG)
-        float base = an > 0 ? float(ah) / an : 0.0
+        f_c(0, 0, ttl + " · " + str.tostring(an) + " חזרות · לפי " + viewIn, color.white, BGS)
+        f_c(5, 1, "", DIM, BGS)
+        f_c(4, 1, "מקרים", DIM, BGS)
+        f_c(3, 1, "החזיק", DIM, BGS)
+        f_c(2, 1, "תגובה ≥½", DIM, BGS)
+        f_c(1, 1, "לקח קיצון", DIM, BGS)
+        f_c(0, 1, "תגובה ממוצעת", DIM, BGS)
+        f_lbl(2, "כל החזרות")
+        f_c(4, 2, str.tostring(an), TXT, BG)
+        f_c(3, 2, f_p(ah, an), TXT, BG)
+        f_c(2, 2, f_p(ag, an), TXT, BG)
+        f_c(1, 2, f_p(as_, an), TXT, BG)
+        f_c(0, 2, an > 0 ? str.tostring(math.round(arx / an)) + "%" : "–", TXT, BG)
+        float bH = an > 0 ? float(ah) / an : 0.0
+        float bG = an > 0 ? float(ag) / an : 0.0
+        float bS = an > 0 ? float(as_) / an : 0.0
         for b = 0 to NB.get(k) - 1
             [n, h, g, s, rx] = f_stat(k, b)
-            float pr = n > 0 ? float(h) / n : 0.0
-            color hc = n < minN ? DIM : pr >= base + 0.05 ? GOOD : pr <= base - 0.05 ? BAD : TXT
-            tb.cell(4, 3 + b, f_bName(k, b), text_color = TXT, bgcolor = BG, text_size = tsz, text_halign = text.align_right)
-            f_c(3, 3 + b, str.tostring(n), n < minN ? DIM : TXT, BG)
-            f_c(2, 3 + b, f_p(h, n), hc, BG)
-            f_c(1, 3 + b, f_p(g, n), n < minN ? DIM : TXT, BG)
-            f_c(0, 3 + b, f_p(s, n), n < minN ? DIM : TXT, BG)
+            bool few = n < minN
+            f_lbl(3 + b, f_bName(k, b))
+            f_c(4, 3 + b, str.tostring(n), few ? DIM : TXT, BG)
+            f_c(3, 3 + b, f_p(h, n), few ? DIM : n > 0 and float(h) / n >= bH + 0.05 ? GOOD : n > 0 and float(h) / n <= bH - 0.05 ? BAD : TXT, BG)
+            f_c(2, 3 + b, f_p(g, n), few ? DIM : n > 0 and float(g) / n >= bG + 0.05 ? GOOD : n > 0 and float(g) / n <= bG - 0.05 ? BAD : TXT, BG)
+            f_c(1, 3 + b, f_p(s, n), few ? DIM : n > 0 and float(s) / n >= bS + 0.05 ? GOOD : n > 0 and float(s) / n <= bS - 0.05 ? BAD : TXT, BG)
+            f_c(0, 3 + b, n > 0 ? str.tostring(math.round(rx / n)) + "%" : "–", few ? DIM : TXT, BG)
+    merged := true
