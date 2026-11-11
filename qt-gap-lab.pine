@@ -384,10 +384,13 @@ method fin(S s) =>
         evCause.push(deg > 0 ? 3 - deg : s.psp ? 3 : not na(s.pt) ? 4 : 5)
         evLead.push(deg > 0 ? (s.dA >= s.dB ? 0 : 1) : -1)
         evPsp.push(s.psp)
-        bool k1 = (deg == 1) or (deg > 0 and s.dB > s.dA)
+        // תוך-יומי: F1 / השני עמוק יותר · עד חצי · קודם לקח קיצון · המחזור האחרון במיכל
+        // 4H ומעלה: כל שבירת Fill · עד חצי · לא בשליש העמוק · גאפ לא קטן (≥10% מהטווח)
+        bool hiTf = L >= 5
+        bool k1 = hiTf ? deg > 0 : (deg == 1) or (deg > 0 and s.dB > s.dA)
         bool k2 = s.ft.get(10) == 0
-        bool k3 = s.ft.get(6) == 0
-        bool k4 = s.ft.get(12) == 2
+        bool k3 = hiTf ? s.ft.get(3) != 0 : s.ft.get(6) == 0
+        bool k4 = hiTf ? s.ft.get(0) != 0 : s.ft.get(12) == 2
         evScore.push((k1 ? 1 : 0) + (k2 ? 1 : 0) + (k3 ? 1 : 0) + (k4 ? 1 : 0))
         evMask.push((k1 ? 1 : 0) + (k2 ? 2 : 0) + (k3 ? 4 : 0) + (k4 ? 8 : 0))
         if not na(s.lb)
@@ -545,12 +548,12 @@ method onBar(S s) =>
                 if showLb
                     s.lb := label.new(bar_index, dn ? low : high, "⛽", yloc = dn ? yloc.belowbar : yloc.abovebar, style = dn ? label.style_label_up : label.style_label_down, color = dn ? cBull : cBear, textcolor = color.white, size = size.tiny)
         else
-            if not s.succ and bar_index > s.tG and (dn ? high > pHi : low < pLo)
+            if not s.succ and bar_index > s.tG and not s.fg.dead and (dn ? high > pHi : low < pLo)
                 s.succ := true
             s.mxA := dn ? math.max(s.mxA, high) : math.min(s.mxA, low)
             if not na(bh)
                 s.mxB := na(s.mxB) ? (dn ? bh : bl) : dn ? math.max(s.mxB, bh) : math.min(s.mxB, bl)
-                if not s.edgeB and not na(pHiB) and (dn ? bh > pHiB : bl < pLoB)
+                if not s.edgeB and not s.fg.dead and not na(pHiB) and (dn ? bh > pHiB : bl < pLoB)
                     s.edgeB := true
             if bar_index <= s.tG + winK
                 s.dA := math.max(s.dA, f_dep(s.fg, high, low))
@@ -847,7 +850,7 @@ if barstate.islast
         f_c(2, 1, "לקצה הסשן", DIM, BGS)
         f_c(1, 1, "≥" + pt + " נק'", DIM, BGS)
         f_c(0, 1, "תגובה ממוצעת", DIM, BGS)
-        array<string> nm = array.from("ציון 0", "ציון 1", "ציון 2", "ציון 3", "ציון 4 (הכול)", "ציון 3 ומעלה", "תנאי: Fill F1 / השני עמוק יותר", "תנאי: הנר לא הגיע לחצי", "תנאי: קודם לקח את הקיצון", "תנאי: המחזור האחרון במיכל")
+        array<string> nm = L >= 5 ? array.from("ציון 0", "ציון 1", "ציון 2", "ציון 3", "ציון 4 (הכול)", "ציון 3 ומעלה", "תנאי: שבירת Fill (F1–F3)", "תנאי: הנר לא הגיע לחצי", "תנאי: לא בשליש העמוק", "תנאי: גאפ לא קטן (≥10%)") : array.from("ציון 0", "ציון 1", "ציון 2", "ציון 3", "ציון 4 (הכול)", "ציון 3 ומעלה", "תנאי: Fill F1 / השני עמוק יותר", "תנאי: הנר לא הגיע לחצי", "תנאי: קודם לקח את הקיצון", "תנאי: המחזור האחרון במיכל")
         float bH = an > 0 ? float(ah) / an : 0.0
         for r = 0 to 9
             [n, a, e, h, x] = f_sc(r)
@@ -859,7 +862,7 @@ if barstate.islast
             f_c(1, 2 + r, f_p(a, n), few ? DIM : TXT, BG)
             f_c(0, 2 + r, n > 0 ? str.tostring(math.round(x / n)) + "%" : "–", few ? DIM : TXT, BG)
         f_mg(0, 12, 5, 12, doM)
-        tb.cell(0, 12, "בסיס: החזיק " + f_p(ah, an), text_color = DIM, bgcolor = BG, text_size = tsz, tooltip = "התנאים: Fill F1 או שהנכס השני נכנס עמוק יותר · הנר הראשון לא הגיע לחצי · קודם נלקח הקיצון · המחזור האחרון במיכל")
+        tb.cell(0, 12, "בסיס: החזיק " + f_p(ah, an), text_color = DIM, bgcolor = BG, text_size = tsz, tooltip = L >= 5 ? "התנאים (4H ומעלה): שבירת Fill בגאפ · הנר הראשון לא הגיע לחצי · הגאפ לא בשליש העמוק של הטווח הקודם · הגאפ לא קטן" : "התנאים: Fill F1 או שהנכס השני נכנס עמוק יותר · הנר הראשון לא הגיע לחצי · קודם נלקח הקיצון · המחזור האחרון במיכל")
     else if viewIn == "חזרה לגאפ — מבט כללי"
         [tot, ret, eb, ra, rn, xo, no] = f_over()
         f_c(0, 0, ttl + " · " + str.tostring(tot) + " מחזורים עם גאפ זמין", color.white, BGS)
