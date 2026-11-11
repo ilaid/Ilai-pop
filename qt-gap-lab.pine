@@ -840,7 +840,7 @@ if barstate.islast
             f_c(0, 2 + r, f_p(h, n), few ? DIM : TXT, BG)
     else if viewIn == "ציון — שילוב התנאים"
         string pt = str.tostring(ptsIn, "#")
-        f_c(0, 0, ttl + " · ציון = כמה מארבעת התנאים הטובים התקיימו", color.white, BGS)
+        f_c(0, 0, ttl + " · ציון התנאים", color.white, BGS)
         f_c(5, 1, "", DIM, BGS)
         f_c(4, 1, "מקרים", DIM, BGS)
         f_c(3, 1, "החזיק", DIM, BGS)
@@ -859,7 +859,7 @@ if barstate.islast
             f_c(1, 2 + r, f_p(a, n), few ? DIM : TXT, BG)
             f_c(0, 2 + r, n > 0 ? str.tostring(math.round(x / n)) + "%" : "–", few ? DIM : TXT, BG)
         f_mg(0, 12, 5, 12, doM)
-        f_c(0, 12, "בסיס: החזיק " + f_p(ah, an) + " · התנאים: Fill F1 או שהנכס השני נכנס עמוק יותר · הנר הראשון לא הגיע לחצי · קודם נלקח הקיצון · המחזור האחרון במיכל", DIM, BG)
+        tb.cell(0, 12, "בסיס: החזיק " + f_p(ah, an), text_color = DIM, bgcolor = BG, text_size = tsz, tooltip = "התנאים: Fill F1 או שהנכס השני נכנס עמוק יותר · הנר הראשון לא הגיע לחצי · קודם נלקח הקיצון · המחזור האחרון במיכל")
     else if viewIn == "חזרה לגאפ — מבט כללי"
         [tot, ret, eb, ra, rn, xo, no] = f_over()
         f_c(0, 0, ttl + " · " + str.tostring(tot) + " מחזורים עם גאפ זמין", color.white, BGS)
