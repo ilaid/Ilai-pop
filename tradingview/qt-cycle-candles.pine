@@ -1,0 +1,363 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0
+// QT Cycle Candles — מציג את 4 הרבעים (Q1–Q4) של מיכל QT כנרות קטנים בצד הגרף.
+// כל הזמנים לפי America/New_York. יום מסחר מתחיל ב-18:00.
+//@version=6
+indicator("QT Cycle Candles", shorttitle = "QT Candles", overlay = true, max_boxes_count = 150, max_lines_count = 150, max_labels_count = 300)
+
+// ════════════════════════════════════════════
+// קבועים
+// ════════════════════════════════════════════
+const string TZ  = "America/New_York"
+
+const string CY0 = "22.5m → 5.625m"
+const string CY1 = "90m → 22.5m"
+const string CY2 = "Session 6H → 90m"
+const string CY3 = "Day → Sessions 6H"
+const string CY4 = "Week → Days"
+const string CY5 = "Month → Weeks"
+const string CY6 = "Quarter → QQ"
+const string CY7 = "Year → Quarters"
+const string CY8 = "4Y Cycle → Years"
+
+// ════════════════════════════════════════════
+// הגדרות — סטים
+// ════════════════════════════════════════════
+const string G1 = "סט 1"
+bool   en1 = input.bool(true, "הצג", group = G1, inline = "a")
+string cs1 = input.string(CY3, "", options = [CY0, CY1, CY2, CY3, CY4, CY5, CY6, CY7, CY8], group = G1, inline = "a")
+string tt1 = input.string("", "כותרת (ריק = אוטומטי)", group = G1)
+
+const string G2 = "סט 2"
+bool   en2 = input.bool(false, "הצג", group = G2, inline = "a")
+string cs2 = input.string(CY2, "", options = [CY0, CY1, CY2, CY3, CY4, CY5, CY6, CY7, CY8], group = G2, inline = "a")
+string tt2 = input.string("", "כותרת (ריק = אוטומטי)", group = G2)
+
+const string G3 = "סט 3"
+bool   en3 = input.bool(false, "הצג", group = G3, inline = "a")
+string cs3 = input.string(CY4, "", options = [CY0, CY1, CY2, CY3, CY4, CY5, CY6, CY7, CY8], group = G3, inline = "a")
+string tt3 = input.string("", "כותרת (ריק = אוטומטי)", group = G3)
+
+// ════════════════════════════════════════════
+// הגדרות — מיקום וגודל
+// ════════════════════════════════════════════
+const string GL = "מיקום וגודל"
+string setLayout    = input.string("אופקי", "סידור הסטים", options = ["אופקי", "אנכי"], group = GL)
+string vpos      = input.string("למעלה", "מיקום אנכי", options = ["למעלה", "אמצע", "למטה"], group = GL)
+int    offBars   = input.int(5, "מרחק מהנר האחרון (נרות)", minval = 0, maxval = 300, group = GL)
+int    cw        = input.int(2, "רוחב נר (נרות)", minval = 2, maxval = 30, step = 2, group = GL)
+int    cgap      = input.int(1, "רווח בין נרות", minval = 0, maxval = 20, group = GL)
+int    sgap      = input.int(10, "רווח בין סטים — אופקי (נרות)", minval = 0, maxval = 200, group = GL)
+float  heightPct = input.float(15, "גובה סט (% מהגובה הנראה)", minval = 2, maxval = 80, step = 1, group = GL)
+float  vgapPct   = input.float(8, "רווח בין סטים — אנכי (%)", minval = 0, maxval = 50, step = 1, group = GL)
+float  marginPct = input.float(6, "מרווח מקצה הגרף (%)", minval = 0, maxval = 40, step = 1, group = GL)
+
+// ════════════════════════════════════════════
+// הגדרות — עיצוב
+// ════════════════════════════════════════════
+const string GS = "עיצוב"
+color  bullCol   = input.color(#26a69a, "נר עולה", group = GS, inline = "c")
+color  bearCol   = input.color(#ef5350, "נר יורד", group = GS, inline = "c")
+bool   wickSame  = input.bool(true, "פתיל בצבע הנר", group = GS, inline = "w")
+color  wickCol   = input.color(color.gray, "", group = GS, inline = "w")
+bool   showEmpty = input.bool(true, "מקום לרבעים עתידיים", group = GS, inline = "e")
+color  emptyCol  = input.color(color.new(color.gray, 50), "", group = GS, inline = "e")
+color  txtCol    = input.color(color.gray, "טקסט Q", group = GS, inline = "t")
+string txtSzS    = input.string("small", "", options = ["tiny", "small", "normal"], group = GS, inline = "t")
+bool   showNames = input.bool(true, "שם / שעה מתחת ל-Q", group = GS)
+color  ttlCol    = input.color(color.gray, "כותרת", group = GS, inline = "h")
+string ttlSzS    = input.string("small", "", options = ["tiny", "small", "normal"], group = GS, inline = "h")
+bool   showHL    = input.bool(true, "High/Low של המיכל", group = GS, inline = "l")
+color  hlCol     = input.color(color.new(color.gray, 30), "", group = GS, inline = "l")
+string hlStyS    = input.string("dotted", "", options = ["dotted", "dashed", "solid"], group = GS, inline = "l")
+bool   showHLPx  = input.bool(true, "מחיר ליד High/Low", group = GS)
+bool   showFri   = input.bool(true, "הצג שישי בסט שבוע (·)", group = GS)
+
+f_size(string s) => s == "tiny" ? size.tiny : s == "normal" ? size.normal : size.small
+f_lstyle(string s) => s == "dashed" ? line.style_dashed : s == "solid" ? line.style_solid : line.style_dotted
+
+// ════════════════════════════════════════════
+// מיפוי מחזורים
+// ════════════════════════════════════════════
+f_cycId(string s) =>
+    switch s
+        CY0 => 0
+        CY1 => 1
+        CY2 => 2
+        CY3 => 3
+        CY4 => 4
+        CY5 => 5
+        CY6 => 6
+        CY7 => 7
+        => 8
+
+// טווח הנתונים שממנו בונים את הנרות. אם הגרף גבוה יותר — משתמשים בגרף (קירוב, מסומן ~).
+f_desTf(int c) =>
+    switch c
+        0 => "15S"
+        1 => "1"
+        2 => "30"
+        3 => "60"
+        4 => "60"
+        5 => "60"
+        => "D"
+
+f_srcTf(int c) =>
+    string d = f_desTf(c)
+    timeframe.in_seconds(timeframe.period) <= timeframe.in_seconds(d) ? d : timeframe.period
+
+f_autoTitle(int c) =>
+    switch c
+        0 => "22.5m · 5.625m"
+        1 => "90m · 22.5m"
+        2 => "Session · 90m"
+        3 => "Day · 6H"
+        4 => "Week · Days"
+        5 => "Month · Weeks"
+        6 => "Quarter · QQ"
+        7 => "Year · Quarters"
+        => "4Y · Years"
+
+// ════════════════════════════════════════════
+// חישובי זמן QT
+// ════════════════════════════════════════════
+f_dayNum(int y, int m, int d) => int(math.floor(timestamp("UTC", y, m, d, 0, 0) / 86400000))
+
+// מחזיר [מפתח מיכל, אינדקס תת-מחזור 0..4, aux]
+f_key(int c) =>
+    int h    = hour(time, TZ)
+    int mi   = minute(time, TZ)
+    int s    = second(time, TZ)
+    int tsec = ((h + 6) % 24) * 3600 + mi * 60 + s          // שניות מתחילת יום המסחר (18:00)
+    int t6   = time + 6 * 3600000                           // תאריך יום המסחר
+    int y    = year(t6, TZ)
+    int m    = month(t6, TZ)
+    int d    = dayofmonth(t6, TZ)
+    int dow  = dayofweek(t6, TZ)
+    int dn   = f_dayNum(y, m, d)
+    int wd   = dow == 1 ? 6 : dow - 2                       // שני=0 .. שישי=4, שבת=5, ראשון=6
+    int key  = 0
+    int slot = 0
+    int aux  = 5
+    if c == 0
+        key  := dn * 100 + int(tsec / 1350)
+        slot := int((tsec % 1350) / 337.5)
+    else if c == 1
+        key  := dn * 100 + int(tsec / 5400)
+        slot := int((tsec % 5400) / 1350)
+    else if c == 2
+        key  := dn * 10 + int(tsec / 21600)
+        slot := int((tsec % 21600) / 5400)
+    else if c == 3
+        key  := dn
+        slot := int(tsec / 21600)
+    else if c == 4
+        key  := dn - wd
+        slot := math.min(wd, 4)
+    else if c == 5
+        int mon  = dn - wd
+        int tueT = (mon + 1) * 86400000
+        int ty   = year(tueT, "UTC")
+        int tm   = month(tueT, "UTC")
+        int td   = dayofmonth(tueT, "UTC")
+        int thm  = month((mon + 3) * 86400000, "UTC")
+        bool dead = tm != thm
+        int wn   = int((td - 1) / 7) + 1
+        key  := ty * 12 + tm - 1                            // החודש של יום שלישי
+        slot := dead or wn >= 5 ? 4 : wn - 1                 // 4 = שבוע 5 / שבוע מת
+        aux  := dead ? 0 : 5
+    else if c == 6
+        int q   = int((m - 1) / 3)
+        int qs  = f_dayNum(y, q * 3 + 1, 1)
+        int qe  = q == 3 ? f_dayNum(y + 1, 1, 1) : f_dayNum(y, q * 3 + 4, 1)
+        int len = qe - qs
+        int dd  = dn - qs
+        key  := y * 4 + q
+        // נר שהגבול נופל באמצעו שייך לרבע הבא
+        slot := math.max(0, math.min(3, int(math.ceil((dd + 1) * 4.0 / len)) - 1))
+    else if c == 7
+        key  := y
+        slot := int((m - 1) / 3)
+    else
+        int k = int(math.floor((y - 2023) / 4.0))
+        key  := k
+        slot := (y - 2023) - 4 * k
+    [key, slot, aux]
+
+// בונה את נרות הרבעים של המיכל הנוכחי (רץ בתוך request.security)
+f_agg(int c) =>
+    var array<float> ao = array.new_float(5, na)
+    var array<float> ah = array.new_float(5, na)
+    var array<float> al = array.new_float(5, na)
+    var array<float> ac = array.new_float(5, na)
+    var int lastKey = na
+    var int xAux    = 5
+    [key, slot, aux] = f_key(c)
+    if na(lastKey) or key != lastKey
+        ao.fill(na)
+        ah.fill(na)
+        al.fill(na)
+        ac.fill(na)
+        lastKey := key
+        xAux    := 5
+    if slot == 4
+        xAux := aux
+    if na(ao.get(slot))
+        ao.set(slot, open)
+        ah.set(slot, high)
+        al.set(slot, low)
+    else
+        ah.set(slot, math.max(ah.get(slot), high))
+        al.set(slot, math.min(al.get(slot), low))
+    ac.set(slot, close)
+    [key, slot, xAux,
+     ao.get(0), ah.get(0), al.get(0), ac.get(0),
+     ao.get(1), ah.get(1), al.get(1), ac.get(1),
+     ao.get(2), ah.get(2), al.get(2), ac.get(2),
+     ao.get(3), ah.get(3), al.get(3), ac.get(3),
+     ao.get(4), ah.get(4), al.get(4), ac.get(4)]
+
+// ════════════════════════════════════════════
+// שמות לכל נר
+// ════════════════════════════════════════════
+f_fmt(float tradingSec, bool withSec) =>
+    float r = tradingSec + 64800
+    r := r >= 86400 ? r - 86400 : r
+    int hh = int(r / 3600)
+    int mm = int((r - hh * 3600) / 60)
+    int ss = int(r - hh * 3600 - mm * 60)
+    string base = str.format("{0,number,00}:{1,number,00}", hh, mm)
+    withSec and ss != 0 ? base + str.format(":{0,number,00}", ss) : base
+
+f_name(int c, int key, int i, int aux) =>
+    string out = ""
+    if c == 0
+        out := f_fmt((key % 100) * 1350 + i * 337.5, true)
+    else if c == 1
+        out := f_fmt((key % 100) * 5400 + i * 1350, true)
+    else if c == 2
+        out := f_fmt((key % 10) * 21600 + i * 5400, false)
+    else if c == 3
+        out := array.from("Asia", "London", "NY AM", "NY PM").get(i)
+    else if c == 4
+        out := array.from("Mon", "Tue", "Wed", "Thu", "Fri").get(i)
+    else if c == 5
+        out := i < 4 ? "W" + str.tostring(i + 1) : aux == 0 ? "Dead" : "W5"
+    else if c == 6
+        int y   = int(math.floor(key / 4))
+        int q   = key - 4 * y
+        int qs  = f_dayNum(y, q * 3 + 1, 1)
+        int qe  = q == 3 ? f_dayNum(y + 1, 1, 1) : f_dayNum(y, q * 3 + 4, 1)
+        int st  = qs + int(math.floor(i * (qe - qs) / 4.0))
+        int t   = st * 86400000
+        out := str.format("{0}/{1}", dayofmonth(t, "UTC"), month(t, "UTC"))
+    else if c == 7
+        out := array.from("Jan-Mar", "Apr-Jun", "Jul-Sep", "Oct-Dec").get(i)
+    else
+        out := str.tostring(2023 + 4 * key + i)
+    out
+
+f_nSlots(int c, int cur, array<float> O) =>
+    c == 4 ? (showFri ? 5 : 4) : c == 5 ? (not na(O.get(4)) or cur == 4 ? 5 : 4) : 4
+
+// ════════════════════════════════════════════
+// נתונים
+// ════════════════════════════════════════════
+int c1 = f_cycId(cs1)
+int c2 = f_cycId(cs2)
+int c3 = f_cycId(cs3)
+
+[k1, s1, x1, o10, h10, l10, c10, o11, h11, l11, c11, o12, h12, l12, c12, o13, h13, l13, c13, o14, h14, l14, c14] = request.security(syminfo.tickerid, f_srcTf(c1), f_agg(c1), lookahead = barmerge.lookahead_on)
+[k2, s2, x2, o20, h20, l20, c20, o21, h21, l21, c21, o22, h22, l22, c22, o23, h23, l23, c23, o24, h24, l24, c24] = request.security(syminfo.tickerid, f_srcTf(c2), f_agg(c2), lookahead = barmerge.lookahead_on)
+[k3, s3, x3, o30, h30, l30, c30, o31, h31, l31, c31, o32, h32, l32, c32, o33, h33, l33, c33, o34, h34, l34, c34] = request.security(syminfo.tickerid, f_srcTf(c3), f_agg(c3), lookahead = barmerge.lookahead_on)
+
+// טווח המחירים הנראה בגרף — לצורך מיקום מכווץ בפינה
+var float visHi = na
+var float visLo = na
+if time >= chart.left_visible_bar_time and time <= chart.right_visible_bar_time
+    visHi := na(visHi) ? high : math.max(visHi, high)
+    visLo := na(visLo) ? low  : math.min(visLo, low)
+
+// ════════════════════════════════════════════
+// ציור
+// ════════════════════════════════════════════
+var array<box>   gBoxes  = array.new<box>()
+var array<line>  gLines  = array.new<line>()
+var array<label> gLabels = array.new<label>()
+
+f_y(float p, float hi, float lo, float yTop, float yBot) =>
+    hi > lo ? yBot + (p - lo) / (hi - lo) * (yTop - yBot) : (yTop + yBot) / 2
+
+f_draw(int c, string ttl, int x0, float yTop, float yBot, int key, int cur, int aux, array<float> O, array<float> H, array<float> L, array<float> C) =>
+    int n = f_nSlots(c, cur, O)
+    float hi = na
+    float lo = na
+    for i = 0 to n - 1
+        if not na(H.get(i))
+            hi := na(hi) ? H.get(i) : math.max(hi, H.get(i))
+            lo := na(lo) ? L.get(i) : math.min(lo, L.get(i))
+    int xEnd = x0 + n * (cw + cgap) - cgap
+    color cClr = color.new(color.black, 100)
+    for i = 0 to n - 1
+        int left  = x0 + i * (cw + cgap)
+        int right = left + cw
+        int mid   = left + int(cw / 2)
+        if not na(O.get(i)) and not na(hi)
+            float o = O.get(i)
+            float cl = C.get(i)
+            color col = cl >= o ? bullCol : bearCol
+            gLines.push(line.new(mid, f_y(H.get(i), hi, lo, yTop, yBot), mid, f_y(L.get(i), hi, lo, yTop, yBot), color = wickSame ? col : wickCol, width = 1))
+            gBoxes.push(box.new(left, f_y(math.max(o, cl), hi, lo, yTop, yBot), right, f_y(math.min(o, cl), hi, lo, yTop, yBot), border_color = col, bgcolor = col, border_width = 1))
+        else if showEmpty
+            gBoxes.push(box.new(left, yTop, right, yBot, border_color = emptyCol, bgcolor = cClr, border_style = line.style_dotted, border_width = 1))
+        string qtxt = i < 4 ? "Q" + str.tostring(i + 1) : "·"
+        string txt  = showNames ? qtxt + "\n" + f_name(c, key, i, aux) : qtxt
+        gLabels.push(label.new(mid, yBot, txt, color = cClr, textcolor = txtCol, style = label.style_label_up, size = f_size(txtSzS)))
+    bool approx = f_srcTf(c) != f_desTf(c)
+    string head = (ttl == "" ? f_autoTitle(c) : ttl) + (approx ? " ~" : "")
+    gLabels.push(label.new(int((x0 + xEnd) / 2), yTop, head, color = cClr, textcolor = ttlCol, style = label.style_label_down, size = f_size(ttlSzS)))
+    if showHL and not na(hi)
+        gLines.push(line.new(x0, yTop, xEnd, yTop, color = hlCol, style = f_lstyle(hlStyS)))
+        gLines.push(line.new(x0, yBot, xEnd, yBot, color = hlCol, style = f_lstyle(hlStyS)))
+        if showHLPx
+            gLabels.push(label.new(xEnd, yTop, "H " + str.tostring(hi, format.mintick), color = cClr, textcolor = hlCol, style = label.style_label_left, size = size.tiny))
+            gLabels.push(label.new(xEnd, yBot, "L " + str.tostring(lo, format.mintick), color = cClr, textcolor = hlCol, style = label.style_label_left, size = size.tiny))
+    xEnd
+
+if barstate.islast
+    for b in gBoxes
+        b.delete()
+    for l in gLines
+        l.delete()
+    for lb in gLabels
+        lb.delete()
+    gBoxes.clear()
+    gLines.clear()
+    gLabels.clear()
+
+    float vh  = na(visHi) ? high : visHi
+    float vl  = na(visLo) ? low  : visLo
+    float rng = math.max(vh - vl, syminfo.mintick * 10)
+    float bandH = rng * heightPct / 100
+    float vgap  = rng * vgapPct / 100
+    float marg  = rng * marginPct / 100
+
+    int nAct = (en1 ? 1 : 0) + (en2 ? 1 : 0) + (en3 ? 1 : 0)
+    bool vert = setLayout == "אנכי"
+    float totalH = vert ? nAct * bandH + math.max(nAct - 1, 0) * vgap : bandH
+    float top0 = vpos == "למעלה" ? vh - marg : vpos == "למטה" ? vl + marg + totalH : (vh + vl) / 2 + totalH / 2
+
+    int x = bar_index + offBars
+    int j = 0
+    if en1
+        float yT = top0 - (vert ? j * (bandH + vgap) : 0)
+        int xe = f_draw(c1, tt1, x, yT, yT - bandH, k1, s1, x1, array.from(o10, o11, o12, o13, o14), array.from(h10, h11, h12, h13, h14), array.from(l10, l11, l12, l13, l14), array.from(c10, c11, c12, c13, c14))
+        x := vert ? x : xe + sgap
+        j += 1
+    if en2
+        float yT = top0 - (vert ? j * (bandH + vgap) : 0)
+        int xe = f_draw(c2, tt2, x, yT, yT - bandH, k2, s2, x2, array.from(o20, o21, o22, o23, o24), array.from(h20, h21, h22, h23, h24), array.from(l20, l21, l22, l23, l24), array.from(c20, c21, c22, c23, c24))
+        x := vert ? x : xe + sgap
+        j += 1
+    if en3
+        float yT = top0 - (vert ? j * (bandH + vgap) : 0)
+        f_draw(c3, tt3, x, yT, yT - bandH, k3, s3, x3, array.from(o30, o31, o32, o33, o34), array.from(h30, h31, h32, h33, h34), array.from(l30, l31, l32, l33, l34), array.from(c30, c31, c32, c33, c34))
