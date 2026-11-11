@@ -17,7 +17,7 @@ indicator("QT Gap Lab", shorttitle = "Gap Lab", overlay = true, max_labels_count
 // הגדרות
 // ══════════════════════════════════════════════════════════════
 G1 = "בדיקה"
-viewIn = input.string("תגובה לפי שבירה", "מה להציג", options = ["סיכום", "תגובה לפי שבירה", "חזרה לגאפ — מבט כללי", "מתי הגאפ נשבר", "גודל הגאפ", "סוג הגאפ", "משותף לשני הנכסים", "מיקום בטווח הקודם", "מתי נוצר במחזור הקודם", "מתי חזר במחזור הנוכחי", "לקיחת הקיצון לפני החזרה", "נגע בגאפ כבר במחזור שלו", "נר תזוזה חזק", "הנכס השני ברגע הנגיעה", "עומק בנר הנגיעה", "כמה גאפים פתוחים בצד", "מיקום המחזור במיכל"], group = G1)
+viewIn = input.string("תגובה לפי שבירה", "מה להציג", options = ["סיכום", "תגובה לפי שבירה", "ציון — שילוב התנאים", "חזרה לגאפ — מבט כללי", "מתי הגאפ נשבר", "גודל הגאפ", "סוג הגאפ", "משותף לשני הנכסים", "מיקום בטווח הקודם", "מתי נוצר במחזור הקודם", "מתי חזר במחזור הנוכחי", "לקיחת הקיצון לפני החזרה", "נגע בגאפ כבר במחזור שלו", "נר תזוזה חזק", "הנכס השני ברגע הנגיעה", "עומק בנר הנגיעה", "כמה גאפים פתוחים בצד", "מיקום המחזור במיכל"], group = G1)
 sideIn = input.string("שני הצדדים", "צד", options = ["שני הצדדים", "גאפ מתחת (שורי)", "גאפ מעל (דובי)"], group = G1)
 rankIn = input.string("החזיק", "בסיכום — לדרג לפי", options = ["החזיק", "תגובה חזקה (≥½)", "לקח קיצון"], group = G1)
 minN   = input.int(15, "מינימום מקרים להשוואה בסיכום", minval = 3, maxval = 200, group = G1)
@@ -318,6 +318,8 @@ var array<int>   evLead  = array.new_int()   // ב-Fill: 0 הגרף עמוק י�
 var array<bool>  evPsp   = array.new_bool()
 var array<int>   evPts   = array.new_int()   // הגיע ליעד הנקודות: 0 לא · 1 רק הגרף · 2 רק השני · 3 שניהם
 var array<int>   evEdge  = array.new_int()   // הגיע לקצה הסשן הקודם: אותו קידוד
+var array<int>   evScore = array.new_int()   // כמה מארבעת התנאים הטובים התקיימו
+var array<int>   evMask  = array.new_int()   // אילו: 1 Fill · 2 עד חצי · 4 קיצון קודם · 8 Q4
 
 var int   cS  = na
 var int   cC  = na
@@ -382,6 +384,12 @@ method fin(S s) =>
         evCause.push(deg > 0 ? 3 - deg : s.psp ? 3 : not na(s.pt) ? 4 : 5)
         evLead.push(deg > 0 ? (s.dA >= s.dB ? 0 : 1) : -1)
         evPsp.push(s.psp)
+        bool k1 = (deg == 1) or (deg > 0 and s.dB > s.dA)
+        bool k2 = s.ft.get(10) == 0
+        bool k3 = s.ft.get(6) == 0
+        bool k4 = s.ft.get(12) == 2
+        evScore.push((k1 ? 1 : 0) + (k2 ? 1 : 0) + (k3 ? 1 : 0) + (k4 ? 1 : 0))
+        evMask.push((k1 ? 1 : 0) + (k2 ? 2 : 0) + (k3 ? 4 : 0) + (k4 ? 8 : 0))
         if not na(s.lb)
             s.lb.set_text((held ? "✓" : "✗") + " " + str.tostring(math.round(rx)) + "%")
             s.lb.set_color(held ? (s.dir == 1 ? cBull : cBear) : color.gray)
@@ -403,6 +411,8 @@ method fin(S s) =>
         evPsp.push(false)
         evPts.push(0)
         evEdge.push(0)
+        evScore.push(-1)
+        evMask.push(0)
     0
 
 method reset(S s, bool inR) =>
@@ -736,6 +746,29 @@ f_cz(int r) =>
                     h += evHeld.get(i) ? 1 : 0
     [n, a, e, o, h]
 
+// לפי ציון: r 0..4 = ציון בדיוק · 5 = 3 ומעלה · 6..9 = תנאי אחד לבד (1/2/4/8 קיים)
+f_sc(int r) =>
+    int n = 0
+    int a = 0
+    int e = 0
+    int h = 0
+    float x = 0.0
+    int ne = evDir.size()
+    if ne > 0
+        for i = 0 to ne - 1
+            if evRet.get(i) and f_sideOk(evDir.get(i))
+                int sc = evScore.get(i)
+                int mk = evMask.get(i)
+                int bit = r == 6 ? 1 : r == 7 ? 2 : r == 8 ? 4 : 8
+                bool ok = r <= 4 ? sc == r : r == 5 ? sc >= 3 : int(math.floor(mk / bit)) % 2 == 1
+                if ok
+                    n += 1
+                    a += evPts.get(i) > 0 ? 1 : 0
+                    e += evEdge.get(i) > 0 ? 1 : 0
+                    h += evHeld.get(i) ? 1 : 0
+                    x += evRx.get(i)
+    [n, a, e, h, x]
+
 f_lbl(int r, string t) =>
     tb.cell(5, r, t, text_color = TXT, bgcolor = BG, text_size = tsz, text_halign = text.align_right)
     0
@@ -805,6 +838,28 @@ if barstate.islast
             f_c(2, 2 + r, f_p(e, n), few or r == 0 ? (few ? DIM : TXT) : n > 0 and float(e) / n >= float(e0) / math.max(n0, 1) + 0.05 ? GOOD : n > 0 and float(e) / n <= float(e0) / math.max(n0, 1) - 0.05 ? BAD : TXT, BG)
             f_c(1, 2 + r, f_p(o, n), few ? DIM : TXT, BG)
             f_c(0, 2 + r, f_p(h, n), few ? DIM : TXT, BG)
+    else if viewIn == "ציון — שילוב התנאים"
+        string pt = str.tostring(ptsIn, "#")
+        f_c(0, 0, ttl + " · ציון = כמה מארבעת התנאים הטובים התקיימו", color.white, BGS)
+        f_c(5, 1, "", DIM, BGS)
+        f_c(4, 1, "מקרים", DIM, BGS)
+        f_c(3, 1, "החזיק", DIM, BGS)
+        f_c(2, 1, "לקצה הסשן", DIM, BGS)
+        f_c(1, 1, "≥" + pt + " נק'", DIM, BGS)
+        f_c(0, 1, "תגובה ממוצעת", DIM, BGS)
+        array<string> nm = array.from("ציון 0", "ציון 1", "ציון 2", "ציון 3", "ציון 4 (הכול)", "ציון 3 ומעלה", "תנאי: Fill F1 / השני עמוק יותר", "תנאי: הנר לא הגיע לחצי", "תנאי: קודם לקח את הקיצון", "תנאי: המחזור האחרון במיכל")
+        float bH = an > 0 ? float(ah) / an : 0.0
+        for r = 0 to 9
+            [n, a, e, h, x] = f_sc(r)
+            bool few = n < minN
+            f_lbl(2 + r, nm.get(r))
+            f_c(4, 2 + r, str.tostring(n), few ? DIM : TXT, BG)
+            f_c(3, 2 + r, f_p(h, n), few ? DIM : n > 0 and float(h) / n >= bH + 0.05 ? GOOD : n > 0 and float(h) / n <= bH - 0.05 ? BAD : TXT, BG)
+            f_c(2, 2 + r, f_p(e, n), few ? DIM : TXT, BG)
+            f_c(1, 2 + r, f_p(a, n), few ? DIM : TXT, BG)
+            f_c(0, 2 + r, n > 0 ? str.tostring(math.round(x / n)) + "%" : "–", few ? DIM : TXT, BG)
+        f_mg(0, 12, 5, 12, doM)
+        f_c(0, 12, "בסיס: החזיק " + f_p(ah, an) + " · התנאים: Fill F1 או שהנכס השני נכנס עמוק יותר · הנר הראשון לא הגיע לחצי · קודם נלקח הקיצון · המחזור האחרון במיכל", DIM, BG)
     else if viewIn == "חזרה לגאפ — מבט כללי"
         [tot, ret, eb, ra, rn, xo, no] = f_over()
         f_c(0, 0, ttl + " · " + str.tostring(tot) + " מחזורים עם גאפ זמין", color.white, BGS)
