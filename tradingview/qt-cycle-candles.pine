@@ -55,10 +55,15 @@ float  marginPct = input.float(6, "מרווח מקצה הגרף (%)", minval = 0
 // הגדרות — עיצוב
 // ════════════════════════════════════════════
 const string GS = "עיצוב"
-color  bullCol   = input.color(#26a69a, "נר עולה", group = GS, inline = "c")
-color  bearCol   = input.color(#ef5350, "נר יורד", group = GS, inline = "c")
-bool   wickSame  = input.bool(true, "פתיל בצבע הנר", group = GS, inline = "w")
-color  wickCol   = input.color(color.gray, "", group = GS, inline = "w")
+const string GC = "נרות (גוף / מסגרת / פתיל)"
+color  bullBody  = input.color(#26a69a, "עולה", group = GC, inline = "bu")
+color  bullBord  = input.color(#26a69a, "", group = GC, inline = "bu")
+color  bullWick  = input.color(#26a69a, "", group = GC, inline = "bu")
+color  bearBody  = input.color(#ef5350, "יורד", group = GC, inline = "be")
+color  bearBord  = input.color(#ef5350, "", group = GC, inline = "be")
+color  bearWick  = input.color(#ef5350, "", group = GC, inline = "be")
+int    bordW     = input.int(1, "עובי מסגרת", minval = 1, maxval = 4, group = GC, inline = "w")
+int    wickW     = input.int(1, "עובי פתיל", minval = 1, maxval = 4, group = GC, inline = "w")
 bool   showEmpty = input.bool(true, "מקום לרבעים עתידיים", group = GS, inline = "e")
 color  emptyCol  = input.color(color.new(color.gray, 50), "", group = GS, inline = "e")
 color  txtCol    = input.color(color.gray, "טקסט Q", group = GS, inline = "t")
@@ -237,7 +242,7 @@ f_name(int c, int key, int i, int aux) =>
     else if c == 2
         out := f_fmt((key % 10) * 21600 + i * 5400, false)
     else if c == 3
-        out := array.from("Asia", "London", "NY AM", "NY PM").get(i)
+        out := array.from("Asia", "Lon", "AM", "PM").get(i)
     else if c == 4
         out := array.from("Mon", "Tue", "Wed", "Thu", "Fri").get(i)
     else if c == 5
@@ -304,9 +309,18 @@ f_draw(int c, string ttl, int x0, float yTop, float yBot, int key, int cur, int 
         if not na(O.get(i)) and not na(hi)
             float o = O.get(i)
             float cl = C.get(i)
-            color col = cl >= o ? bullCol : bearCol
-            gLines.push(line.new(mid, f_y(H.get(i), hi, lo, yTop, yBot), mid, f_y(L.get(i), hi, lo, yTop, yBot), color = wickSame ? col : wickCol, width = 1))
-            gBoxes.push(box.new(left, f_y(math.max(o, cl), hi, lo, yTop, yBot), right, f_y(math.min(o, cl), hi, lo, yTop, yBot), border_color = col, bgcolor = col, border_width = 1))
+            bool  up    = cl >= o
+            float yBT   = f_y(math.max(o, cl), hi, lo, yTop, yBot)
+            float yBB   = f_y(math.min(o, cl), hi, lo, yTop, yBot)
+            float yH    = f_y(H.get(i), hi, lo, yTop, yBot)
+            float yL    = f_y(L.get(i), hi, lo, yTop, yBot)
+            color wCol  = up ? bullWick : bearWick
+            // פתיל עליון ותחתון בנפרד — לא עובר דרך הגוף (חשוב לנרות חלולים)
+            if yH > yBT
+                gLines.push(line.new(mid, yH, mid, yBT, color = wCol, width = wickW))
+            if yL < yBB
+                gLines.push(line.new(mid, yBB, mid, yL, color = wCol, width = wickW))
+            gBoxes.push(box.new(left, yBT, right, yBB, border_color = up ? bullBord : bearBord, bgcolor = up ? bullBody : bearBody, border_width = bordW))
         else if showEmpty
             gBoxes.push(box.new(left, yTop, right, yBot, border_color = emptyCol, bgcolor = cClr, border_style = line.style_dotted, border_width = 1))
         string qtxt = i < 4 ? "Q" + str.tostring(i + 1) : "·"
