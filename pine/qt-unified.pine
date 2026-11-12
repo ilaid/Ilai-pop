@@ -249,6 +249,7 @@ type Gap
     int    fVis    = 0
     int    fPrev   = 0
     int    fTime   = 0
+    int    fLagI   = -1   // המשבצת שהייתה המפגר כשהשבירה נרשמה
 
 f_newGap(int id, int kind, int d, float ab, float at, float bb, float bt, float cb, float ct, int ref, int oT) =>
     Gap.new(id = id, kind = kind, dir = d, aBot = ab, aTop = at, bBot = bb, bTop = bt, cBot = cb, cTop = ct, refId = ref, originT = oT, aExt = d == 1 ? at : ab, bExt = d == 1 ? bt : bb, cExt = d == 1 ? ct : cb)
@@ -427,23 +428,29 @@ method track(Gap g, int rf, float hA, float lA, float kA, float hB, float lB, fl
             g.cExt := na
     g.dead
 
-// רישום: true כשנרשמה שבירה או עלתה דרגה. תיקון באותו ביקור מבטל.
+// המפגר יישר קו: הגיע לעומק שהדרגה דורשת שלא יגיע אליו — F1: נגע · F2: CE ·
+// F3: הקצה הרחוק. בכל ביקור, לא רק בזה שבו השבירה נרשמה.
+method caught(Gap g) =>
+    bool c = false
+    if g.fDeg > 0 and g.fLagI >= 0
+        float d = g.depthOf(g.fLagI)
+        c := not na(d) and (g.fDeg == 3 ? d >= 1.0 : g.fDeg == 2 ? d >= 0.5 : d > 0.0)
+    c
+
+// רישום: true כשנרשמה שבירה או עלתה דרגה. ברגע שהמפגר מיישר קו — אין שבירה.
 method register(Gap g, bool canReg, int t) =>
     bool fired = false
     if not g.dead and g.armed
         int deg = g.fracDeg()
         if canReg and deg > g.fDeg
-            if g.fVis != g.visits
-                g.fPrev := g.fDeg
-                g.fVis  := g.visits
             g.fDeg  := deg
             g.fLead := g.fracTxt()
+            g.fLagI := g.lagIdx()
             g.fTime := t
             fired   := true
-        else if g.inVisit and g.fVis == g.visits and deg < g.fDeg
-            g.fDeg := math.max(deg, g.fPrev)
-            if deg > 0 and deg >= g.fPrev
-                g.fLead := g.fracTxt()
+        else if g.caught()
+            g.fDeg  := 0
+            g.fLagI := -1
     fired
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1284,11 +1291,11 @@ if tfClass != 0
     f_run(eU3)
     f_run(eU4)
 
-// Fill על הנר שעוד לא נסגר: אם המפגר משלים באותו ביקור — השבירה מתבטלת
-// (חוזרת לדרגה שלפני הביקור), בדיוק כמו בסגירה. מחזיר את הדרגה האפקטיבית.
+// Fill על הנר שעוד לא נסגר: אם המפגר מיישר קו — השבירה מתבטלת מיד, בדיוק
+// כמו בסגירה. מחזיר את הדרגה האפקטיבית.
 f_fillLive(Eng e, Gap g) =>
     int deg = g.fDeg
-    if g.inVisit and g.fVis == g.visits and not g.dead
+    if deg > 0 and not g.dead
         int ia = g.kind == 0 ? 0 : 2
         int ib = g.kind == 0 ? 1 : 3
         float sa = g.aExt
@@ -1304,12 +1311,12 @@ f_fillLive(Eng e, Gap g) =>
             g.bExt := up ? math.min(sb, rb) : math.max(sb, rb)
         if g.kind == 0 and not na(g.cTop) and not na(rc)
             g.cExt := up ? math.min(sc, rc) : math.max(sc, rc)
-        int live = g.fracDeg()
+        bool cg = g.caught()
         g.aExt := sa
         g.bExt := sb
         g.cExt := sc
-        if live < deg
-            deg := math.max(live, g.fPrev)
+        if cg
+            deg := 0
     deg
 
 // ═══════════════════════════════════════════════════════════════════
