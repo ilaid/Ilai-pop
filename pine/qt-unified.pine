@@ -18,8 +18,9 @@ indicator("QT Unified | SSMT · Fill · PSP", shorttitle = "QT·U", overlay = tr
 //
 // מסגרות: 1m · 5m · 15m · 1H · 4H. 1D ו-1W — רק כשהגרף יומי ומעלה.
 // הוסרו לעומת שלושת האינדיקטורים: 15 שניות, הצצות הגאפים של ה-Fill,
-// התראות, תיבת 5m/15m המהירה, ◦ PCP ממתין, סינון True Open, QS (★),
-// אזהרת "עומדת להתבטל", ייצוא ל-Hub. כל החישוב — על נרות סגורים.
+// התראות, תיבת 5m/15m המהירה, סינון True Open, אזהרת "עומדת להתבטל",
+// ייצוא ל-Hub, ו-SSMT מסוג (all/core closed). כל החישוב — על נרות סגורים.
+// PCP ממתין: על הגרף בכל מסגרת, בצד רק ב-1H ומעלה. QS (★) — על SSMT.
 // ═══════════════════════════════════════════════════════════════════
 
 // ═══════════════════════════════════════════════════════════════════
@@ -43,15 +44,17 @@ viMinTicks   = input.int(4, "VI לבד — מינימום טיקים", minval = 
 viMergeTicks = input.int(1, "הרחבה — מינימום טיקים", minval = 1, maxval = 100, group = grpFill)
 maxGaps      = input.int(60, "מקסימום גאפים במיכל", minval = 5, maxval = 200, group = grpFill)
 
-grpSS = "SSMT"
-hideClosed = input.bool(false, "הסתר SSMT שכולם סגרו (closed)", group = grpSS)
+// QS — חלונות זמן חמים, על שבירות SSMT/HSSMT (כמו ב-SSMT + HSSMT)
+grpQS   = "רצפי QS (SSMT)"
+qsMode  = input.string("סמן ★ בשבירה ב-QS", "QS — חלונות זמן חמים", options = ["סמן ★ בשבירה ב-QS", "רק שבירות ב-QS", "כבוי"], group = grpQS, tooltip = "פעיל ב-1m עד 1D, על שבירות SSMT/HSSMT.\n★ = הנר שעשה את השבירה נמצא בחלון QS על נכס הגרף. ☆ = על נכס אחר.\nעל הגרף — שורה עליונה בתווית: מאיזה רצף לאיזה (למשל 321-333 ★).\nרק שבירות ב-QS = SSMT שלא ב-QS מוסתרת, גם על הגרף וגם בצד.")
+hotList = input.string("111,114,141,144,411,414,441,444,222,333", "רצפים חמים", group = grpQS, tooltip = "מופרדים בפסיקים. שלוש רמות רצופות שיוצרות אחד מהרצפים = חלון QS.")
 
 grpPsp = "PSP"
 ymWeak   = input.bool(true, "כלול חולשת נכס 3 (יומי ומעלה)", group = grpPsp)
 wickKill = input.bool(true, "בטל PSP לפי פתיל", tooltip = "כבוי = רק סגירה מעבר לרמה מבטלת.", group = grpPsp)
 pspDepth = input.int(5, "כמה PSP לזכור לכל מסגרת", minval = 1, maxval = 10, group = grpPsp)
 q1Mode   = input.string("בצבע נפרד", "PSP ברבע ראשון / זמן חסום", options = ["בצבע נפרד", "רגיל", "לא קיים"], group = grpPsp)
-showPend = input.bool(true, "סמן נר PCP שעוד לא הוכרע (•)", tooltip = "נר שנסגר עם דיברגנס ומחכה לסגירה הבאה כדי לדעת אם הוא סווינג (PSP).\nעל הגרף — נקודה מעל הנר, והיא נעלמת ברגע שהנר כבר לא יכול להיות סווינג.\nבצד — ◦ בסוף השורה של המסגרת (בצבע הזוג כשזה 3·4).", group = grpPsp)
+showPend = input.bool(true, "סמן נר PCP שעוד לא הוכרע", tooltip = "נר שנסגר עם דיברגנס ומחכה לסגירה הבאה כדי לדעת אם הוא סווינג (PSP).\nעל הגרף — נקודה מעל הנר, והיא נעלמת ברגע שהנר כבר לא יכול להיות סווינג.\nבצד — רק ב-1H ומעלה: ◦PCP והשעה של הנר, בסוף השורה (בצבע הזוג כשזה 3·4).", group = grpPsp)
 colPend  = input.color(color.new(#000000, 0), "צבע PCP ממתין", tooltip = "על ערכת נושא כהה — להחליף ללבן.", group = grpPsp)
 
 grpLogic = "לוגיקה"
@@ -77,6 +80,7 @@ cornerPosI = input.string("שמאל למטה", "מיקום", options = ["שמא�
 cornerSz   = input.string("tiny", "גודל טקסט", options = ["tiny", "small", "normal"], group = grpCor)
 cornerWhen = input.bool(true, "Q ושעה ליד האחרונה", group = grpCor)
 colOff     = input.color(color.gray, "צבע ממתינה (✗)", group = grpCor)
+cornerLift = input.int(2, "הרם את השורות (שורות ריקות)", minval = 0, maxval = 8, group = grpCor, tooltip = "שורות ריקות בין השורות לקצה המסך — כדי שלא ייפלו על אינדיקטור אחר באותה פינה.")
 
 grpMtf = "מסגרות זמן"
 lowerLevels = input.int(4, "כמה מדרגות מתחת לגרף", minval = 0, maxval = 4, group = grpMtf, tooltip = "אם מופיעה שגיאת Memory limits — להוריד ל-3 או 2.")
@@ -759,6 +763,7 @@ type Eng
     array<PBrk>   pP
     bool          pnd        = false  // הנר שנסגר עכשיו הוא PCP של השלישייה שעוד יכול להיות סווינג
     bool          pndP       = false  // אותו דבר לזוג 3·4
+    int           pndT       = 0      // פתיחת הנר הממתין
 
 f_newEng(int c) => Eng.new(cls = c, h1 = array.new_float(8, na), h2 = array.new_float(8, na), h3 = array.new_float(8, na), h4 = array.new_float(8, na), gaps = array.new<Gap>(), a1 = f_newAcc(), a2 = f_newAcc(), a3 = f_newAcc(), a4 = f_newAcc(), sTy = array.new_int(4, 0), sRi = array.new_int(4, -1), sSq = array.new_int(4, 0), sTm = array.new_int(4, 0), sLb = array.new_string(4, ""), pT = array.new<PBrk>(), pP = array.new<PBrk>())
 
@@ -996,6 +1001,7 @@ f_step(Eng e, int t, array<float> q1, array<float> q2, array<float> q3, array<fl
         bool xYw = ymWeak and e.cls >= 6 and xoY and xY < 0 and ((xoE and xE > 0) or (xoN and xN > 0)) and not xP and not xYm
         e.pnd  := (xP or xYm or xYw) and (f_canSw(q1) or f_canSw(q2) or ((xYm or xYw) and f_canSw(q3)))
         e.pndP := use4 and xoY and not na(xR) and xY != xR and (f_canSw(q3) or f_canSw(q4))
+        e.pndT := t
     did
 
 // היסטוריית שני הנרות הקודמים של כל נכס — בתוך המנוע
@@ -1219,6 +1225,163 @@ if tfClass != 0
 // הכלל — השבירות החיות של מסגרת, והאחרונה מביניהן
 // ═══════════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════════
+// רצפי QS — מ-SSMT + HSSMT, על שבירות SSMT/HSSMT בלבד.
+// הסולם: חודש ברבעון QT ← שבוע ← יום ← סשן ← 90 ← 22.5 ← 5.625 דק'.
+// חלון QS = שלוש רמות רצופות שיוצרות רצף חם ושהרמה של המסגרת חלק מהן.
+// המספור כאן הוא של ה-SSMT המקורי: המסגרת שלנו + 1 (2 = 1m … 7 = 1D).
+// מחושב רק בנר האחרון — משפיע רק על התצוגה.
+// ═══════════════════════════════════════════════════════════════════
+
+qsFilt = qsMode == "רק שבירות ב-QS"
+hotKey = "," + str.replace_all(hotList, " ", "") + ","
+qsUseCls(int c) => qsMode != "כבוי" and c >= 1 and c <= 6
+
+f_qsDigits(int t) =>
+    mOD  = hour(t, TZ) * 60 + minute(t, TZ)
+    post = mOD >= 1080
+    mFD  = post ? mOD - 1080 : mOD + 360
+    sFD  = mFD * 60 + second(t, TZ)
+    tdt  = post ? t + 86400000 : t
+    sI   = math.floor(sFD / 21600)
+    sIS  = sFD % 21600
+    mI   = math.floor(sIS / 5400)
+    sIM  = sIS % 5400
+    qI   = math.floor(sIM / 1350)
+    sqI  = math.floor((sIM % 1350) / 337.5)
+    dw   = dayofweek(tdt, TZ)
+    dN   = dw == dayofweek.monday ? 1 : dw == dayofweek.tuesday ? 2 : dw == dayofweek.wednesday ? 3 : dw == dayofweek.thursday ? 4 : 0
+    dsm  = dw == dayofweek.sunday ? 6 : dw - 2
+    mon  = tdt - dsm * 86400000
+    tue  = mon + 86400000
+    thu  = mon + 3 * 86400000
+    tM   = month(tue, TZ)
+    dead = tM != month(thu, TZ)
+    wk   = dead ? 0 : math.floor((dayofmonth(tue, TZ) - 1) / 7) + 1
+    mQ   = (tM >= 4 ? tM - 4 : tM + 8) % 3 + 1
+    str.tostring(mQ) + (wk == 0 ? "·" : str.tostring(wk)) + (dN == 0 ? "·" : str.tostring(dN)) + str.tostring(sI + 1) + str.tostring(mI + 1) + str.tostring(qI + 1) + str.tostring(sqI + 1)
+
+f_qsDay(int t) =>
+    post = hour(t, TZ) * 60 + minute(t, TZ) >= 1080
+    tdt  = post ? t + 86400000 : t
+    yy   = year(tdt, TZ)
+    mm   = month(tdt, TZ)
+    dd   = dayofmonth(tdt, TZ)
+    qMI  = mm >= 4 ? mm - 4 : mm + 8
+    qY   = mm >= 4 ? yy : yy - 1
+    qQ   = math.floor(qMI / 3) + 1
+    qsM  = qQ == 1 ? 4 : qQ == 2 ? 7 : qQ == 3 ? 10 : 1
+    qsY  = qQ == 4 ? qY + 1 : qY
+    nsM  = qsM == 10 ? 1 : qsM + 3
+    nsY  = qsM == 10 ? qsY + 1 : qsY
+    qsT  = timestamp(TZ, qsY, qsM, 1, 12, 0)
+    nsT  = timestamp(TZ, nsY, nsM, 1, 12, 0)
+    tdNT = timestamp(TZ, yy, mm, dd, 12, 0)
+    qLn  = math.round((nsT - qsT) / 86400000)
+    dSnc = math.round((tdNT - qsT) / 86400000)
+    qq   = qLn > 0 ? math.min(3, math.max(0, math.floor(dSnc * 4 / qLn))) : 0
+    str.tostring(((yy - 2023) % 4 + 4) % 4 + 1) + str.tostring(qQ) + str.tostring(qq + 1)
+
+f_qsK(int sc)   => sc <= 2 ? 4 : sc == 3 ? 3 : sc == 4 ? 2 : sc == 5 ? 1 : 0
+f_qsLvl(int sc) => sc <= 1 ? 6 : sc == 2 ? 5 : sc == 3 ? 4 : sc == 4 ? 3 : sc == 5 ? 2 : 1
+f_qsChain(int sc, int t) => sc == 7 ? f_qsDay(t) : sc >= 1 and sc <= 6 ? str.substring(f_qsDigits(t), f_qsK(sc), f_qsK(sc) + 3) : ""
+f_qsHot(string s) => str.length(s) == 3 and str.contains(hotKey, "," + s + ",")
+
+f_qsAt(int sc, int t, int durMs) =>
+    bool   found = false
+    string pat   = ""
+    if sc == 7
+        s = f_qsDay(t)
+        if f_qsHot(s)
+            found := true
+            pat   := s
+    else if sc >= 1 and sc <= 6
+        d1   = f_qsDigits(t)
+        d2   = f_qsDigits(t + durMs - 1)
+        kOwn = f_qsK(sc)
+        lvl  = f_qsLvl(sc)
+        kLo  = math.max(lvl - 2, 0)
+        kHi  = math.min(lvl, 4)
+        for i = 0 to kHi - kLo + 1
+            k = i == 0 ? kOwn : kLo + i - 1
+            if not found
+                s1 = str.substring(d1, k, k + 3)
+                s2 = str.substring(d2, k, k + 3)
+                h  = f_qsHot(s1) ? s1 : f_qsHot(s2) ? s2 : ""
+                if h != ""
+                    found := true
+                    pat   := h
+    [found, pat]
+
+// הרצפים וה-QS של שבירה על נכס אחד. HSSMT — קודם נר השבירה של הסגירה, ואם
+// הוא לא ב-QS גם זה של הפתיל.
+f_qsAsset(Acc acc, int sc, bool isBull, int typ, int refI, int dur) =>
+    string cR  = ""
+    string cT  = ""
+    bool   hot = false
+    string pat = ""
+    for ps = 0 to 1
+        bool isH = typ == 2 and ps == 0
+        if ps == 0 or (typ == 2 and not hot)
+            [b1, p1, b2, p2, ok] = f_pts(acc, isBull, isH, refI)
+            if ok
+                [h, q] = f_qsAt(sc, b2, dur)
+                if ps == 0 or h
+                    cR := f_qsChain(sc, b1)
+                    cT := f_qsChain(sc, b2)
+                if h
+                    hot := true
+                    pat := q
+    [cR, cT, hot, pat]
+
+f_clsMs(int c) => c == 1 ? 60000 : c == 2 ? 300000 : c == 3 ? 900000 : c == 4 ? 3600000 : c == 5 ? 14400000 : 86400000
+f_starTxt(string sym, string pat, string chT) => pat == "" or pat == chT ? sym : sym + pat
+
+// QS של משבצת SSMT k במנוע: [השורה העליונה לתווית, ★/☆, ב-QS?]
+f_ssQS(Eng e, int k) =>
+    string top  = ""
+    string star = ""
+    bool   inQ  = false
+    int    ty   = array.get(e.sTy, k)
+    int    ri   = array.get(e.sRi, k)
+    if qsUseCls(e.cls) and ty != 0 and ri >= 0
+        int    sc     = e.cls + 1
+        bool   isBull = k % 2 == 1
+        int    aLo    = k >= 2 ? 2 : 0
+        int    aHi    = k >= 2 ? 3 : 2
+        bool   inGrp  = cA >= aLo and cA <= aHi
+        string oR  = ""
+        string oT  = ""
+        bool   oH  = false
+        string oP  = ""
+        bool   xOn = false
+        string xR  = ""
+        string xT  = ""
+        string xP  = ""
+        for a = aLo to aHi
+            [r, tt, h, pt] = f_qsAsset(f_engAcc(e, a), sc, isBull, ty, ri, f_clsMs(e.cls))
+            if a == cA
+                oR := r
+                oT := tt
+                oH := h
+                oP := pt
+            else
+                if not inGrp and a == aLo
+                    oR := r
+                    oT := tt
+                if not xOn and h
+                    xOn := true
+                    xR  := r
+                    xT  := tt
+                    xP  := pt
+        star := oH ? "★" : xOn ? "☆" : ""
+        string sTxt = oH ? f_starTxt("★", oP, oT) : xOn ? f_starTxt("☆", xP, oT != "" ? oT : xT) : ""
+        string chR  = oR != "" ? oR : xR
+        string chT  = oT != "" ? oT : xT
+        top := chR != "" ? chR + "-" + chT + (sTxt != "" ? " " + sTxt : "") : ""
+        inQ := oH or xOn
+    [top, star, inQ]
+
 type Cand
     int    typ          // 0 = Fill · 1 = SSMT · 2 = PSP
     int    dir
@@ -1228,6 +1391,7 @@ type Cand
     string tx           // F2 · H · S · P
     int    ix           // אינדקס הגאפ / משבצת ה-SSMT / מקום ב-PSP
     bool   inQ1 = false
+    string qTop = ""        // SSMT: שורת ה-QS לתווית
 
 // לכל סוג: האחרונה של השלישייה ושל הזוג, בכל כיוון. מיכל שנגמר — כלום.
 f_cands(Eng e) =>
@@ -1250,8 +1414,11 @@ f_cands(Eng e) =>
                 array.push(out, Cand.new(typ = 0, dir = fdir, pair = fk == 1, seq = gb.fSeq, t = gb.fTime, tx = "F" + str.tostring(gb.fDeg), ix = best))
         for k = 0 to 3
             int ty = array.get(e.sTy, k)
-            if ty != 0 and not (hideClosed and f_closed(array.get(e.sLb, k)))
-                array.push(out, Cand.new(typ = 1, dir = k % 2 == 1 ? 1 : -1, pair = k >= 2, seq = array.get(e.sSq, k), t = array.get(e.sTm, k), tx = ty == 2 ? "H" : "S", ix = k))
+            // SSMT שכולם (או שני החזקים) כבר סגרו מעבר — (all/core closed) — לא מוצגת
+            if ty != 0 and not f_closed(array.get(e.sLb, k))
+                [qTop, qStar, qIn] = f_ssQS(e, k)
+                if not (qsFilt and qsUseCls(e.cls) and not qIn)
+                    array.push(out, Cand.new(typ = 1, dir = k % 2 == 1 ? 1 : -1, pair = k >= 2, seq = array.get(e.sSq, k), t = array.get(e.sTm, k), tx = (ty == 2 ? "H" : "S") + qStar, ix = k, qTop = qTop))
         for s = 0 to 1
             array<PBrk> st = s == 0 ? e.pT : e.pP
             for dd = 0 to 1
@@ -1345,7 +1512,7 @@ f_drawSS(Eng e, Cand c) =>
             float y1  = isBull ? p1 - pad - sh : p1 + pad + sh
             float y2  = isBull ? p2 - pad - sh : p2 + pad + sh
             array.push(dLn, line.new(b1, y1, b2, y2, xloc = xloc.bar_time, color = col, width = 1))
-        string txt = f_cycName(e.cls) + " " + (isH ? "HSSMT" : "SSMT") + " · " + f_assets(lb) + "\n" + str.format_time(b2, e.cls >= 6 ? "dd.MM" : "HH:mm", TZ)
+        string txt = (c.qTop != "" ? c.qTop + "\n" : "") + f_cycName(e.cls) + " " + (isH ? "HSSMT" : "SSMT") + " · " + f_assets(lb)
         array.push(dLb, label.new(b2, close, isBull ? "\n" + txt : txt + "\n", xloc = xloc.bar_time, yloc = isBull ? yloc.belowbar : yloc.abovebar, style = label.style_none, textcolor = col, size = lblSize, textalign = text.align_center))
     0
 
@@ -1385,7 +1552,9 @@ if barstate.islast
 // ═══════════════════════════════════════════════════════════════════
 
 cornerPos = cornerPosI == "שמאל למעלה" ? position.top_left : cornerPosI == "ימין למטה" ? position.bottom_right : cornerPosI == "ימין למעלה" ? position.top_right : position.bottom_left
-var table cTbl = table.new(cornerPos, 14, 9, border_width = 0)
+var table cTbl = table.new(cornerPos, 14, 9 + cornerLift, border_width = 0)
+cornerTop = cornerPosI == "שמאל למעלה" or cornerPosI == "ימין למעלה"
+rowOff    = cornerTop ? cornerLift : 0
 bgClr = color.new(color.black, 100)
 
 f_itemTx(Cand c) => (c.dir == 1 ? "▲" : "▼") + c.tx
@@ -1395,7 +1564,7 @@ f_whenTx(Cand c, int cls) =>
     (wn > 0 ? " Q" + str.tostring(wn) : "") + " " + str.format_time(c.t, cls <= 5 ? "HH:mm" : "dd/MM", TZ)
 
 if barstate.islast
-    table.clear(cTbl, 0, 0, 13, 8)
+    table.clear(cTbl, 0, 0, 13, 8 + cornerLift)
     if cornerOn and tfClass != 0
         int row = 0
         for cls = 8 to 1
@@ -1404,28 +1573,34 @@ if barstate.islast
                 if f_useE(k) and e.cls == cls and row <= 8
                     array<Cand> cs = f_cands(e)
                     int  li  = f_latest(cs)
-                    bool pdT = showPend and e.pnd
-                    bool pdP = showPend and use4 and e.pndP
+                    // PCP ממתין בצד — רק ב-1H ומעלה
+                    bool pdT = showPend and cls >= 4 and e.pnd
+                    bool pdP = showPend and cls >= 4 and use4 and e.pndP
                     if li >= 0 or pdT or pdP
-                        table.cell(cTbl, 0, row, f_clsName(cls) + " ", text_color = cls == tfClass ? chart.fg_color : color.gray, text_size = cornerSz, bgcolor = bgClr)
+                        table.cell(cTbl, 0, row + rowOff, f_clsName(cls) + " ", text_color = cls == tfClass ? chart.fg_color : color.gray, text_size = cornerSz, bgcolor = bgClr)
                         int col = 1
                         if li >= 0
                             Cand lc = array.get(cs, li)
-                            table.cell(cTbl, 1, row, f_itemTx(lc) + (cornerWhen ? f_whenTx(lc, cls) : "") + " ", text_color = f_colC(lc), text_size = cornerSz, bgcolor = bgClr)
+                            table.cell(cTbl, 1, row + rowOff, f_itemTx(lc) + (cornerWhen ? f_whenTx(lc, cls) : "") + " ", text_color = f_colC(lc), text_size = cornerSz, bgcolor = bgClr)
                             col := 2
                             for pass = 0 to 1
                                 for i = 0 to array.size(cs) - 1
                                     Cand c   = array.get(cs, i)
                                     bool act = c.dir == lc.dir
                                     if i != li and (pass == 0 ? act : not act) and col <= 11
-                                        table.cell(cTbl, col, row, (act ? "" : "✗") + f_itemTx(c) + " ", text_color = act ? f_colC(c) : colOff, text_size = cornerSz, bgcolor = bgClr)
+                                        table.cell(cTbl, col, row + rowOff, (act ? "" : "✗") + f_itemTx(c) + " ", text_color = act ? f_colC(c) : colOff, text_size = cornerSz, bgcolor = bgClr)
                                         col += 1
+                        string pTm = str.format_time(e.pndT, cls <= 5 ? "HH:mm" : "dd/MM", TZ)
                         if pdT
-                            table.cell(cTbl, col, row, "◦ ", text_color = colPend, text_size = cornerSz, bgcolor = bgClr)
+                            table.cell(cTbl, col, row + rowOff, "◦PCP " + pTm + " ", text_color = colPend, text_size = cornerSz, bgcolor = bgClr)
                             col += 1
                         if pdP
-                            table.cell(cTbl, col, row, "◦ ", text_color = colPair, text_size = cornerSz, bgcolor = bgClr)
+                            table.cell(cTbl, col, row + rowOff, "◦PCP " + nm3 + "/" + nm4 + " " + pTm + " ", text_color = colPair, text_size = cornerSz, bgcolor = bgClr)
                         row += 1
+        // השורות הריקות שמרימות את הטבלה מהקצה
+        if row > 0 and cornerLift > 0
+            for r = 0 to cornerLift - 1
+                table.cell(cTbl, 0, cornerTop ? r : row + r, " ", text_size = cornerSz, bgcolor = bgClr)
 
 // ═══════════════════════════════════════════════════════════════════
 // PCP ממתין על הגרף — כמו ב-ADI
