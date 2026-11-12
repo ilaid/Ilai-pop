@@ -20,7 +20,11 @@ indicator("QT Gaps | Collective + Chart", overlay = true, max_boxes_count = 300)
 //   החלפת מיכל — אותו מיפוי כמו ב-SSMT Fill (זרע ב-1m · 5m · 1H).
 //
 // כיתוב: אזור · שעת יצירה · משתתפים (V = כולו VI), למשל "Asia 23:45 NQ+ES".
-// "דרוך" = תת-המחזור שבו נולד הגאפ כבר הסתיים.
+// "דרוך" = תת-המחזור שבו נולד הגאפ כבר הסתיים — בדיוק כמו בהצצה של SSMT Fill:
+//   1H — רק גאפים מימים קודמים של השבוע (ביום שלישי: של שני)
+//   15m — רק מסשנים קודמים של אותו יום · 4H — רק משבועות קודמים של החודש
+//   1m/5m — רבעים/מיקרו קודמים · 1D/1W/Mo — רבע-רבעון/רבעון/שנה קודמים
+// ברירת המחדל: רק דרוכים (כמו הישן). כיבוי = גם גאפים מתת-המחזור הנוכחי.
 // ═══════════════════════════════════════════════════════════════════
 
 // ═══════════════════════════════════════════════════════════════════
@@ -48,8 +52,7 @@ maxGaps      = input.int(60, "מקסימום גאפים לכל סוג", minval =
 grpColl  = "גאפים קולקטיביים"
 collMode = input.string("תמיד", "הצגה", options = ["כבוי", "הצצה", "תמיד"], tooltip = "הצצה = רק בכמה השניות הראשונות אחרי טעינת הסקריפט (החלפת מסגרת / פתיחת גרף).", group = grpColl)
 collSec  = input.int(20, "כמה שניות בהצצה", minval = 1, maxval = 600, group = grpColl)
-collArm  = input.bool(false, "רק דרוכים", tooltip = "רק גאפים שתת-המחזור שבו נולדו כבר הסתיים.", group = grpColl)
-collMaxTf = input.string("Mo", "הצג במסגרות עד", options = ["1m", "5m", "15m", "1H", "4H", "1D", "1W", "Mo"], group = grpColl)
+collArm  = input.bool(true, "רק דרוכים (תת-מחזור שהסתיים)", tooltip = "1H = רק גאפים מימים קודמים של השבוע · 15m = רק מסשנים קודמים של היום · 4H = רק משבועות קודמים של החודש. כבוי = גם גאפים מתת-המחזור הנוכחי.", group = grpColl)
 colBull  = input.color(#26a69a, "שורי", group = grpColl)
 colBear  = input.color(#ef5350, "דובי", group = grpColl)
 colPair  = input.color(#ab47bc, "הזוג 3·4", group = grpColl)
@@ -57,8 +60,7 @@ colPair  = input.color(#ab47bc, "הזוג 3·4", group = grpColl)
 grpOwn    = "גאפים של הגרף"
 ownMode   = input.string("תמיד", "הצגה", options = ["כבוי", "הצצה", "תמיד"], group = grpOwn)
 ownSec    = input.int(20, "כמה שניות בהצצה", minval = 1, maxval = 600, group = grpOwn)
-ownArm    = input.bool(false, "רק דרוכים", group = grpOwn)
-ownMaxTf  = input.string("Mo", "הצג במסגרות עד", options = ["1m", "5m", "15m", "1H", "4H", "1D", "1W", "Mo"], group = grpOwn)
+ownArm    = input.bool(true, "רק דרוכים (תת-מחזור שהסתיים)", group = grpOwn)
 ownBull   = input.color(#42a5f5, "שורי", group = grpOwn)
 ownBear   = input.color(#ffa726, "דובי", group = grpOwn)
 
@@ -68,8 +70,19 @@ edgeTr    = input.int(85, "שקיפות המסגרת", minval = 0, maxval = 100,
 showTxt   = input.bool(true, "כיתוב בקופסה", group = grpLook)
 showCE    = input.bool(false, "קו CE (חצי גאפ)", group = grpLook)
 
-f_tfCls(string s) =>
-    s == "1m" ? 1 : s == "5m" ? 2 : s == "15m" ? 3 : s == "1H" ? 4 : s == "4H" ? 5 : s == "1D" ? 6 : s == "1W" ? 7 : 8
+// באילו מסגרות זמן להציג — כל מסגרת בנפרד
+grpTf  = "מסגרות להצגה"
+tfOn1  = input.bool(true, "1m",  inline = "tfa", group = grpTf)
+tfOn2  = input.bool(true, "5m",  inline = "tfa", group = grpTf)
+tfOn3  = input.bool(true, "15m", inline = "tfa", group = grpTf)
+tfOn4  = input.bool(true, "1H",  inline = "tfa", group = grpTf)
+tfOn5  = input.bool(true, "4H",  inline = "tfb", group = grpTf)
+tfOn6  = input.bool(true, "1D",  inline = "tfb", group = grpTf)
+tfOn7  = input.bool(true, "1W",  inline = "tfb", group = grpTf)
+tfOn8  = input.bool(true, "Mo",  inline = "tfb", group = grpTf)
+
+f_tfOn(int c) =>
+    c == 1 ? tfOn1 : c == 2 ? tfOn2 : c == 3 ? tfOn3 : c == 4 ? tfOn4 : c == 5 ? tfOn5 : c == 6 ? tfOn6 : c == 7 ? tfOn7 : c == 8 ? tfOn8 : false
 
 // ═══════════════════════════════════════════════════════════════════
 // נכסים — שמות, נכס הגרף, סימבולים לבקשות
@@ -536,8 +549,8 @@ if ownMode != "כבוי" and barstate.isconfirmed and tfClass != 0 and bar_index
 // ═══════════════════════════════════════════════════════════════════
 
 var int bootT = timenow
-drawColl = collMode != "כבוי" and tfClass != 0 and tfClass <= f_tfCls(collMaxTf) and (collMode == "תמיד" or timenow - bootT <= collSec * 1000)
-drawOwn  = ownMode  != "כבוי" and tfClass != 0 and tfClass <= f_tfCls(ownMaxTf)  and (ownMode  == "תמיד" or timenow - bootT <= ownSec * 1000)
+drawColl = collMode != "כבוי" and f_tfOn(tfClass) and (collMode == "תמיד" or timenow - bootT <= collSec * 1000)
+drawOwn  = ownMode  != "כבוי" and f_tfOn(tfClass) and (ownMode  == "תמיד" or timenow - bootT <= ownSec * 1000)
 
 f_gapCol(int kind, int dir) =>
     kind == 1 ? colPair : dir == 1 ? colBull : colBear
