@@ -52,6 +52,7 @@ hotList = input.string("111,114,141,144,411,414,441,444,222,333", "רצפים ח
 grpPsp = "PSP"
 ymWeak   = input.bool(true, "כלול חולשת נכס 3 (יומי ומעלה)", group = grpPsp)
 wickKill = input.bool(true, "בטל PSP לפי פתיל", tooltip = "כבוי = רק סגירה מעבר לרמה מבטלת.", group = grpPsp)
+pspRule  = input.string("הנכס של הגרף", "מתי PSP נחשב נלקח", options = ["הנכס של הגרף", "שני המכריעים"], group = grpPsp, tooltip = "הנכס של הגרף = ברגע שהנכס שאתה רואה עבר את הקצה של נר הסווינג — גם בנר שעוד לא נסגר. מה שהעין רואה.\nשני המכריעים = כמו ב-ADI: 1 וגם 2 (בזוג: 3 וגם 4) צריכים לעבור, בסגירת נר.\nכשהגרף הוא לא אחד מנכסי השבירה — תמיד שני המכריעים.")
 pspDepth = input.int(5, "כמה PSP לזכור לכל מסגרת", minval = 1, maxval = 10, group = grpPsp)
 q1Mode   = input.string("בצבע נפרד", "PSP ברבע ראשון / זמן חסום", options = ["בצבע נפרד", "רגיל", "לא קיים"], group = grpPsp)
 showPend = input.bool(true, "סמן נר PCP שעוד לא הוכרע", tooltip = "נר שנסגר עם דיברגנס ומחכה לסגירה הבאה כדי לדעת אם הוא סווינג (PSP).\nעל הגרף — נקודה מעל הנר, והיא נעלמת ברגע שהנר כבר לא יכול להיות סווינג.\nבצד — רק ב-1H ומעלה: ◦PCP והשעה של הנר, בסוף השורה (בצבע הזוג כשזה 3·4).", group = grpPsp)
@@ -72,14 +73,18 @@ fillMark   = input.string("חץ", "Fill — סימון הנר שעשה את ה-f
 markTransp = input.int(65, "שקיפות הקו האנכי", minval = 0, maxval = 95, group = grpVis)
 showLine   = input.bool(true, "SSMT — קו שבירה", group = grpVis)
 linePad    = input.float(0.1, "SSMT — מרווח הקו מהנרות (ATR)", minval = 0.0, maxval = 3.0, step = 0.05, group = grpVis)
-pspSize    = input.string("normal", "PSP — גודל הסימון", options = ["tiny", "small", "normal", "large"], group = grpVis)
+pspSize    = input.string("normal", "PSP — גודל הסימון", options = ["tiny", "small", "normal", "large", "huge"], group = grpVis)
+pspGlyph   = input.string("עיגול ●", "PSP — צורת הסימון", options = ["עיגול ●", "נקודה •", "ריבוע ■", "יהלום ◆", "כוכב ★", "איקס ✕", "חץ ⬇", "משולש ▲", "טקסט משלי"], group = grpVis, tooltip = "חץ ומשולש מצביעים לפי הכיוון. טקסט משלי — שני השדות שמתחת.")
+pspTxBear  = input.string("▲", "טקסט משלי — דובי (מעל הנר)", group = grpVis)
+pspTxBull  = input.string("▼", "טקסט משלי — שורי (מתחת לנר)", group = grpVis)
+pspGap     = input.int(15, "PSP — מרחק הסימון מהנר (% מ-ATR)", minval = 0, maxval = 300, group = grpVis, tooltip = "0 = הסימון יושב על הפתיל עצמו. נמדד באחוז מ-ATR, כדי שאותו מספר ייתן אותו מרווח בכל נכס ובכל מסגרת.")
 
 grpCor = "הצד"
 cornerOn   = input.bool(true, "הצג את השבירות בצד", group = grpCor)
 cornerPosI = input.string("שמאל למטה", "מיקום", options = ["שמאל למטה", "שמאל למעלה", "ימין למטה", "ימין למעלה"], group = grpCor)
 cornerSz   = input.string("tiny", "גודל טקסט", options = ["tiny", "small", "normal"], group = grpCor)
 cornerWhen = input.bool(true, "Q ושעה ליד האחרונה", group = grpCor)
-colOff     = input.color(color.gray, "צבע ממתינה (✗)", group = grpCor)
+offFade    = input.int(60, "שקיפות ממתינה (✗)", minval = 0, maxval = 90, group = grpCor, tooltip = "ממתינה נכתבת בצבע שלה (זוג 3·4 — בצבע הזוג), רק דהוי.")
 cornerLift = input.int(2, "הרם את השורות (שורות ריקות)", minval = 0, maxval = 8, group = grpCor, tooltip = "שורות ריקות בין השורות לקצה המסך — כדי שלא ייפלו על אינדיקטור אחר באותה פינה.")
 
 grpMtf = "מסגרות זמן"
@@ -702,6 +707,7 @@ type PBrk
     bool  pair = false
     int   seq  = 0
     int   regT = 0      // הנר שאישר — רגע הרישום
+    float mkY  = na     // הקצה של נר הסווינג על נכס הגרף — למיקום הסימון
 
 f_taken(float lvl, int dir, float tH, float tL) =>
     na(lvl) ? false : dir == -1 ? tH > lvl : tL < lvl
@@ -764,6 +770,9 @@ type Eng
     bool          pnd        = false  // הנר שנסגר עכשיו הוא PCP של השלישייה שעוד יכול להיות סווינג
     bool          pndP       = false  // אותו דבר לזוג 3·4
     int           pndT       = 0      // פתיחת הנר הממתין
+    float         runH       = na     // הגבוה/נמוך של נכס הגרף מאז הצעד האחרון —
+    float         runL       = na     // הנר של המסגרת שעוד לא נסגר
+    int           runT       = 0
 
 f_newEng(int c) => Eng.new(cls = c, h1 = array.new_float(8, na), h2 = array.new_float(8, na), h3 = array.new_float(8, na), h4 = array.new_float(8, na), gaps = array.new<Gap>(), a1 = f_newAcc(), a2 = f_newAcc(), a3 = f_newAcc(), a4 = f_newAcc(), sTy = array.new_int(4, 0), sRi = array.new_int(4, -1), sSq = array.new_int(4, 0), sTm = array.new_int(4, 0), sLb = array.new_string(4, ""), pT = array.new<PBrk>(), pP = array.new<PBrk>())
 
@@ -972,7 +981,7 @@ f_step(Eng e, int t, array<float> q1, array<float> q2, array<float> q3, array<fl
                     bool bear = nHi >= nLo
                     int  ix   = bear ? 10 : 11
                     e.seq := e.seq + 1
-                    array.unshift(e.pT, PBrk.new(dir = bear ? -1 : 1, weak = divW, nq = array.get(q1, ix), es = array.get(q2, ix), ym = array.get(q3, ix), cont = lf, born = tMid, inQ1 = q1Mid, pair = false, seq = e.seq, regT = t))
+                    array.unshift(e.pT, PBrk.new(dir = bear ? -1 : 1, weak = divW, nq = array.get(q1, ix), es = array.get(q2, ix), ym = array.get(q3, ix), cont = lf, born = tMid, inQ1 = q1Mid, pair = false, seq = e.seq, regT = t, mkY = array.get(cA == 1 ? q2 : cA == 2 ? q3 : cA == 3 ? q4 : q1, ix)))
                     while array.size(e.pT) > pspDepth
                         array.pop(e.pT)
             if use4
@@ -984,7 +993,7 @@ f_step(Eng e, int t, array<float> q1, array<float> q2, array<float> q3, array<fl
                         bool pBear = pHi >= pLo
                         int  px    = pBear ? 10 : 11
                         e.seq := e.seq + 1
-                        array.unshift(e.pP, PBrk.new(dir = pBear ? -1 : 1, nq = array.get(q3, px), es = array.get(q4, px), cont = lf, born = tMid, inQ1 = q1Mid, pair = true, seq = e.seq, regT = t))
+                        array.unshift(e.pP, PBrk.new(dir = pBear ? -1 : 1, nq = array.get(q3, px), es = array.get(q4, px), cont = lf, born = tMid, inQ1 = q1Mid, pair = true, seq = e.seq, regT = t, mkY = array.get(cA == 1 ? q2 : cA == 2 ? q3 : cA == 3 ? q4 : q1, px)))
                         while array.size(e.pP) > pspDepth
                             array.pop(e.pP)
 
@@ -1221,6 +1230,28 @@ if tfClass != 0
     if useL4
         f_feed(eL4, w4t1, w4o1, w4h1, w4l1, w4c1, w4t2, w4o2, w4h2, w4l2, w4c2, w4t3, w4o3, w4h3, w4l3, w4c3, w4t4, w4o4, w4h4, w4l4, w4c4)
 
+// הגבוה והנמוך של נכס הגרף מאז הצעד האחרון של כל מנוע (הגרף ומעליו) —
+// כדי ש-PSP שנלקח בנר שעוד לא נסגר ייעלם מיד
+chH = cA == 1 ? c2H : cA == 2 ? c3H : cA == 3 ? c4H : c1H
+chL = cA == 1 ? c2L : cA == 2 ? c3L : cA == 3 ? c4L : c1L
+
+f_run(Eng e, float h, float l) =>
+    if e.lastT != e.runT
+        e.runT := e.lastT
+        e.runH := h
+        e.runL := l
+    else
+        e.runH := na(e.runH) ? h : math.max(e.runH, h)
+        e.runL := na(e.runL) ? l : math.min(e.runL, l)
+    e.runH
+
+if tfClass != 0
+    f_run(eCh, chH, chL)
+    f_run(eU1, chH, chL)
+    f_run(eU2, chH, chL)
+    f_run(eU3, chH, chL)
+    f_run(eU4, chH, chL)
+
 // ═══════════════════════════════════════════════════════════════════
 // הכלל — השבירות החיות של מסגרת, והאחרונה מביניהן
 // ═══════════════════════════════════════════════════════════════════
@@ -1421,13 +1452,19 @@ f_cands(Eng e) =>
                     array.push(out, Cand.new(typ = 1, dir = k % 2 == 1 ? 1 : -1, pair = k >= 2, seq = array.get(e.sSq, k), t = array.get(e.sTm, k), tx = (ty == 2 ? "H" : "S") + qStar, ix = k, qTop = qTop))
         for s = 0 to 1
             array<PBrk> st = s == 0 ? e.pT : e.pP
+            // הרמה של נכס הגרף בשבירה הזו (שלישייה: 1/2/3, זוג: 3/4)
+            int slot = s == 0 ? cA : cA - 2
             for dd = 0 to 1
                 int  pdir  = dd == 0 ? -1 : 1
                 bool found = false
                 if array.size(st) > 0
                     for i = 0 to array.size(st) - 1
                         PBrk b = array.get(st, i)
-                        if not found and b.dir == pdir
+                        float lv  = slot == 0 ? b.nq : slot == 1 ? b.es : slot == 2 and s == 0 ? b.ym : na
+                        bool  own = pspRule == "הנכס של הגרף" and slot >= 0 and slot <= (s == 0 ? 2 : 1)
+                        // נלקח על נכס הגרף: הרמה כבר נמחקה בסגירה, או שהנר החי עבר אותה
+                        bool  gone = own and (na(lv) or (wickKill and e.cls >= tfClass and (b.dir == -1 ? e.runH > lv : e.runL < lv)))
+                        if not found and b.dir == pdir and not gone
                             found := true
                             array.push(out, Cand.new(typ = 2, dir = pdir, pair = s == 1, seq = b.seq, t = b.regT, tx = "P", ix = i, inQ1 = b.inQ1))
     out
@@ -1516,11 +1553,19 @@ f_drawSS(Eng e, Cand c) =>
         array.push(dLb, label.new(b2, close, isBull ? "\n" + txt : txt + "\n", xloc = xloc.bar_time, yloc = isBull ? yloc.belowbar : yloc.abovebar, style = label.style_none, textcolor = col, size = lblSize, textalign = text.align_center))
     0
 
+f_glyph(bool bear) =>
+    pspGlyph == "עיגול ●" ? "●" : pspGlyph == "נקודה •" ? "•" : pspGlyph == "ריבוע ■" ? "■" : pspGlyph == "יהלום ◆" ? "◆" : pspGlyph == "כוכב ★" ? "★" : pspGlyph == "איקס ✕" ? "✕" : pspGlyph == "חץ ⬇" ? (bear ? "⬇" : "⬆") : pspGlyph == "משולש ▲" ? (bear ? "▼" : "▲") : (bear ? pspTxBear : pspTxBull)
+
 f_drawPsp(Eng e, Cand c) =>
     PBrk b    = array.get(c.pair ? e.pP : e.pT, c.ix)
     bool bear = b.dir == -1
     string tip = "PSP " + (bear ? "▼ " : "▲ ") + f_holds(b) + " · " + str.format_time(b.born, e.cls >= 6 ? "dd.MM" : "HH:mm", TZ)
-    array.push(dLb, label.new(b.born, close, bear ? "▲" : "▼", xloc = xloc.bar_time, yloc = bear ? yloc.abovebar : yloc.belowbar, style = label.style_none, textcolor = f_colC(c), size = pspSize, tooltip = tip))
+    float gap  = nz(atrCh) * pspGap / 100.0
+    string gl  = f_glyph(bear)
+    if na(b.mkY)
+        array.push(dLb, label.new(b.born, close, gl, xloc = xloc.bar_time, yloc = bear ? yloc.abovebar : yloc.belowbar, style = label.style_none, textcolor = f_colC(c), size = pspSize, tooltip = tip))
+    else
+        array.push(dLb, label.new(b.born, bear ? b.mkY + gap : b.mkY - gap, gl, xloc = xloc.bar_time, yloc = yloc.price, style = bear ? label.style_label_down : label.style_label_up, color = color.new(color.black, 100), textcolor = f_colC(c), size = pspSize, tooltip = tip))
     0
 
 if barstate.islast
@@ -1583,19 +1628,33 @@ if barstate.islast
                             Cand lc = array.get(cs, li)
                             table.cell(cTbl, 1, row + rowOff, f_itemTx(lc) + (cornerWhen ? f_whenTx(lc, cls) : "") + " ", text_color = f_colC(lc), text_size = cornerSz, bgcolor = bgClr)
                             col := 2
-                            for pass = 0 to 1
-                                for i = 0 to array.size(cs) - 1
-                                    Cand c   = array.get(cs, i)
-                                    bool act = c.dir == lc.dir
-                                    if i != li and (pass == 0 ? act : not act) and col <= 11
-                                        table.cell(cTbl, col, row + rowOff, (act ? "" : "✗") + f_itemTx(c) + " ", text_color = act ? f_colC(c) : colOff, text_size = cornerSz, bgcolor = bgClr)
+                            // סוג אחד = פריט אחד: לכל סוג אחר — הפעילה האחרונה שלו,
+                            // ואם אין לו פעילה — הממתינה האחרונה (✗). סדר: F · H/S · P.
+                            for ty = 0 to 2
+                                if ty != lc.typ
+                                    int bA = -1
+                                    int bI = -1
+                                    for i = 0 to array.size(cs) - 1
+                                        Cand c = array.get(cs, i)
+                                        if c.typ == ty
+                                            if c.dir == lc.dir
+                                                if bA < 0 or c.seq > array.get(cs, bA).seq
+                                                    bA := i
+                                            else
+                                                if bI < 0 or c.seq > array.get(cs, bI).seq
+                                                    bI := i
+                                    int  pick = bA >= 0 ? bA : bI
+                                    if pick >= 0
+                                        Cand c   = array.get(cs, pick)
+                                        bool act = bA >= 0
+                                        table.cell(cTbl, col, row + rowOff, (act ? "" : "✗") + f_itemTx(c) + " ", text_color = act ? f_colC(c) : color.new(f_colC(c), offFade), text_size = cornerSz, bgcolor = bgClr)
                                         col += 1
                         string pTm = str.format_time(e.pndT, cls <= 5 ? "HH:mm" : "dd/MM", TZ)
                         if pdT
                             table.cell(cTbl, col, row + rowOff, "◦PCP " + pTm + " ", text_color = colPend, text_size = cornerSz, bgcolor = bgClr)
                             col += 1
                         if pdP
-                            table.cell(cTbl, col, row + rowOff, "◦PCP " + nm3 + "/" + nm4 + " " + pTm + " ", text_color = colPair, text_size = cornerSz, bgcolor = bgClr)
+                            table.cell(cTbl, col, row + rowOff, "◦PCP " + pTm + " ", text_color = colPair, text_size = cornerSz, bgcolor = bgClr)
                         row += 1
         // השורות הריקות שמרימות את הטבלה מהקצה
         if row > 0 and cornerLift > 0
