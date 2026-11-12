@@ -1528,14 +1528,39 @@ f_cands(Eng e) =>
                             array.push(out, Cand.new(typ = 2, dir = pdir, pair = s == 1, seq = b.seq, t = b.regT, tx = "P", ix = i, inQ1 = b.inQ1))
     out
 
+// האחרונה שקובעת את הכיוון. שתי שבירות מנוגדות שנרשמו באותו נר — אף אחת לא
+// קובעת: הולכים עם הכיוון שהיה לפני הנר הזה (השבירה החיה האחרונה שלפניו).
+// אם אין שום שבירה חיה לפניו — האחרונה שנרשמה. מחזיר את השבירה הכי חדשה
+// בכיוון שנקבע.
 f_latest(array<Cand> cs) =>
     int li = -1
     int ls = -1
-    if array.size(cs) > 0
-        for i = 0 to array.size(cs) - 1
+    int n  = array.size(cs)
+    if n > 0
+        for i = 0 to n - 1
             if array.get(cs, i).seq > ls
                 ls := array.get(cs, i).seq
                 li := i
+        int  lt  = array.get(cs, li).t
+        int  ld  = array.get(cs, li).dir
+        bool tie = false
+        int  pi  = -1
+        int  ps  = -1
+        for i = 0 to n - 1
+            Cand c = array.get(cs, i)
+            if c.t == lt and c.dir != ld
+                tie := true
+            if c.t < lt and c.seq > ps
+                ps := c.seq
+                pi := i
+        if tie and pi >= 0
+            int pd = array.get(cs, pi).dir
+            int bs = -1
+            for i = 0 to n - 1
+                Cand c = array.get(cs, i)
+                if c.dir == pd and c.seq > bs
+                    bs := c.seq
+                    li := i
     li
 
 f_colC(Cand c) => c.typ == 2 and c.inQ1 and q1Col ? colQ1 : c.pair ? colPair : c.dir == 1 ? colBull : colBear
