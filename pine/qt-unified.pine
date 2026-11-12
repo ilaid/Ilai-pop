@@ -51,6 +51,8 @@ ymWeak   = input.bool(true, "כלול חולשת נכס 3 (יומי ומעלה)"
 wickKill = input.bool(true, "בטל PSP לפי פתיל", tooltip = "כבוי = רק סגירה מעבר לרמה מבטלת.", group = grpPsp)
 pspDepth = input.int(5, "כמה PSP לזכור לכל מסגרת", minval = 1, maxval = 10, group = grpPsp)
 q1Mode   = input.string("בצבע נפרד", "PSP ברבע ראשון / זמן חסום", options = ["בצבע נפרד", "רגיל", "לא קיים"], group = grpPsp)
+showPend = input.bool(true, "סמן נר PCP שעוד לא הוכרע (•)", tooltip = "נר שנסגר עם דיברגנס ומחכה לסגירה הבאה כדי לדעת אם הוא סווינג (PSP).\nעל הגרף — נקודה מעל הנר, והיא נעלמת ברגע שהנר כבר לא יכול להיות סווינג.\nבצד — ◦ בסוף השורה של המסגרת (בצבע הזוג כשזה 3·4).", group = grpPsp)
+colPend  = input.color(color.new(#000000, 0), "צבע PCP ממתין", tooltip = "על ערכת נושא כהה — להחליף ללבן.", group = grpPsp)
 
 grpLogic = "לוגיקה"
 blockDeadWeek = input.bool(true, "חסום שבירות בשבוע מת (4H)", group = grpLogic)
@@ -94,6 +96,14 @@ s1 = ticker.modify(sym1, backadjustment = bAdj, settlement_as_close = bSet)
 s2 = ticker.modify(sym2, backadjustment = bAdj, settlement_as_close = bSet)
 s3 = ticker.modify(sym3, backadjustment = bAdj, settlement_as_close = bSet)
 s4 = ticker.modify(use4 ? sym4 : sym3, backadjustment = bAdj, settlement_as_close = bSet)
+
+// נתוני ארבעת הנכסים במסגרת הגרף — חייבים להיות מוגדרים לפני המנוע (tk1..tk4)
+lkh = barmerge.lookahead_off
+
+[c1O, c1H, c1L, c1C, tk1] = request.security(s1, timeframe.period, [open, high, low, close, syminfo.mintick], lookahead = lkh)
+[c2O, c2H, c2L, c2C, tk2] = request.security(s2, timeframe.period, [open, high, low, close, syminfo.mintick], lookahead = lkh)
+[c3O, c3H, c3L, c3C, tk3] = request.security(s3, timeframe.period, [open, high, low, close, syminfo.mintick], lookahead = lkh)
+[c4O, c4H, c4L, c4C, tk4] = request.security(s4, timeframe.period, [open, high, low, close, syminfo.mintick], lookahead = lkh)
 
 // MNQ1! → NQ · M2K1! → RTY
 f_name(string s) =>
@@ -747,6 +757,8 @@ type Eng
     array<string> sLb
     array<PBrk>   pT
     array<PBrk>   pP
+    bool          pnd        = false  // הנר שנסגר עכשיו הוא PCP של השלישייה שעוד יכול להיות סווינג
+    bool          pndP       = false  // אותו דבר לזוג 3·4
 
 f_newEng(int c) => Eng.new(cls = c, h1 = array.new_float(8, na), h2 = array.new_float(8, na), h3 = array.new_float(8, na), h4 = array.new_float(8, na), gaps = array.new<Gap>(), a1 = f_newAcc(), a2 = f_newAcc(), a3 = f_newAcc(), a4 = f_newAcc(), sTy = array.new_int(4, 0), sRi = array.new_int(4, -1), sSq = array.new_int(4, 0), sTm = array.new_int(4, 0), sLb = array.new_string(4, ""), pT = array.new<PBrk>(), pP = array.new<PBrk>())
 
@@ -763,6 +775,17 @@ f_d1(array<float> q) =>
 
 f_swH(array<float> q) => array.get(q, 10) > array.get(q, 6) and array.get(q, 10) > array.get(q, 1)
 f_swL(array<float> q) => array.get(q, 11) < array.get(q, 7) and array.get(q, 11) < array.get(q, 2)
+// הנר שנסגר עכשיו: כיוון, והאם הוא עוד יכול להיות סווינג (מעל/מתחת לקודם)
+f_d0(array<float> q) =>
+    float o = array.get(q, 0)
+    float c = array.get(q, 3)
+    int r = na
+    if not na(o) and not na(c)
+        r := c > o ? 1 : c < o ? -1 : 0
+    r
+
+f_canSw(array<float> q) => array.get(q, 1) > array.get(q, 10) or array.get(q, 2) < array.get(q, 11)
+
 f_tkH(array<float> q) => wickKill ? array.get(q, 1) : array.get(q, 3)
 f_tkL(array<float> q) => wickKill ? array.get(q, 2) : array.get(q, 3)
 
@@ -959,6 +982,20 @@ f_step(Eng e, int t, array<float> q1, array<float> q2, array<float> q3, array<fl
                         array.unshift(e.pP, PBrk.new(dir = pBear ? -1 : 1, nq = array.get(q3, px), es = array.get(q4, px), cont = lf, born = tMid, inQ1 = q1Mid, pair = true, seq = e.seq, regT = t))
                         while array.size(e.pP) > pspDepth
                             array.pop(e.pP)
+
+        // ══ PCP ממתין — הנר שנסגר עכשיו; ההכרעה בסגירה הבאה ══
+        int  xN  = f_d0(q1)
+        int  xE  = f_d0(q2)
+        int  xY  = f_d0(q3)
+        int  xR  = f_d0(q4)
+        bool xoN = not na(xN)
+        bool xoE = not na(xE)
+        bool xoY = not na(xY)
+        bool xP  = xoN and xoE and xN != xE
+        bool xYm = xoY and xY > 0 and ((xoE and xE < 0) or (xoN and xN < 0))
+        bool xYw = ymWeak and e.cls >= 6 and xoY and xY < 0 and ((xoE and xE > 0) or (xoN and xN > 0)) and not xP and not xYm
+        e.pnd  := (xP or xYm or xYw) and (f_canSw(q1) or f_canSw(q2) or ((xYm or xYw) and f_canSw(q3)))
+        e.pndP := use4 and xoY and not na(xR) and xY != xR and (f_canSw(q3) or f_canSw(q4))
     did
 
 // היסטוריית שני הנרות הקודמים של כל נכס — בתוך המנוע
@@ -1061,12 +1098,6 @@ f_feed(Eng e, array<int> at, array<float> ao, array<float> ah, array<float> al, 
 // 4 (הגרף) + 16 (מעל) + 16 (מתחת) = 36
 // ═══════════════════════════════════════════════════════════════════
 
-lkh = barmerge.lookahead_off
-
-[c1O, c1H, c1L, c1C, tk1] = request.security(s1, timeframe.period, [open, high, low, close, syminfo.mintick], lookahead = lkh)
-[c2O, c2H, c2L, c2C, tk2] = request.security(s2, timeframe.period, [open, high, low, close, syminfo.mintick], lookahead = lkh)
-[c3O, c3H, c3L, c3C, tk3] = request.security(s3, timeframe.period, [open, high, low, close, syminfo.mintick], lookahead = lkh)
-[c4O, c4H, c4L, c4C, tk4] = request.security(s4, timeframe.period, [open, high, low, close, syminfo.mintick], lookahead = lkh)
 
 // מעל הגרף — עד 4H; 1D ו-1W רק כשהגרף יומי ומעלה
 hiCap = tfClass >= 6 ? 7 : 5
@@ -1372,17 +1403,60 @@ if barstate.islast
                 Eng e = array.get(allEng, k)
                 if f_useE(k) and e.cls == cls and row <= 8
                     array<Cand> cs = f_cands(e)
-                    int li = f_latest(cs)
-                    if li >= 0
-                        Cand lc = array.get(cs, li)
+                    int  li  = f_latest(cs)
+                    bool pdT = showPend and e.pnd
+                    bool pdP = showPend and use4 and e.pndP
+                    if li >= 0 or pdT or pdP
                         table.cell(cTbl, 0, row, f_clsName(cls) + " ", text_color = cls == tfClass ? chart.fg_color : color.gray, text_size = cornerSz, bgcolor = bgClr)
-                        table.cell(cTbl, 1, row, f_itemTx(lc) + (cornerWhen ? f_whenTx(lc, cls) : "") + " ", text_color = f_colC(lc), text_size = cornerSz, bgcolor = bgClr)
-                        int col = 2
-                        for pass = 0 to 1
-                            for i = 0 to array.size(cs) - 1
-                                Cand c   = array.get(cs, i)
-                                bool act = c.dir == lc.dir
-                                if i != li and (pass == 0 ? act : not act) and col <= 13
-                                    table.cell(cTbl, col, row, (act ? "" : "✗") + f_itemTx(c) + " ", text_color = act ? f_colC(c) : colOff, text_size = cornerSz, bgcolor = bgClr)
-                                    col += 1
+                        int col = 1
+                        if li >= 0
+                            Cand lc = array.get(cs, li)
+                            table.cell(cTbl, 1, row, f_itemTx(lc) + (cornerWhen ? f_whenTx(lc, cls) : "") + " ", text_color = f_colC(lc), text_size = cornerSz, bgcolor = bgClr)
+                            col := 2
+                            for pass = 0 to 1
+                                for i = 0 to array.size(cs) - 1
+                                    Cand c   = array.get(cs, i)
+                                    bool act = c.dir == lc.dir
+                                    if i != li and (pass == 0 ? act : not act) and col <= 11
+                                        table.cell(cTbl, col, row, (act ? "" : "✗") + f_itemTx(c) + " ", text_color = act ? f_colC(c) : colOff, text_size = cornerSz, bgcolor = bgClr)
+                                        col += 1
+                        if pdT
+                            table.cell(cTbl, col, row, "◦ ", text_color = colPend, text_size = cornerSz, bgcolor = bgClr)
+                            col += 1
+                        if pdP
+                            table.cell(cTbl, col, row, "◦ ", text_color = colPair, text_size = cornerSz, bgcolor = bgClr)
                         row += 1
+
+// ═══════════════════════════════════════════════════════════════════
+// PCP ממתין על הגרף — כמו ב-ADI
+// נקודה על הנר החי כשיש בו דיברגנס, ועל הנר הקודם כל עוד הוא עוד יכול
+// להיות סווינג (הנר החי עוד לא עבר את הגבוה/הנמוך שלו בנכס שמשתתף).
+// ═══════════════════════════════════════════════════════════════════
+
+f_dirC(float o, float c) => c > o ? 1 : c < o ? -1 : 0
+
+dN0 = f_dirC(c1O, c1C)
+dE0 = f_dirC(c2O, c2C)
+dY0 = f_dirC(c3O, c3C)
+dR0 = f_dirC(c4O, c4C)
+wkOk   = ymWeak and tfClass >= 6
+pDivP  = dN0 != dE0
+pDivY  = dY0 > 0 and (dE0 < 0 or dN0 < 0)
+pDivW  = wkOk and dY0 < 0 and (dE0 > 0 or dN0 > 0) and not pDivP and not pDivY
+isPcp  = pDivP or pDivY or pDivW
+isPcpP = use4 and dY0 != dR0
+
+f_canSwC(float h, float l) => (h[1] > h[2] and h < h[1]) or (l[1] < l[2] and l > l[1])
+
+csN = f_canSwC(c1H, c1L)
+csE = f_canSwC(c2H, c2L)
+csY = f_canSwC(c3H, c3L)
+csR = f_canSwC(c4H, c4L)
+pLive  = csN or csE or ((pDivY[1] or pDivW[1]) and csY)
+pLiveP = csY or csR
+
+pendOn  = showPend and tfClass != 0 and not barstate.isconfirmed
+pendNow = pendOn and (isPcp or isPcpP)
+pendPrv = pendOn and ((isPcp[1] and pLive) or (isPcpP[1] and pLiveP))
+plotchar(pendNow ? 1 : na, "PCP ממתין — הנר החי", "•", location.abovebar, color = isPcp ? colPend : colPair, size = size.tiny)
+plotchar(pendPrv ? 1 : na, "PCP ממתין — הנר הקודם", "•", location.abovebar, color = isPcp[1] and pLive ? colPend : colPair, offset = -1, size = size.tiny)
