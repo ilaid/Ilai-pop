@@ -1087,6 +1087,14 @@ f_cur(array<int> ta, int t, int from) =>
     k
 
 // מסגרת מתחת לגרף: כל תת-נר **סגור**, לפי הסדר, מזווג לפי זמן
+// הערך של תת-הנר האחרון של נכס, רק אם הוא באותו זמן כמו של נכס 1
+f_lastAt(array<int> ts, array<float> v, int sz, int tj) =>
+    float r = na
+    if sz > 0
+        if array.get(ts, sz - 1) == tj
+            r := array.get(v, sz - 1)
+    r
+
 f_feed(Eng e, array<int> at, array<float> ao, array<float> ah, array<float> al, array<float> ac, array<int> bt, array<float> bo, array<float> bh, array<float> bl, array<float> bc, array<int> ct, array<float> co, array<float> ch, array<float> cl, array<float> cc, array<int> dt, array<float> dO, array<float> dh, array<float> dl, array<float> dc) =>
     int szA  = f_aszF(ac)
     int szT  = f_aszI(at)
@@ -1113,6 +1121,21 @@ f_feed(Eng e, array<int> at, array<float> ao, array<float> ah, array<float> al, 
                 kd := f_cur(dt, tj, kd)
                 pd := array.get(dt, kd) == tj
             f_push(e, tj, true, pb, pc, pd, array.get(ao, j), array.get(ah, j), array.get(al, j), array.get(ac, j), f_ltfGet(bo, kb, pb), f_ltfGet(bh, kb, pb), f_ltfGet(bl, kb, pb), f_ltfGet(bc, kb, pb), f_ltfGet(co, kc, pc), f_ltfGet(ch, kc, pc), f_ltfGet(cl, kc, pc), f_ltfGet(cc, kc, pc), f_ltfGet(dO, kd, pd), f_ltfGet(dh, kd, pd), f_ltfGet(dl, kd, pd), f_ltfGet(dc, kd, pd))
+    // תת-הנר שעוד נבנה — הגבוה/נמוך שלו לכל נכס, כמו הנר החי במסגרות מעל הגרף.
+    // כך PSP שנלקח ו-Fill שהמפגר השלים נעלמים מיד גם במסגרת שמתחת לגרף.
+    for a = 0 to 3
+        array.set(e.rH, a, na)
+        array.set(e.rL, a, na)
+    if szA > 0 and szT == szA and nUse == szA - 1
+        int tl = array.get(at, szA - 1)
+        array.set(e.rH, 0, array.get(ah, szA - 1))
+        array.set(e.rL, 0, array.get(al, szA - 1))
+        array.set(e.rH, 1, f_lastAt(bt, bh, szB, tl))
+        array.set(e.rL, 1, f_lastAt(bt, bl, szB, tl))
+        array.set(e.rH, 2, f_lastAt(ct, ch, szC, tl))
+        array.set(e.rL, 2, f_lastAt(ct, cl, szC, tl))
+        array.set(e.rH, 3, f_lastAt(dt, dh, szD, tl))
+        array.set(e.rL, 3, f_lastAt(dt, dl, szD, tl))
     szA
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1266,7 +1289,7 @@ if tfClass != 0
 // (חוזרת לדרגה שלפני הביקור), בדיוק כמו בסגירה. מחזיר את הדרגה האפקטיבית.
 f_fillLive(Eng e, Gap g) =>
     int deg = g.fDeg
-    if e.cls >= tfClass and g.inVisit and g.fVis == g.visits and not g.dead
+    if g.inVisit and g.fVis == g.visits and not g.dead
         int ia = g.kind == 0 ? 0 : 2
         int ib = g.kind == 0 ? 1 : 3
         float sa = g.aExt
@@ -1499,7 +1522,7 @@ f_cands(Eng e) =>
                         // נלקח על נכס הגרף (גם בשבירת זוג): הקצה של נר הסווינג כבר
                         // נחצה בסגירה, או שהנר שעוד לא נסגר עבר אותו
                         bool  ownR = pspRule == "הנכס של הגרף" and cA >= 0
-                        bool  gone = ownR and (na(b.own) or (wickKill and e.cls >= tfClass and (b.dir == -1 ? array.get(e.rH, cA) > b.own : array.get(e.rL, cA) < b.own)))
+                        bool  gone = ownR and (na(b.own) or (wickKill and (b.dir == -1 ? array.get(e.rH, cA) > b.own : array.get(e.rL, cA) < b.own)))
                         if not found and b.dir == pdir and not gone
                             found := true
                             array.push(out, Cand.new(typ = 2, dir = pdir, pair = s == 1, seq = b.seq, t = b.regT, tx = "P", ix = i, inQ1 = b.inQ1))
