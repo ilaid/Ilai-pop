@@ -708,6 +708,7 @@ type PBrk
     int   seq  = 0
     int   regT = 0      // הנר שאישר — רגע הרישום
     float mkY  = na     // הקצה של נר הסווינג על נכס הגרף — למיקום הסימון
+    float own  = na     // אותו קצה כרמה: נמחק כשנכס הגרף עובר אותו (גם בשבירת זוג)
 
 f_taken(float lvl, int dir, float tH, float tL) =>
     na(lvl) ? false : dir == -1 ? tH > lvl : tL < lvl
@@ -770,11 +771,11 @@ type Eng
     bool          pnd        = false  // הנר שנסגר עכשיו הוא PCP של השלישייה שעוד יכול להיות סווינג
     bool          pndP       = false  // אותו דבר לזוג 3·4
     int           pndT       = 0      // פתיחת הנר הממתין
-    float         runH       = na     // הגבוה/נמוך של נכס הגרף מאז הצעד האחרון —
-    float         runL       = na     // הנר של המסגרת שעוד לא נסגר
+    array<float>  rH                  // הגבוה/נמוך של כל נכס מאז הצעד האחרון —
+    array<float>  rL                  // הנר של המסגרת שעוד לא נסגר
     int           runT       = 0
 
-f_newEng(int c) => Eng.new(cls = c, h1 = array.new_float(8, na), h2 = array.new_float(8, na), h3 = array.new_float(8, na), h4 = array.new_float(8, na), gaps = array.new<Gap>(), a1 = f_newAcc(), a2 = f_newAcc(), a3 = f_newAcc(), a4 = f_newAcc(), sTy = array.new_int(4, 0), sRi = array.new_int(4, -1), sSq = array.new_int(4, 0), sTm = array.new_int(4, 0), sLb = array.new_string(4, ""), pT = array.new<PBrk>(), pP = array.new<PBrk>())
+f_newEng(int c) => Eng.new(cls = c, h1 = array.new_float(8, na), h2 = array.new_float(8, na), h3 = array.new_float(8, na), h4 = array.new_float(8, na), gaps = array.new<Gap>(), a1 = f_newAcc(), a2 = f_newAcc(), a3 = f_newAcc(), a4 = f_newAcc(), sTy = array.new_int(4, 0), sRi = array.new_int(4, -1), sSq = array.new_int(4, 0), sTm = array.new_int(4, 0), sLb = array.new_string(4, ""), pT = array.new<PBrk>(), pP = array.new<PBrk>(), rH = array.new_float(4, na), rL = array.new_float(4, na))
 
 f_engAcc(Eng e, int a) => a == 0 ? e.a1 : a == 1 ? e.a2 : a == 2 ? e.a3 : e.a4
 
@@ -946,9 +947,12 @@ f_step(Eng e, int t, array<float> q1, array<float> q2, array<float> q3, array<fl
 
         // ══ PSP ══
         // 1. הנר שנסגר לוקח את מה שהוא מגיע אליו; מיכל שנגמר — מת
+        array<float> qc = cA == 1 ? q2 : cA == 2 ? q3 : cA == 3 ? q4 : q1
         int pk = 0
         while pk < array.size(e.pT)
             PBrk pb = array.get(e.pT, pk)
+            if not na(pb.own) and f_taken(pb.own, pb.dir, f_tkH(qc), f_tkL(qc))
+                pb.own := na
             bool gone = f_kill(pb, f_tkH(q1), f_tkL(q1), f_tkH(q2), f_tkL(q2), f_tkH(q3), f_tkL(q3))
             if gone or pb.cont != lf
                 array.remove(e.pT, pk)
@@ -957,6 +961,8 @@ f_step(Eng e, int t, array<float> q1, array<float> q2, array<float> q3, array<fl
         pk := 0
         while pk < array.size(e.pP)
             PBrk pp = array.get(e.pP, pk)
+            if not na(pp.own) and f_taken(pp.own, pp.dir, f_tkH(qc), f_tkL(qc))
+                pp.own := na
             bool goneP = f_kill(pp, f_tkH(q3), f_tkL(q3), f_tkH(q4), f_tkL(q4), na, na)
             if goneP or pp.cont != lf
                 array.remove(e.pP, pk)
@@ -981,7 +987,7 @@ f_step(Eng e, int t, array<float> q1, array<float> q2, array<float> q3, array<fl
                     bool bear = nHi >= nLo
                     int  ix   = bear ? 10 : 11
                     e.seq := e.seq + 1
-                    array.unshift(e.pT, PBrk.new(dir = bear ? -1 : 1, weak = divW, nq = array.get(q1, ix), es = array.get(q2, ix), ym = array.get(q3, ix), cont = lf, born = tMid, inQ1 = q1Mid, pair = false, seq = e.seq, regT = t, mkY = array.get(cA == 1 ? q2 : cA == 2 ? q3 : cA == 3 ? q4 : q1, ix)))
+                    array.unshift(e.pT, PBrk.new(dir = bear ? -1 : 1, weak = divW, nq = array.get(q1, ix), es = array.get(q2, ix), ym = array.get(q3, ix), cont = lf, born = tMid, inQ1 = q1Mid, pair = false, seq = e.seq, regT = t, mkY = array.get(cA == 1 ? q2 : cA == 2 ? q3 : cA == 3 ? q4 : q1, ix), own = cA >= 0 ? array.get(cA == 1 ? q2 : cA == 2 ? q3 : cA == 3 ? q4 : q1, ix) : na))
                     while array.size(e.pT) > pspDepth
                         array.pop(e.pT)
             if use4
@@ -993,7 +999,7 @@ f_step(Eng e, int t, array<float> q1, array<float> q2, array<float> q3, array<fl
                         bool pBear = pHi >= pLo
                         int  px    = pBear ? 10 : 11
                         e.seq := e.seq + 1
-                        array.unshift(e.pP, PBrk.new(dir = pBear ? -1 : 1, nq = array.get(q3, px), es = array.get(q4, px), cont = lf, born = tMid, inQ1 = q1Mid, pair = true, seq = e.seq, regT = t, mkY = array.get(cA == 1 ? q2 : cA == 2 ? q3 : cA == 3 ? q4 : q1, px)))
+                        array.unshift(e.pP, PBrk.new(dir = pBear ? -1 : 1, nq = array.get(q3, px), es = array.get(q4, px), cont = lf, born = tMid, inQ1 = q1Mid, pair = true, seq = e.seq, regT = t, mkY = array.get(cA == 1 ? q2 : cA == 2 ? q3 : cA == 3 ? q4 : q1, px), own = cA >= 0 ? array.get(cA == 1 ? q2 : cA == 2 ? q3 : cA == 3 ? q4 : q1, px) : na))
                         while array.size(e.pP) > pspDepth
                             array.pop(e.pP)
 
@@ -1230,27 +1236,58 @@ if tfClass != 0
     if useL4
         f_feed(eL4, w4t1, w4o1, w4h1, w4l1, w4c1, w4t2, w4o2, w4h2, w4l2, w4c2, w4t3, w4o3, w4h3, w4l3, w4c3, w4t4, w4o4, w4h4, w4l4, w4c4)
 
-// הגבוה והנמוך של נכס הגרף מאז הצעד האחרון של כל מנוע (הגרף ומעליו) —
-// כדי ש-PSP שנלקח בנר שעוד לא נסגר ייעלם מיד
-chH = cA == 1 ? c2H : cA == 2 ? c3H : cA == 3 ? c4H : c1H
-chL = cA == 1 ? c2L : cA == 2 ? c3L : cA == 3 ? c4L : c1L
+// הגבוה והנמוך של כל נכס מאז הצעד האחרון של כל מנוע (הגרף ומעליו) — הנר
+// של המסגרת שעוד לא נסגר. כך PSP שנלקח, ו-Fill שהמפגר השלים, נעלמים מיד.
+f_run1(Eng e, int a, float h, float l, bool rst) =>
+    float oh = array.get(e.rH, a)
+    float ol = array.get(e.rL, a)
+    array.set(e.rH, a, rst or na(oh) ? h : na(h) ? oh : math.max(oh, h))
+    array.set(e.rL, a, rst or na(ol) ? l : na(l) ? ol : math.min(ol, l))
+    a
 
-f_run(Eng e, float h, float l) =>
-    if e.lastT != e.runT
-        e.runT := e.lastT
-        e.runH := h
-        e.runL := l
-    else
-        e.runH := na(e.runH) ? h : math.max(e.runH, h)
-        e.runL := na(e.runL) ? l : math.min(e.runL, l)
-    e.runH
+f_run(Eng e) =>
+    bool rst = e.lastT != e.runT
+    e.runT := e.lastT
+    f_run1(e, 0, c1H, c1L, rst)
+    f_run1(e, 1, c2H, c2L, rst)
+    f_run1(e, 2, c3H, c3L, rst)
+    f_run1(e, 3, c4H, c4L, rst)
+    rst
 
 if tfClass != 0
-    f_run(eCh, chH, chL)
-    f_run(eU1, chH, chL)
-    f_run(eU2, chH, chL)
-    f_run(eU3, chH, chL)
-    f_run(eU4, chH, chL)
+    f_run(eCh)
+    f_run(eU1)
+    f_run(eU2)
+    f_run(eU3)
+    f_run(eU4)
+
+// Fill על הנר שעוד לא נסגר: אם המפגר משלים באותו ביקור — השבירה מתבטלת
+// (חוזרת לדרגה שלפני הביקור), בדיוק כמו בסגירה. מחזיר את הדרגה האפקטיבית.
+f_fillLive(Eng e, Gap g) =>
+    int deg = g.fDeg
+    if e.cls >= tfClass and g.inVisit and g.fVis == g.visits and not g.dead
+        int ia = g.kind == 0 ? 0 : 2
+        int ib = g.kind == 0 ? 1 : 3
+        float sa = g.aExt
+        float sb = g.bExt
+        float sc = g.cExt
+        bool up = g.dir == 1
+        float ra = up ? array.get(e.rL, ia) : array.get(e.rH, ia)
+        float rb = up ? array.get(e.rL, ib) : array.get(e.rH, ib)
+        float rc = up ? array.get(e.rL, 2) : array.get(e.rH, 2)
+        if not na(g.aTop) and not na(ra)
+            g.aExt := up ? math.min(sa, ra) : math.max(sa, ra)
+        if not na(g.bTop) and not na(rb)
+            g.bExt := up ? math.min(sb, rb) : math.max(sb, rb)
+        if g.kind == 0 and not na(g.cTop) and not na(rc)
+            g.cExt := up ? math.min(sc, rc) : math.max(sc, rc)
+        int live = g.fracDeg()
+        g.aExt := sa
+        g.bExt := sb
+        g.cExt := sc
+        if live < deg
+            deg := math.max(live, g.fPrev)
+    deg
 
 // ═══════════════════════════════════════════════════════════════════
 // הכלל — השבירות החיות של מסגרת, והאחרונה מביניהן
@@ -1437,12 +1474,12 @@ f_cands(Eng e) =>
             if array.size(e.gaps) > 0
                 for i = 0 to array.size(e.gaps) - 1
                     Gap g = array.get(e.gaps, i)
-                    if not g.dead and g.fDeg > 0 and g.kind == fk and g.dir == fdir and g.fSeq > bs
+                    if not g.dead and g.fDeg > 0 and g.kind == fk and g.dir == fdir and g.fSeq > bs and f_fillLive(e, g) > 0
                         bs   := g.fSeq
                         best := i
             if best >= 0
                 Gap gb = array.get(e.gaps, best)
-                array.push(out, Cand.new(typ = 0, dir = fdir, pair = fk == 1, seq = gb.fSeq, t = gb.fTime, tx = "F" + str.tostring(gb.fDeg), ix = best))
+                array.push(out, Cand.new(typ = 0, dir = fdir, pair = fk == 1, seq = gb.fSeq, t = gb.fTime, tx = "F" + str.tostring(f_fillLive(e, gb)), ix = best))
         for k = 0 to 3
             int ty = array.get(e.sTy, k)
             // SSMT שכולם (או שני החזקים) כבר סגרו מעבר — (all/core closed) — לא מוצגת
@@ -1452,18 +1489,16 @@ f_cands(Eng e) =>
                     array.push(out, Cand.new(typ = 1, dir = k % 2 == 1 ? 1 : -1, pair = k >= 2, seq = array.get(e.sSq, k), t = array.get(e.sTm, k), tx = (ty == 2 ? "H" : "S") + qStar, ix = k, qTop = qTop))
         for s = 0 to 1
             array<PBrk> st = s == 0 ? e.pT : e.pP
-            // הרמה של נכס הגרף בשבירה הזו (שלישייה: 1/2/3, זוג: 3/4)
-            int slot = s == 0 ? cA : cA - 2
             for dd = 0 to 1
                 int  pdir  = dd == 0 ? -1 : 1
                 bool found = false
                 if array.size(st) > 0
                     for i = 0 to array.size(st) - 1
                         PBrk b = array.get(st, i)
-                        float lv  = slot == 0 ? b.nq : slot == 1 ? b.es : slot == 2 and s == 0 ? b.ym : na
-                        bool  own = pspRule == "הנכס של הגרף" and slot >= 0 and slot <= (s == 0 ? 2 : 1)
-                        // נלקח על נכס הגרף: הרמה כבר נמחקה בסגירה, או שהנר החי עבר אותה
-                        bool  gone = own and (na(lv) or (wickKill and e.cls >= tfClass and (b.dir == -1 ? e.runH > lv : e.runL < lv)))
+                        // נלקח על נכס הגרף (גם בשבירת זוג): הקצה של נר הסווינג כבר
+                        // נחצה בסגירה, או שהנר שעוד לא נסגר עבר אותו
+                        bool  ownR = pspRule == "הנכס של הגרף" and cA >= 0
+                        bool  gone = ownR and (na(b.own) or (wickKill and e.cls >= tfClass and (b.dir == -1 ? array.get(e.rH, cA) > b.own : array.get(e.rL, cA) < b.own)))
                         if not found and b.dir == pdir and not gone
                             found := true
                             array.push(out, Cand.new(typ = 2, dir = pdir, pair = s == 1, seq = b.seq, t = b.regT, tx = "P", ix = i, inQ1 = b.inQ1))
@@ -1518,7 +1553,7 @@ f_drawFill(Eng e, Cand c) =>
     Gap    g   = array.get(e.gaps, c.ix)
     color  col = f_colC(c)
     bool   up  = g.dir == 1
-    string txt = "F" + str.tostring(g.fDeg) + " " + g.fLead
+    string txt = "F" + str.tostring(f_fillLive(e, g)) + " " + g.fLead
     [gb, gt] = f_fillBounds(g)
     if showBox and not na(gt)
         array.push(dBx, box.new(left = g.originT, top = gt, right = time, bottom = gb, xloc = xloc.bar_time, border_color = color.new(col, 45), border_width = 1, bgcolor = color.new(col, boxTransp), text = txt, text_color = col, text_size = lblSize, text_halign = text.align_right, text_valign = text.align_center))
