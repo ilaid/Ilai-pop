@@ -20,7 +20,7 @@ indicator("QT Unified | SSMT · Fill · PSP", shorttitle = "QT·U", overlay = tr
 // הוסרו לעומת שלושת האינדיקטורים: 15 שניות, הצצות הגאפים של ה-Fill,
 // התראות, תיבת 5m/15m המהירה, סינון True Open, אזהרת "עומדת להתבטל",
 // ייצוא ל-Hub, ו-SSMT מסוג (all/core closed). כל החישוב — על נרות סגורים.
-// PCP ממתין: על הגרף בכל מסגרת, בצד רק ב-1H ומעלה. QS (★) — על SSMT.
+// PCP ממתין: על הגרף בכל מסגרת, בצד מ-5m ומעלה. PSP חדש ב-5m/15m — ⚡. QS (★) — על SSMT.
 // ═══════════════════════════════════════════════════════════════════
 
 // ═══════════════════════════════════════════════════════════════════
@@ -55,7 +55,7 @@ wickKill = input.bool(true, "בטל PSP לפי פתיל", tooltip = "כבוי = 
 pspRule  = input.string("הנכס של הגרף", "מתי PSP נחשב נלקח", options = ["הנכס של הגרף", "שני המכריעים"], group = grpPsp, tooltip = "הנכס של הגרף = ברגע שהנכס שאתה רואה עבר את הקצה של נר הסווינג — גם בנר שעוד לא נסגר. מה שהעין רואה.\nשני המכריעים = כמו ב-ADI: 1 וגם 2 (בזוג: 3 וגם 4) צריכים לעבור, בסגירת נר.\nכשהגרף הוא לא אחד מנכסי השבירה — תמיד שני המכריעים.")
 pspDepth = input.int(5, "כמה PSP לזכור לכל מסגרת", minval = 1, maxval = 10, group = grpPsp)
 q1Mode   = input.string("בצבע נפרד", "PSP ברבע ראשון / זמן חסום", options = ["בצבע נפרד", "רגיל", "לא קיים"], group = grpPsp)
-showPend = input.bool(true, "סמן נר PCP שעוד לא הוכרע", tooltip = "נר שנסגר עם דיברגנס ומחכה לסגירה הבאה כדי לדעת אם הוא סווינג (PSP).\nעל הגרף — נקודה מעל הנר, והיא נעלמת ברגע שהנר כבר לא יכול להיות סווינג.\nבצד — רק ב-1H ומעלה: ◦PCP והשעה של הנר, בסוף השורה (בצבע הזוג כשזה 3·4).", group = grpPsp)
+showPend = input.bool(true, "סמן נר PCP שעוד לא הוכרע", tooltip = "נר שנסגר עם דיברגנס ומחכה לסגירה הבאה כדי לדעת אם הוא סווינג (PSP).\nעל הגרף — נקודה מעל הנר, והיא נעלמת ברגע שהנר כבר לא יכול להיות סווינג.\nבצד — מ-5m ומעלה: ◦PCP והשעה של הנר, בסוף השורה (בצבע הזוג כשזה 3·4).", group = grpPsp)
 colPend  = input.color(color.new(#000000, 0), "צבע PCP ממתין", tooltip = "על ערכת נושא כהה — להחליף ללבן.", group = grpPsp)
 
 grpLogic = "לוגיקה"
@@ -84,6 +84,7 @@ cornerOn   = input.bool(true, "הצג את השבירות בצד", group = grpCo
 cornerPosI = input.string("שמאל למטה", "מיקום", options = ["שמאל למטה", "שמאל למעלה", "ימין למטה", "ימין למעלה"], group = grpCor)
 cornerSz   = input.string("tiny", "גודל טקסט", options = ["tiny", "small", "normal"], group = grpCor)
 cornerWhen = input.bool(true, "Q ושעה ליד האחרונה", group = grpCor)
+fastFlash  = input.bool(true, "הדגש PSP חדש ב-5m וב-15m (⚡)", group = grpCor, tooltip = "PSP שנרשם בנר האחרון שנסגר ב-5m או ב-15m מקבל ⚡ ורקע צבעוני בצד, עד הסגירה הבאה של אותה מסגרת. נראה מכל גרף — גם PSP של NQ/ES כשאתה על RTY.")
 offFade    = input.int(60, "שקיפות ממתינה (✗)", minval = 0, maxval = 90, group = grpCor, tooltip = "ממתינה נכתבת בצבע שלה (זוג 3·4 — בצבע הזוג), רק דהוי.")
 cornerLift = input.int(2, "הרם את השורות (שורות ריקות)", minval = 0, maxval = 8, group = grpCor, tooltip = "שורות ריקות בין השורות לקצה המסך — כדי שלא ייפלו על אינדיקטור אחר באותה פינה.")
 
@@ -1639,6 +1640,11 @@ bgClr = color.new(color.black, 100)
 
 f_itemTx(Cand c) => (c.dir == 1 ? "▲" : "▼") + c.tx
 
+// PSP שנרשם בצעד האחרון של 5m/15m — חדש, עד הסגירה הבאה של אותה מסגרת
+f_fresh(Cand c, Eng e) => fastFlash and c.typ == 2 and (e.cls == 2 or e.cls == 3) and c.t == e.lastT
+f_pre(Cand c, Eng e)   => f_fresh(c, e) ? "⚡" : ""
+f_bg(Cand c, Eng e)    => f_fresh(c, e) ? color.new(f_colC(c), 80) : bgClr
+
 f_whenTx(Cand c, int cls) =>
     [wr, wl, wb, wq, wn] = f_cyc(cls, c.t)
     (wn > 0 ? " Q" + str.tostring(wn) : "") + " " + str.format_time(c.t, cls <= 5 ? "HH:mm" : "dd/MM", TZ)
@@ -1653,20 +1659,21 @@ if barstate.islast
                 if f_useE(k) and e.cls == cls and row <= 8
                     array<Cand> cs = f_cands(e)
                     int  li  = f_latest(cs)
-                    // PCP ממתין בצד — רק ב-1H ומעלה
-                    bool pdT = showPend and cls >= 4 and e.pnd
-                    bool pdP = showPend and cls >= 4 and use4 and e.pndP
+                    // PCP ממתין בצד — מ-5m ומעלה (לא ב-1m)
+                    bool pdT = showPend and cls >= 2 and e.pnd
+                    bool pdP = showPend and cls >= 2 and use4 and e.pndP
                     if li >= 0 or pdT or pdP
                         table.cell(cTbl, 0, row + rowOff, f_clsName(cls) + " ", text_color = cls == tfClass ? chart.fg_color : color.gray, text_size = cornerSz, bgcolor = bgClr)
                         int col = 1
                         if li >= 0
                             Cand lc = array.get(cs, li)
-                            table.cell(cTbl, 1, row + rowOff, f_itemTx(lc) + (cornerWhen ? f_whenTx(lc, cls) : "") + " ", text_color = f_colC(lc), text_size = cornerSz, bgcolor = bgClr)
+                            table.cell(cTbl, 1, row + rowOff, f_pre(lc, e) + f_itemTx(lc) + (cornerWhen ? f_whenTx(lc, cls) : "") + " ", text_color = f_colC(lc), text_size = cornerSz, bgcolor = f_bg(lc, e))
                             col := 2
                             // סוג אחד = פריט אחד: לכל סוג אחר — הפעילה האחרונה שלו,
                             // ואם אין לו פעילה — הממתינה האחרונה (✗). סדר: F · H/S · P.
+                            // ולסוג של האחרונה — הממתינה האחרונה שלו בכיוון ההפוך (✗), אם יש
                             for ty = 0 to 2
-                                if ty != lc.typ
+                                if true
                                     int bA = -1
                                     int bI = -1
                                     int sA = -1
@@ -1683,11 +1690,11 @@ if barstate.islast
                                                 if c.seq > sI
                                                     sI := c.seq
                                                     bI := i
-                                    int  pick = bA >= 0 ? bA : bI
+                                    int  pick = ty == lc.typ ? bI : bA >= 0 ? bA : bI
                                     if pick >= 0
                                         Cand c   = array.get(cs, pick)
-                                        bool act = bA >= 0
-                                        table.cell(cTbl, col, row + rowOff, (act ? "" : "✗") + f_itemTx(c) + " ", text_color = act ? f_colC(c) : color.new(f_colC(c), offFade), text_size = cornerSz, bgcolor = bgClr)
+                                        bool act = ty != lc.typ and bA >= 0
+                                        table.cell(cTbl, col, row + rowOff, (act ? f_pre(c, e) : "✗") + f_itemTx(c) + " ", text_color = act ? f_colC(c) : color.new(f_colC(c), offFade), text_size = cornerSz, bgcolor = act ? f_bg(c, e) : bgClr)
                                         col += 1
                         string pTm = str.format_time(e.pndT, cls <= 5 ? "HH:mm" : "dd/MM", TZ)
                         if pdT
