@@ -13,6 +13,9 @@ indicator("QT Gaps | Collective + Chart", overlay = true, max_boxes_count = 300)
 //   של הגרף — כל גאפ של הנכס שהגרף מציג. גאפ שהוא גם קולקטיבי ומצויר
 //     כקולקטיבי לא מצויר פעמיים; אם הוא קולקטיבי חי שלא מצויר — הוא מוצג
 //     בצבעים ובשמות של הקולקטיבי.
+//   גאפים תאומים — גאפ של הגרף שחופף לגאפ קולקטיבי מצויר באותו כיוון (למשל
+//     רווח הפתיחה ב-18:00 וה-FVG של הנר שאחריו) מתאחדים לקופסה קולקטיבית אחת,
+//     מהקצה הרחוק של האחד עד הקצה הרחוק של השני.
 //
 // גאפ חי עד:
 //   IFVG — בקולקטיבי: סגירה של נכס 1 או 2 מעבר לגאפ (בזוג: 3 או 4). נכס 3
@@ -575,20 +578,38 @@ f_box(int x1, float top, float bot, color c, string txt) =>
 f_collShown(Gap g) =>
     drawColl and not na(g.drwTop) and (g.armed or not collArm)
 
+// גאפ של הגרף מצויר?
+f_ownShown(OwnGap og) =>
+    drawOwn and (og.armed or not ownArm)
+
 if barstate.islast
     while array.size(bxs) > 0
         box.delete(array.pop(bxs))
     while array.size(lns) > 0
         line.delete(array.pop(lns))
+    // גאפים של הגרף שהתאחדו עם קולקטיבי — לא מצוירים בנפרד
+    array<bool> merged = array.new_bool(array.size(owns), false)
     if drawColl and array.size(gaps) > 0
         for i = 0 to array.size(gaps) - 1
             Gap gz = array.get(gaps, i)
             if f_collShown(gz)
-                f_box(gz.origin, gz.drwTop, gz.drwBot, f_gapCol(gz.kind, gz.dir), f_subName(tfClass, gz.birthT) + " " + f_bornTxt(tfClass, gz.birthT) + " " + f_legsTxt(gz) + (gz.volImb ? " V" : ""))
+                float top = gz.drwTop
+                float bot = gz.drwBot
+                int   x1  = gz.origin
+                // גאפים תאומים: גאפ של הגרף באותו כיוון שחופף — מתאחד לקופסה אחת
+                if array.size(owns) > 0
+                    for j = 0 to array.size(owns) - 1
+                        OwnGap ow = array.get(owns, j)
+                        if not array.get(merged, j) and f_ownShown(ow) and ow.dir == gz.dir and ow.top >= bot and ow.bot <= top
+                            top := math.max(top, ow.top)
+                            bot := math.min(bot, ow.bot)
+                            x1  := math.min(x1, ow.origin)
+                            array.set(merged, j, true)
+                f_box(x1, top, bot, f_gapCol(gz.kind, gz.dir), f_subName(tfClass, gz.birthT) + " " + f_bornTxt(tfClass, gz.birthT) + " " + f_legsTxt(gz) + (gz.volImb ? " V" : ""))
     if drawOwn and array.size(owns) > 0
         for i = 0 to array.size(owns) - 1
             OwnGap og = array.get(owns, i)
-            if og.armed or not ownArm
+            if f_ownShown(og) and not array.get(merged, i)
                 // קולקטיבי שכבר מצויר — לא שוב. קולקטיבי חי שלא מצויר — בצבעים ובשמות שלו.
                 bool   dup  = false
                 string legs = ""
