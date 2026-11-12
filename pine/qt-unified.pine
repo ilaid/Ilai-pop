@@ -1634,14 +1634,19 @@ if barstate.islast
                                 if ty != lc.typ
                                     int bA = -1
                                     int bI = -1
+                                    int sA = -1
+                                    int sI = -1
                                     for i = 0 to array.size(cs) - 1
                                         Cand c = array.get(cs, i)
+                                        // ב-Pine ה-or לא עוצר באמצע — לכן שומרים את ה-seq ולא קוראים array.get(-1)
                                         if c.typ == ty
                                             if c.dir == lc.dir
-                                                if bA < 0 or c.seq > array.get(cs, bA).seq
+                                                if c.seq > sA
+                                                    sA := c.seq
                                                     bA := i
                                             else
-                                                if bI < 0 or c.seq > array.get(cs, bI).seq
+                                                if c.seq > sI
+                                                    sI := c.seq
                                                     bI := i
                                     int  pick = bA >= 0 ? bA : bI
                                     if pick >= 0
