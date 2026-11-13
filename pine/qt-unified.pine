@@ -1490,12 +1490,21 @@ type Cand
     int    ix           // אינדקס הגאפ / משבצת ה-SSMT / מקום ב-PSP
     bool   inQ1 = false
     string qTop = ""        // SSMT: שורת ה-QS לתווית
+    int    hs   = 0         // SSMT: 2 = HSSMT · 1 = SSMT
+
+// PSP שנלקח על נכס הגרף (גם בשבירת זוג): הקצה של נר הסווינג כבר נחצה בסגירה,
+// או שהנר שעוד לא נסגר עבר אותו
+f_pspGone(Eng e, PBrk b) =>
+    bool ownR = pspRule == "הנכס של הגרף" and cA >= 0
+    ownR and (na(b.own) or (wickKill and (b.dir == -1 ? array.get(e.rH, cA) > b.own : array.get(e.rL, cA) < b.own)))
+
+// מיכל המנוע עדיין חי (מתחת לגרף — תמיד: הוא כבר צעד עד תת-הנר האחרון)
+f_live(Eng e) => e.started and (e.cls < tfClass or e.lifeId == f_lifeOf(e.cls, time))
 
 // לכל סוג: האחרונה של השלישייה ושל הזוג, בכל כיוון. מיכל שנגמר — כלום.
 f_cands(Eng e) =>
     array<Cand> out = array.new<Cand>()
-    // מסגרת מתחת לגרף כבר צעדה עד תת-הנר האחרון שנסגר — המיכל שלה מעודכן
-    if e.started and (e.cls < tfClass or e.lifeId == f_lifeOf(e.cls, time))
+    if f_live(e)
         for kd = 0 to 3
             int fk   = kd >= 2 ? 1 : 0
             int fdir = kd % 2 == 1 ? 1 : -1
@@ -1516,7 +1525,7 @@ f_cands(Eng e) =>
             if ty != 0 and not f_closed(array.get(e.sLb, k))
                 [qTop, qStar, qIn] = f_ssQS(e, k)
                 if not (qsFilt and qsUseCls(e.cls) and not qIn)
-                    array.push(out, Cand.new(typ = 1, dir = k % 2 == 1 ? 1 : -1, pair = k >= 2, seq = array.get(e.sSq, k), t = array.get(e.sTm, k), tx = (ty == 2 ? "H" : "S") + qStar, ix = k, qTop = qTop))
+                    array.push(out, Cand.new(typ = 1, dir = k % 2 == 1 ? 1 : -1, pair = k >= 2, seq = array.get(e.sSq, k), t = array.get(e.sTm, k), tx = (ty == 2 ? "H" : "S") + qStar, ix = k, qTop = qTop, hs = ty))
         for s = 0 to 1
             array<PBrk> st = s == 0 ? e.pT : e.pP
             for dd = 0 to 1
@@ -1525,28 +1534,37 @@ f_cands(Eng e) =>
                 if array.size(st) > 0
                     for i = 0 to array.size(st) - 1
                         PBrk b = array.get(st, i)
-                        // נלקח על נכס הגרף (גם בשבירת זוג): הקצה של נר הסווינג כבר
-                        // נחצה בסגירה, או שהנר שעוד לא נסגר עבר אותו
-                        bool  ownR = pspRule == "הנכס של הגרף" and cA >= 0
-                        bool  gone = ownR and (na(b.own) or (wickKill and (b.dir == -1 ? array.get(e.rH, cA) > b.own : array.get(e.rL, cA) < b.own)))
-                        if not found and b.dir == pdir and not gone
+                        if not found and b.dir == pdir and not f_pspGone(e, b)
                             found := true
                             array.push(out, Cand.new(typ = 2, dir = pdir, pair = s == 1, seq = b.seq, t = b.regT, tx = "P", ix = i, inQ1 = b.inQ1))
     out
 
-// האחרונה שקובעת את הכיוון. שתי שבירות מנוגדות שנרשמו באותו נר — אף אחת לא
-// קובעת: הולכים עם הכיוון שהיה לפני הנר הזה (השבירה החיה האחרונה שלפניו).
-// אם אין שום שבירה חיה לפניו — האחרונה שנרשמה. מחזיר את השבירה הכי חדשה
-// בכיוון שנקבע.
+// HSSMT חזקה מ-SSMT: SSMT לא קובעת כיוון כשיש HSSMT חיה בכיוון ההפוך באותה
+// מסגרת. היא נשארת, ומופיעה בצד כ-✗.
+f_elig(array<Cand> cs, Cand c) =>
+    bool ok = true
+    if c.typ == 1 and c.hs == 1
+        for i = 0 to array.size(cs) - 1
+            Cand o = array.get(cs, i)
+            if o.typ == 1 and o.hs == 2 and o.dir != c.dir
+                ok := false
+    ok
+
+// האחרונה שקובעת את הכיוון (מבין אלה שיכולות לקבוע — ראה f_elig).
+// שתי שבירות מנוגדות שנרשמו באותו נר — אף אחת לא קובעת: הולכים עם הכיוון
+// שהיה לפני הנר הזה (השבירה החיה האחרונה שלפניו). אם אין שום שבירה חיה
+// לפניו — האחרונה שנרשמה. מחזיר את השבירה הכי חדשה בכיוון שנקבע.
 f_latest(array<Cand> cs) =>
     int li = -1
     int ls = -1
     int n  = array.size(cs)
     if n > 0
         for i = 0 to n - 1
-            if array.get(cs, i).seq > ls
-                ls := array.get(cs, i).seq
+            Cand c = array.get(cs, i)
+            if c.seq > ls and f_elig(cs, c)
+                ls := c.seq
                 li := i
+    if li >= 0
         int  lt  = array.get(cs, li).t
         int  ld  = array.get(cs, li).dir
         bool tie = false
@@ -1554,25 +1572,25 @@ f_latest(array<Cand> cs) =>
         int  ps  = -1
         for i = 0 to n - 1
             Cand c = array.get(cs, i)
-            if c.t == lt and c.dir != ld
-                tie := true
-            if c.t < lt and c.seq > ps
-                ps := c.seq
-                pi := i
-        if tie and pi >= 0
-            int pd = array.get(cs, pi).dir
-            int bs = -1
-            for i = 0 to n - 1
-                Cand c = array.get(cs, i)
-                if c.dir == pd and c.seq > bs
-                    bs := c.seq
-                    li := i
+            if f_elig(cs, c)
+                if c.t == lt and c.dir != ld
+                    tie := true
+                if c.t < lt and c.seq > ps
+                    ps := c.seq
+                    pi := i
+        int pd = tie and pi >= 0 ? array.get(cs, pi).dir : ld
+        int bs = -1
+        for i = 0 to n - 1
+            Cand c = array.get(cs, i)
+            if c.dir == pd and c.seq > bs
+                bs := c.seq
+                li := i
     li
 
 f_colC(Cand c) => c.typ == 2 and c.inQ1 and q1Col ? colQ1 : c.pair ? colPair : c.dir == 1 ? colBull : colBear
 
 // ═══════════════════════════════════════════════════════════════════
-// ציור — רק השבירות הפעילות של מסגרת הגרף
+// ציור — השבירות הפעילות של מסגרת הגרף, וכל PSP חי (ממתין — דהוי)
 // ═══════════════════════════════════════════════════════════════════
 
 atrCh = ta.atr(14)
@@ -1646,16 +1664,17 @@ f_drawSS(Eng e, Cand c) =>
 f_glyph(bool bear) =>
     pspGlyph == "עיגול ●" ? "●" : pspGlyph == "נקודה •" ? "•" : pspGlyph == "ריבוע ■" ? "■" : pspGlyph == "יהלום ◆" ? "◆" : pspGlyph == "כוכב ★" ? "★" : pspGlyph == "איקס ✕" ? "✕" : pspGlyph == "חץ ⬇" ? (bear ? "⬇" : "⬆") : pspGlyph == "משולש ▲" ? (bear ? "▼" : "▲") : (bear ? pspTxBear : pspTxBull)
 
-f_drawPsp(Eng e, Cand c) =>
-    PBrk b    = array.get(c.pair ? e.pP : e.pT, c.ix)
+f_colP(PBrk b) => b.inQ1 and q1Col ? colQ1 : b.pair ? colPair : b.dir == 1 ? colBull : colBear
+
+f_drawPsp(Eng e, PBrk b, color col) =>
     bool bear = b.dir == -1
     string tip = "PSP " + (bear ? "▼ " : "▲ ") + f_holds(b) + " · " + str.format_time(b.born, e.cls >= 6 ? "dd.MM" : "HH:mm", TZ)
     float gap  = nz(atrCh) * pspGap / 100.0
     string gl  = f_glyph(bear)
     if na(b.mkY)
-        array.push(dLb, label.new(b.born, close, gl, xloc = xloc.bar_time, yloc = bear ? yloc.abovebar : yloc.belowbar, style = label.style_none, textcolor = f_colC(c), size = pspSize, tooltip = tip))
+        array.push(dLb, label.new(b.born, close, gl, xloc = xloc.bar_time, yloc = bear ? yloc.abovebar : yloc.belowbar, style = label.style_none, textcolor = col, size = pspSize, tooltip = tip))
     else
-        array.push(dLb, label.new(b.born, bear ? b.mkY + gap : b.mkY - gap, gl, xloc = xloc.bar_time, yloc = yloc.price, style = bear ? label.style_label_down : label.style_label_up, color = color.new(color.black, 100), textcolor = f_colC(c), size = pspSize, tooltip = tip))
+        array.push(dLb, label.new(b.born, bear ? b.mkY + gap : b.mkY - gap, gl, xloc = xloc.bar_time, yloc = yloc.price, style = bear ? label.style_label_down : label.style_label_up, color = color.new(color.black, 100), textcolor = col, size = pspSize, tooltip = tip))
     0
 
 if barstate.islast
@@ -1668,8 +1687,8 @@ if barstate.islast
     if tfClass != 0
         array<Cand> cc = f_cands(eCh)
         int li = f_latest(cc)
+        int ld = li >= 0 ? array.get(cc, li).dir : 0
         if li >= 0
-            int ld = array.get(cc, li).dir
             for i = 0 to array.size(cc) - 1
                 Cand c = array.get(cc, i)
                 if c.dir == ld
@@ -1677,8 +1696,17 @@ if barstate.islast
                         f_drawFill(eCh, c)
                     else if c.typ == 1
                         f_drawSS(eCh, c)
-                    else
-                        f_drawPsp(eCh, c)
+        // PSP — כל אחד שעוד חי (לא נלקח, המיכל שלו לא נגמר) מוצג על הגרף תמיד.
+        // ממתין (בכיוון ההפוך לאחרונה) — דהוי.
+        if f_live(eCh)
+            for s = 0 to 1
+                array<PBrk> st = s == 0 ? eCh.pT : eCh.pP
+                if array.size(st) > 0
+                    for i = 0 to array.size(st) - 1
+                        PBrk b = array.get(st, i)
+                        if not f_pspGone(eCh, b)
+                            color pc = f_colP(b)
+                            f_drawPsp(eCh, b, b.dir == ld ? pc : color.new(pc, offFade))
 
 // ═══════════════════════════════════════════════════════════════════
 // הצד — שורה לכל מסגרת, מהגבוהה לנמוכה:
