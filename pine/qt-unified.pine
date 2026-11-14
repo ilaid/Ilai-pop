@@ -33,7 +33,7 @@ sym2 = input.symbol("CME_MINI:MES1!",  "נכס 2 — חזק", group = grpSym)
 sym3 = input.symbol("CBOT_MINI:MYM1!", "נכס 3 — חלש", group = grpSym)
 use4 = input.bool(true, "השתמש בנכס 4 — בן הזוג של 3", group = grpSym)
 sym4 = input.symbol("CME_MINI:M2K1!",  "נכס 4", group = grpSym)
-adjMode  = input.string("בלי יישור", "נתוני חוזה רציף", options = ["בלי יישור", "מיושר לגלגול", "ברירת המחדל של הסימבול"], group = grpSym)
+adjMode  = input.string("מיושר לגלגול", "נתוני חוזה רציף", options = ["בלי יישור", "מיושר לגלגול", "ברירת המחדל של הסימבול"], group = grpSym, tooltip = "חייב להתאים לכפתור B-ADJ בתחתית הגרף:\nB-ADJ דלוק = מיושר לגלגול · B-ADJ כבוי = בלי יישור.\nאם הם לא תואמים — הקופסאות, הקווים והסימונים יוצאים בגובה הלא נכון (בהפרש של גלגול החוזה), כי ההגדרה של הגרף לא עוברת לאינדיקטור.")
 settleIn = input.string("כבוי — כמו הגרף", "Settlement כסגירה יומית", options = ["כבוי — כמו הגרף", "דלוק", "ברירת המחדל של הסימבול"], group = grpSym)
 
 grpFill = "Fill — הגדרת גאפ"
@@ -820,6 +820,30 @@ f_legA(int d, array<float> q, float tk, bool edge, bool use) =>
     [lb, lt, lf, lm, lv] = f_leg(d, ok, array.get(q, 0), array.get(q, 1), array.get(q, 2), array.get(q, 3), array.get(q, 4), array.get(q, 5), array.get(q, 6), array.get(q, 7), array.get(q, 8), array.get(q, 9), tk, edge)
     [lb, lt, lf, lm, lv]
 
+// SSMT קיימת שנלקחה שוב עכשיו: אחד הנכסים שבשבירה (H — בסגירה, S — בפתיל) קבע
+// בנר הזה קיצון חדש מעבר לרמה. זו שבירה שקרתה עכשיו — היא נחשבת האחרונה.
+f_renew(Eng e, int k, string lb, int t) =>
+    bool   isBull = k % 2 == 1
+    int    aLo    = k >= 2 ? 2 : 0
+    int    aHi    = k >= 2 ? 3 : 2
+    int    ri     = array.get(e.sRi, k)
+    string s2     = " " + lb + " "
+    int    pS     = str.pos(s2, " S ")
+    string hPart  = str.startswith(lb, "H ") ? (na(pS) ? s2 : str.substring(s2, 0, pS + 1)) : ""
+    string sPart  = na(pS) ? "" : str.substring(s2, pS + 2)
+    bool   rn     = false
+    if ri >= 0
+        for a = aLo to aHi
+            string nmA = " " + f_nm(a) + " "
+            Acc    acc = f_engAcc(e, a)
+            for ps = 0 to 1
+                bool isH = ps == 0
+                if not rn and str.contains(" " + (isH ? hPart : sPart) + " ", nmA)
+                    [bp, bb] = f_take(isBull, f_accA(acc, isBull, isH), f_accPA(acc, isBull, isH), ri, f_accV(acc, isBull, isH), f_accP(acc, isBull, isH))
+                    if bb == t
+                        rn := true
+    rn
+
 f_step(Eng e, int t, array<float> q1, array<float> q2, array<float> q3, array<float> q4) =>
     bool did = false
     if not na(t) and t != e.lastT and (not na(array.get(q1, 3)) or not na(array.get(q2, 3)))
@@ -941,13 +965,15 @@ f_step(Eng e, int t, array<float> q1, array<float> q2, array<float> q3, array<fl
                     nI := gi
                     nS := gs
             if nT != 0
-                if array.get(e.sTy, k) == 0 or nI != array.get(e.sRi, k)
-                    e.seq := e.seq + 1
-                    array.set(e.sSq, k, e.seq)
-                    array.set(e.sTm, k, t)
+                bool isNew = array.get(e.sTy, k) == 0 or nI != array.get(e.sRi, k)
                 array.set(e.sRi, k, nI)
                 array.set(e.sTy, k, nT)
                 array.set(e.sLb, k, nS)
+                // חדשה, או קיימת שנלקחה שוב בנר הזה — רגע הרישום מתעדכן
+                if isNew or f_renew(e, k, nS, t)
+                    e.seq := e.seq + 1
+                    array.set(e.sSq, k, e.seq)
+                    array.set(e.sTm, k, t)
             else
                 array.set(e.sTy, k, 0)
                 array.set(e.sRi, k, -1)
