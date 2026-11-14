@@ -1206,23 +1206,24 @@ tL2 = not useL2 ? "12M" : cL2 == 1 ? "1" : cL2 == 2 ? "5" : cL2 == 3 ? "15" : cL
 tL3 = not useL3 ? "12M" : cL3 == 1 ? "1" : cL3 == 2 ? "5" : cL3 == 3 ? "15" : cL3 == 4 ? "60" : cL3 == 5 ? "240" : cL3 == 6 ? "D" : "W"
 tL4 = not useL4 ? "12M" : cL4 == 1 ? "1" : cL4 == 2 ? "5" : cL4 == 3 ? "15" : cL4 == 4 ? "60" : cL4 == 5 ? "240" : cL4 == 6 ? "D" : "W"
 
-// מעל הגרף: הנר האחרון שנסגר, עם היסט בתוך הבקשה — בלי ריפיינט
-[u1t, u1o1, u1h1, u1l1, u1c1] = request.security(s1, tU1, [time[1], open[1], high[1], low[1], close[1]], lookahead = lkh)
-[u1o2, u1h2, u1l2, u1c2]      = request.security(s2, tU1, [open[1], high[1], low[1], close[1]], lookahead = lkh)
-[u1o3, u1h3, u1l3, u1c3]      = request.security(s3, tU1, [open[1], high[1], low[1], close[1]], lookahead = lkh)
-[u1o4, u1h4, u1l4, u1c4]      = request.security(s4, tU1, [open[1], high[1], low[1], close[1]], lookahead = lkh)
-[u2t, u2o1, u2h1, u2l1, u2c1] = request.security(s1, tU2, [time[1], open[1], high[1], low[1], close[1]], lookahead = lkh)
-[u2o2, u2h2, u2l2, u2c2]      = request.security(s2, tU2, [open[1], high[1], low[1], close[1]], lookahead = lkh)
-[u2o3, u2h3, u2l3, u2c3]      = request.security(s3, tU2, [open[1], high[1], low[1], close[1]], lookahead = lkh)
-[u2o4, u2h4, u2l4, u2c4]      = request.security(s4, tU2, [open[1], high[1], low[1], close[1]], lookahead = lkh)
-[u3t, u3o1, u3h1, u3l1, u3c1] = request.security(s1, tU3, [time[1], open[1], high[1], low[1], close[1]], lookahead = lkh)
-[u3o2, u3h2, u3l2, u3c2]      = request.security(s2, tU3, [open[1], high[1], low[1], close[1]], lookahead = lkh)
-[u3o3, u3h3, u3l3, u3c3]      = request.security(s3, tU3, [open[1], high[1], low[1], close[1]], lookahead = lkh)
-[u3o4, u3h4, u3l4, u3c4]      = request.security(s4, tU3, [open[1], high[1], low[1], close[1]], lookahead = lkh)
-[u4t, u4o1, u4h1, u4l1, u4c1] = request.security(s1, tU4, [time[1], open[1], high[1], low[1], close[1]], lookahead = lkh)
-[u4o2, u4h2, u4l2, u4c2]      = request.security(s2, tU4, [open[1], high[1], low[1], close[1]], lookahead = lkh)
-[u4o3, u4h3, u4l3, u4c3]      = request.security(s3, tU4, [open[1], high[1], low[1], close[1]], lookahead = lkh)
-[u4o4, u4h4, u4l4, u4c4]      = request.security(s4, tU4, [open[1], high[1], low[1], close[1]], lookahead = lkh)
+// מעל הגרף: הנר האחרון שנסגר — [1] עם lookahead_on. עם lookahead_off ה-[1] בהיסטוריה
+// מחזיר את הנר שלפני האחרון שנסגר, והמסגרות שמעל הגרף פיגרו בנר אחד.
+[u1t, u1o1, u1h1, u1l1, u1c1] = request.security(s1, tU1, [time[1], open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_on)
+[u1o2, u1h2, u1l2, u1c2]      = request.security(s2, tU1, [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_on)
+[u1o3, u1h3, u1l3, u1c3]      = request.security(s3, tU1, [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_on)
+[u1o4, u1h4, u1l4, u1c4]      = request.security(s4, tU1, [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_on)
+[u2t, u2o1, u2h1, u2l1, u2c1] = request.security(s1, tU2, [time[1], open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_on)
+[u2o2, u2h2, u2l2, u2c2]      = request.security(s2, tU2, [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_on)
+[u2o3, u2h3, u2l3, u2c3]      = request.security(s3, tU2, [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_on)
+[u2o4, u2h4, u2l4, u2c4]      = request.security(s4, tU2, [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_on)
+[u3t, u3o1, u3h1, u3l1, u3c1] = request.security(s1, tU3, [time[1], open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_on)
+[u3o2, u3h2, u3l2, u3c2]      = request.security(s2, tU3, [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_on)
+[u3o3, u3h3, u3l3, u3c3]      = request.security(s3, tU3, [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_on)
+[u3o4, u3h4, u3l4, u3c4]      = request.security(s4, tU3, [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_on)
+[u4t, u4o1, u4h1, u4l1, u4c1] = request.security(s1, tU4, [time[1], open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_on)
+[u4o2, u4h2, u4l2, u4c2]      = request.security(s2, tU4, [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_on)
+[u4o3, u4h3, u4l3, u4c3]      = request.security(s3, tU4, [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_on)
+[u4o4, u4h4, u4l4, u4c4]      = request.security(s4, tU4, [open[1], high[1], low[1], close[1]], lookahead = barmerge.lookahead_on)
 
 // מתחת לגרף: כל תת-הנרות של נר הגרף, עם זמן לכל נכס כדי לזווג לפי זמן
 [w1t1, w1o1, w1h1, w1l1, w1c1] = request.security_lower_tf(s1, tL1, [time, open, high, low, close], ignore_invalid_timeframe = true)
