@@ -142,7 +142,9 @@ tfSec   = timeframe.in_seconds()
 isD1    = timeframe.isdaily   and timeframe.multiplier == 1
 isW1    = timeframe.isweekly  and timeframe.multiplier == 1
 isM1    = timeframe.ismonthly and timeframe.multiplier == 1
-tfClass = isD1 ? 6 : isW1 ? 7 : isM1 ? 8 : tfSec <= 60 ? 1 : tfSec <= 300 ? 2 : tfSec <= 900 ? 3 : tfSec <= 3600 ? 4 : tfSec <= 14400 ? 5 : 0
+// רק מסגרות סטנדרטיות. מסגרת אחרת (3m, 30m, 2H…) היא 0 — לא מחושב כלום, כדי
+// שלא יוצגו נרות של 3 דקות תחת השם "5m".
+tfClass = isD1 ? 6 : isW1 ? 7 : isM1 ? 8 : tfSec == 60 ? 1 : tfSec == 300 ? 2 : tfSec == 900 ? 3 : tfSec == 3600 ? 4 : tfSec == 14400 ? 5 : 0
 
 f_clsName(int c) => c == 8 ? "Mo" : c == 7 ? "1W" : c == 6 ? "1D" : c == 5 ? "4H" : c == 4 ? "1H" : c == 3 ? "15m" : c == 2 ? "5m" : c == 1 ? "1m" : "?"
 f_cycName(int c) => c == 1 ? "22.5m" : c == 2 ? "90m" : c == 3 ? "Session" : c == 4 ? "Day" : c == 5 ? "Week" : c == 6 ? "QQ" : c == 7 ? "Qtr" : "Year"
@@ -432,8 +434,11 @@ method track(Gap g, int rf, float hA, float lA, float kA, float hB, float lB, fl
 // F3: הקצה הרחוק. בכל ביקור, לא רק בזה שבו השבירה נרשמה.
 method caught(Gap g) =>
     bool c = false
-    if g.fDeg > 0 and g.fLagI >= 0
-        float d = g.depthOf(g.fLagI)
+    // המפגר הנוכחי = הרדוד מבין אלה שיכולים להיות מפגרים. כל עוד אחד מהם לא הגיע,
+    // השבירה עדיין קיימת — גם אם המפגר המקורי כבר נכנס.
+    int  li = g.lagIdx()
+    if g.fDeg > 0 and li >= 0
+        float d = g.depthOf(li)
         c := not na(d) and (g.fDeg == 3 ? d >= 1.0 : g.fDeg == 2 ? d >= 0.5 : d > 0.0)
     c
 
@@ -1020,7 +1025,10 @@ f_step(Eng e, int t, array<float> q1, array<float> q2, array<float> q3, array<fl
                     bool bear = nHi >= nLo
                     int  ix   = bear ? 10 : 11
                     e.seq := e.seq + 1
-                    array.unshift(e.pT, PBrk.new(dir = bear ? -1 : 1, weak = divW, nq = array.get(q1, ix), es = array.get(q2, ix), ym = array.get(q3, ix), cont = lf, born = tMid, inQ1 = q1Mid, pair = false, seq = e.seq, regT = t, mkY = array.get(cA == 1 ? q2 : cA == 2 ? q3 : cA == 3 ? q4 : q1, ix), own = cA >= 0 ? array.get(cA == 1 ? q2 : cA == 2 ? q3 : cA == 3 ? q4 : q1, ix) : na))
+                    float ownT = cA >= 0 ? array.get(qc, ix) : na
+                    if not na(ownT) and f_taken(ownT, bear ? -1 : 1, f_tkH(qc), f_tkL(qc))
+                        ownT := na
+                    array.unshift(e.pT, PBrk.new(dir = bear ? -1 : 1, weak = divW, nq = array.get(q1, ix), es = array.get(q2, ix), ym = array.get(q3, ix), cont = lf, born = tMid, inQ1 = q1Mid, pair = false, seq = e.seq, regT = t, mkY = array.get(qc, ix), own = ownT))
                     while array.size(e.pT) > pspDepth
                         array.pop(e.pT)
             if use4
@@ -1032,7 +1040,10 @@ f_step(Eng e, int t, array<float> q1, array<float> q2, array<float> q3, array<fl
                         bool pBear = pHi >= pLo
                         int  px    = pBear ? 10 : 11
                         e.seq := e.seq + 1
-                        array.unshift(e.pP, PBrk.new(dir = pBear ? -1 : 1, nq = array.get(q3, px), es = array.get(q4, px), cont = lf, born = tMid, inQ1 = q1Mid, pair = true, seq = e.seq, regT = t, mkY = array.get(cA == 1 ? q2 : cA == 2 ? q3 : cA == 3 ? q4 : q1, px), own = cA >= 0 ? array.get(cA == 1 ? q2 : cA == 2 ? q3 : cA == 3 ? q4 : q1, px) : na))
+                        float ownP = cA >= 0 ? array.get(qc, px) : na
+                        if not na(ownP) and f_taken(ownP, pBear ? -1 : 1, f_tkH(qc), f_tkL(qc))
+                            ownP := na
+                        array.unshift(e.pP, PBrk.new(dir = pBear ? -1 : 1, nq = array.get(q3, px), es = array.get(q4, px), cont = lf, born = tMid, inQ1 = q1Mid, pair = true, seq = e.seq, regT = t, mkY = array.get(qc, px), own = ownP))
                         while array.size(e.pP) > pspDepth
                             array.pop(e.pP)
 
@@ -1762,6 +1773,8 @@ f_whenTx(Cand c, int cls) =>
 
 if barstate.islast
     table.clear(cTbl, 0, 0, 13, 8 + cornerLift)
+    if cornerOn and tfClass == 0
+        table.cell(cTbl, 0, rowOff, "QT·U — מסגרת לא נתמכת (1m · 5m · 15m · 1H · 4H · D · W · M)", text_color = color.gray, text_size = cornerSz, bgcolor = bgClr)
     if cornerOn and tfClass != 0
         int row = 0
         for cls = 8 to 1
@@ -1818,18 +1831,23 @@ if barstate.islast
 // להיות סווינג (הנר החי עוד לא עבר את הגבוה/הנמוך שלו בנכס שמשתתף).
 // ═══════════════════════════════════════════════════════════════════
 
-f_dirC(float o, float c) => c > o ? 1 : c < o ? -1 : 0
+// na = אין נתון — לא כיוון. בלי זה נכס בלי נר נחשב דוג'י ויוצר PCP מדומה.
+f_dirC(float o, float c) =>
+    int r = na
+    if not na(o) and not na(c)
+        r := c > o ? 1 : c < o ? -1 : 0
+    r
 
 dN0 = f_dirC(c1O, c1C)
 dE0 = f_dirC(c2O, c2C)
 dY0 = f_dirC(c3O, c3C)
 dR0 = f_dirC(c4O, c4C)
 wkOk   = ymWeak and tfClass >= 6
-pDivP  = dN0 != dE0
-pDivY  = dY0 > 0 and (dE0 < 0 or dN0 < 0)
-pDivW  = wkOk and dY0 < 0 and (dE0 > 0 or dN0 > 0) and not pDivP and not pDivY
+pDivP  = not na(dN0) and not na(dE0) and dN0 != dE0
+pDivY  = not na(dY0) and dY0 > 0 and (dE0 < 0 or dN0 < 0)
+pDivW  = wkOk and not na(dY0) and dY0 < 0 and (dE0 > 0 or dN0 > 0) and not pDivP and not pDivY
 isPcp  = pDivP or pDivY or pDivW
-isPcpP = use4 and dY0 != dR0
+isPcpP = use4 and not na(dY0) and not na(dR0) and dY0 != dR0
 
 f_canSwC(float h, float l) => (h[1] > h[2] and h < h[1]) or (l[1] < l[2] and l > l[1])
 
