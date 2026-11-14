@@ -1517,6 +1517,7 @@ type Cand
     bool   inQ1 = false
     string qTop = ""        // SSMT: שורת ה-QS לתווית
     int    hs   = 0         // SSMT: 2 = HSSMT · 1 = SSMT
+    int    shT  = 0         // השעה שמוצגת בצד: PSP — נר הסווינג; השאר — נר השבירה
 
 // PSP שנלקח על נכס הגרף (גם בשבירת זוג): הקצה של נר הסווינג כבר נחצה בסגירה,
 // או שהנר שעוד לא נסגר עבר אותו
@@ -1562,7 +1563,7 @@ f_cands(Eng e) =>
                         PBrk b = array.get(st, i)
                         if not found and b.dir == pdir and not f_pspGone(e, b)
                             found := true
-                            array.push(out, Cand.new(typ = 2, dir = pdir, pair = s == 1, seq = b.seq, t = b.regT, tx = "P", ix = i, inQ1 = b.inQ1))
+                            array.push(out, Cand.new(typ = 2, dir = pdir, pair = s == 1, seq = b.seq, t = b.regT, tx = "P", ix = i, inQ1 = b.inQ1, shT = b.born))
     out
 
 // HSSMT חזקה מ-SSMT: SSMT לא קובעת כיוון כשיש HSSMT חיה בכיוון ההפוך באותה
@@ -1754,8 +1755,9 @@ f_pre(Cand c, Eng e)   => f_fresh(c, e) ? "⚡" : ""
 f_bg(Cand c, Eng e)    => f_fresh(c, e) ? color.new(f_colC(c), 80) : bgClr
 
 f_whenTx(Cand c, int cls) =>
-    [wr, wl, wb, wq, wn] = f_cyc(cls, c.t)
-    (wn > 0 ? " Q" + str.tostring(wn) : "") + " " + str.format_time(c.t, cls <= 5 ? "HH:mm" : "dd/MM", TZ)
+    int tt = c.shT > 0 ? c.shT : c.t
+    [wr, wl, wb, wq, wn] = f_cyc(cls, tt)
+    (wn > 0 ? " Q" + str.tostring(wn) : "") + " " + str.format_time(tt, cls <= 5 ? "HH:mm" : "dd/MM", TZ)
 
 if barstate.islast
     table.clear(cTbl, 0, 0, 13, 8 + cornerLift)
