@@ -1777,33 +1777,26 @@ if barstate.islast
                             Cand lc = array.get(cs, li)
                             table.cell(cTbl, 1, row + rowOff, f_pre(lc, e) + f_itemTx(lc) + (cornerWhen ? f_whenTx(lc, cls) : "") + " ", text_color = f_colC(lc), text_size = cornerSz, bgcolor = f_bg(lc, e))
                             col := 2
-                            // סוג אחד = פריט אחד: לכל סוג אחר — הפעילה האחרונה שלו,
-                            // ואם אין לו פעילה — הממתינה האחרונה (✗). סדר: F · H/S · P.
-                            // ולסוג של האחרונה — הממתינה האחרונה שלו בכיוון ההפוך (✗), אם יש
-                            for ty = 0 to 2
-                                if true
-                                    int bA = -1
-                                    int bI = -1
-                                    int sA = -1
-                                    int sI = -1
-                                    for i = 0 to array.size(cs) - 1
-                                        Cand c = array.get(cs, i)
-                                        // ב-Pine ה-or לא עוצר באמצע — לכן שומרים את ה-seq ולא קוראים array.get(-1)
-                                        if c.typ == ty
-                                            if c.dir == lc.dir
-                                                if c.seq > sA
-                                                    sA := c.seq
-                                                    bA := i
-                                            else
-                                                if c.seq > sI
-                                                    sI := c.seq
-                                                    bI := i
-                                    int  pick = ty == lc.typ ? bI : bA >= 0 ? bA : bI
-                                    if pick >= 0
-                                        Cand c   = array.get(cs, pick)
-                                        bool act = ty != lc.typ and bA >= 0
-                                        table.cell(cTbl, col, row + rowOff, (act ? f_pre(c, e) : "✗") + f_itemTx(c) + " ", text_color = act ? f_colC(c) : color.new(f_colC(c), offFade), text_size = cornerSz, bgcolor = act ? f_bg(c, e) : bgClr)
-                                        col += 1
+                            // קודם הפעילות: לכל סוג אחר — הפעילה האחרונה שלו.
+                            // אחר כך הממתינות (✗): לכל סוג — הממתינה האחרונה בכיוון ההפוך,
+                            // גם כשיש לאותו סוג פעילה. כך רואים תמיד שבירה נגדית חיה.
+                            // סדר בתוך כל קבוצה: F · H/S · P.
+                            for pass = 0 to 1
+                                for ty = 0 to 2
+                                    if pass == 1 or ty != lc.typ
+                                        int bP = -1
+                                        int sP = -1
+                                        for i = 0 to array.size(cs) - 1
+                                            Cand c = array.get(cs, i)
+                                            bool wantAct = pass == 0
+                                            if c.typ == ty and (c.dir == lc.dir) == wantAct and c.seq > sP
+                                                sP := c.seq
+                                                bP := i
+                                        if bP >= 0
+                                            Cand c   = array.get(cs, bP)
+                                            bool act = pass == 0
+                                            table.cell(cTbl, col, row + rowOff, (act ? f_pre(c, e) : "✗") + f_itemTx(c) + " ", text_color = act ? f_colC(c) : color.new(f_colC(c), offFade), text_size = cornerSz, bgcolor = act ? f_bg(c, e) : bgClr)
+                                            col += 1
                         string pTm = str.format_time(e.pndT, cls <= 5 ? "HH:mm" : "dd/MM", TZ)
                         if pdT
                             table.cell(cTbl, col, row + rowOff, "◦PCP " + pTm + " ", text_color = colPend, text_size = cornerSz, bgcolor = bgClr)
