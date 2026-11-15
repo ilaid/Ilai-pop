@@ -90,6 +90,7 @@ cornerLift = input.int(2, "הרם את השורות (שורות ריקות)", mi
 
 grpMtf = "מסגרות זמן"
 lowerLevels = input.int(4, "כמה מדרגות מתחת לגרף", minval = 0, maxval = 4, group = grpMtf, tooltip = "אם מופיעה שגיאת Memory limits — להוריד ל-3 או 2.")
+heavyLow    = input.bool(false, "כלול גם מסגרות כבדות מתחת לגרף", group = grpMtf, tooltip = "כבוי (מומלץ): מסגרת מתחת לגרף נכנסת רק אם בנר אחד של הגרף יש עד 16 נרות שלה — למשל בגרף 15m: 5m ו-1m · בגרף 1H: 15m ו-5m · בגרף 4H: 1H ו-15m.\nדלוק: גם 1m בגרף שעתי, 5m בגרף 4H וכו'. כל נר כזה = עשרות תת-נרות × 4 נכסים, ובהיסטוריה ארוכה או ב-Replay זה חורג ממגבלת הזיכרון של TradingView (Memory limits exceeded).")
 
 q1Col  = q1Mode == "בצבע נפרד"
 q1Drop = q1Mode == "לא קיים"
@@ -1193,10 +1194,14 @@ useU1 = tfClass != 0 and tfClass + 1 <= hiCap
 useU2 = tfClass != 0 and tfClass + 2 <= hiCap
 useU3 = tfClass != 0 and tfClass + 3 <= hiCap
 useU4 = tfClass != 0 and tfClass + 4 <= hiCap
-useL1 = tfClass != 0 and lowerLevels >= 1 and tfClass - 1 >= 1
-useL2 = tfClass != 0 and lowerLevels >= 2 and tfClass - 2 >= 1
-useL3 = tfClass != 0 and lowerLevels >= 3 and tfClass - 3 >= 1
-useL4 = tfClass != 0 and lowerLevels >= 4 and tfClass - 4 >= 1
+// מסגרת מתחת לגרף — רק כשבנר אחד של הגרף יש עד 16 נרות שלה (אלא אם ביקשו גם כבדות):
+// 1m מגרף שעתי = 60 תת-נרות לכל נר × 4 נכסים, וזה מה שחורג מהזיכרון.
+f_clsSec(int c) => c == 1 ? 60 : c == 2 ? 300 : c == 3 ? 900 : c == 4 ? 3600 : c == 5 ? 14400 : c == 6 ? 86400 : 604800
+f_lowOk(int c) => heavyLow or tfSec / f_clsSec(c) <= 16
+useL1 = tfClass != 0 and lowerLevels >= 1 and tfClass - 1 >= 1 and f_lowOk(tfClass - 1)
+useL2 = tfClass != 0 and lowerLevels >= 2 and tfClass - 2 >= 1 and f_lowOk(tfClass - 2)
+useL3 = tfClass != 0 and lowerLevels >= 3 and tfClass - 3 >= 1 and f_lowOk(tfClass - 3)
+useL4 = tfClass != 0 and lowerLevels >= 4 and tfClass - 4 >= 1 and f_lowOk(tfClass - 4)
 
 cU1 = math.min(tfClass + 1, 7)
 cU2 = math.min(tfClass + 2, 7)
