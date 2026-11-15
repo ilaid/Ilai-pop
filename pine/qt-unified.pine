@@ -1196,21 +1196,25 @@ useU3 = tfClass != 0 and tfClass + 3 <= hiCap
 useU4 = tfClass != 0 and tfClass + 4 <= hiCap
 // מסגרת מתחת לגרף — רק כשבנר אחד של הגרף יש עד 16 נרות שלה (אלא אם ביקשו גם כבדות):
 // 1m מגרף שעתי = 60 תת-נרות לכל נר × 4 נכסים, וזה מה שחורג מהזיכרון.
-f_clsSec(int c) => c == 1 ? 60 : c == 2 ? 300 : c == 3 ? 900 : c == 4 ? 3600 : c == 5 ? 14400 : c == 6 ? 86400 : 604800
-f_lowOk(int c) => heavyLow or tfSec / f_clsSec(c) <= 16
-useL1 = tfClass != 0 and lowerLevels >= 1 and tfClass - 1 >= 1 and f_lowOk(tfClass - 1)
-useL2 = tfClass != 0 and lowerLevels >= 2 and tfClass - 2 >= 1 and f_lowOk(tfClass - 2)
-useL3 = tfClass != 0 and lowerLevels >= 3 and tfClass - 3 >= 1 and f_lowOk(tfClass - 3)
-useL4 = tfClass != 0 and lowerLevels >= 4 and tfClass - 4 >= 1 and f_lowOk(tfClass - 4)
+// בלי פונקציה בכוונה: מחרוזת המסגרת לבקשה חייבת להיות simple, ופונקציה של
+// המשתמש מחזירה series — זה הפיל את כל הבקשות.
+cL1 = math.max(tfClass - 1, 1)
+cL2 = math.max(tfClass - 2, 1)
+cL3 = math.max(tfClass - 3, 1)
+cL4 = math.max(tfClass - 4, 1)
+sL1 = cL1 == 1 ? 60 : cL1 == 2 ? 300 : cL1 == 3 ? 900 : cL1 == 4 ? 3600 : cL1 == 5 ? 14400 : cL1 == 6 ? 86400 : 604800
+sL2 = cL2 == 1 ? 60 : cL2 == 2 ? 300 : cL2 == 3 ? 900 : cL2 == 4 ? 3600 : cL2 == 5 ? 14400 : cL2 == 6 ? 86400 : 604800
+sL3 = cL3 == 1 ? 60 : cL3 == 2 ? 300 : cL3 == 3 ? 900 : cL3 == 4 ? 3600 : cL3 == 5 ? 14400 : cL3 == 6 ? 86400 : 604800
+sL4 = cL4 == 1 ? 60 : cL4 == 2 ? 300 : cL4 == 3 ? 900 : cL4 == 4 ? 3600 : cL4 == 5 ? 14400 : cL4 == 6 ? 86400 : 604800
+useL1 = tfClass != 0 and lowerLevels >= 1 and tfClass - 1 >= 1 and (heavyLow or tfSec <= 16 * sL1)
+useL2 = tfClass != 0 and lowerLevels >= 2 and tfClass - 2 >= 1 and (heavyLow or tfSec <= 16 * sL2)
+useL3 = tfClass != 0 and lowerLevels >= 3 and tfClass - 3 >= 1 and (heavyLow or tfSec <= 16 * sL3)
+useL4 = tfClass != 0 and lowerLevels >= 4 and tfClass - 4 >= 1 and (heavyLow or tfSec <= 16 * sL4)
 
 cU1 = math.min(tfClass + 1, 7)
 cU2 = math.min(tfClass + 2, 7)
 cU3 = math.min(tfClass + 3, 7)
 cU4 = math.min(tfClass + 4, 7)
-cL1 = math.max(tfClass - 1, 1)
-cL2 = math.max(tfClass - 2, 1)
-cL3 = math.max(tfClass - 3, 1)
-cL4 = math.max(tfClass - 4, 1)
 
 // מדרגה כבויה: למעלה — מסגרת הגרף (כבר טעונה), למטה — "12M" (לא חוקי, נזרק)
 tU1 = not useU1 ? timeframe.period : cU1 == 2 ? "5" : cU1 == 3 ? "15" : cU1 == 4 ? "60" : cU1 == 5 ? "240" : cU1 == 6 ? "D" : "W"
