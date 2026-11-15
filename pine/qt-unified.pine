@@ -1824,13 +1824,14 @@ if barstate.islast
                                 for ty = 0 to 2
                                     if pass == 1 or ty != lc.typ
                                         int bP = -1
-                                        int sP = -1
                                         for i = 0 to array.size(cs) - 1
                                             Cand c = array.get(cs, i)
                                             bool wantAct = pass == 0
-                                            if c.typ == ty and (c.dir == lc.dir) == wantAct and c.seq > sP
-                                                sP := c.seq
-                                                bP := i
+                                            if c.typ == ty and (c.dir == lc.dir) == wantAct
+                                                if bP < 0
+                                                    bP := i
+                                                else if f_newer(c, array.get(cs, bP))
+                                                    bP := i
                                         if bP >= 0
                                             Cand c   = array.get(cs, bP)
                                             bool act = pass == 0
