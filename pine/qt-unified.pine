@@ -1599,41 +1599,54 @@ f_elig(array<Cand> cs, Cand c) =>
                 ok := false
     ok
 
+// רגע השבירה: PSP — נר הסווינג (הנר שהפך ל-PCP), גם שהוא מאושר רק בנר הבא.
+// Fill ו-SSMT — הנר שעשה את השבירה.
+f_ev(Cand c) => c.shT > 0 ? c.shT : c.t
+
+// a חדשה מ-b: לפי רגע השבירה, ובאותו רגע — לפי סדר הרישום
+f_newer(Cand a, Cand b) => f_ev(a) > f_ev(b) or (f_ev(a) == f_ev(b) and a.seq > b.seq)
+
 // האחרונה שקובעת את הכיוון (מבין אלה שיכולות לקבוע — ראה f_elig).
-// שתי שבירות מנוגדות שנרשמו באותו נר — אף אחת לא קובעת: הולכים עם הכיוון
-// שהיה לפני הנר הזה (השבירה החיה האחרונה שלפניו). אם אין שום שבירה חיה
-// לפניו — האחרונה שנרשמה. מחזיר את השבירה הכי חדשה בכיוון שנקבע.
+// שתי שבירות מנוגדות באותו נר — אף אחת לא קובעת: הולכים עם הכיוון שהיה לפני
+// הנר הזה (השבירה החיה האחרונה שלפניו). אם אין שום שבירה חיה לפניו — האחרונה
+// שנרשמה. מחזיר את השבירה הכי חדשה בכיוון שנקבע.
+// (בלי or על array.get — ב-Pine ה-or לא עוצר באמצע.)
 f_latest(array<Cand> cs) =>
     int li = -1
-    int ls = -1
     int n  = array.size(cs)
     if n > 0
         for i = 0 to n - 1
             Cand c = array.get(cs, i)
-            if c.seq > ls and f_elig(cs, c)
-                ls := c.seq
-                li := i
+            if f_elig(cs, c)
+                if li < 0
+                    li := i
+                else if f_newer(c, array.get(cs, li))
+                    li := i
     if li >= 0
-        int  lt  = array.get(cs, li).t
+        int  lt  = f_ev(array.get(cs, li))
         int  ld  = array.get(cs, li).dir
         bool tie = false
         int  pi  = -1
-        int  ps  = -1
         for i = 0 to n - 1
             Cand c = array.get(cs, i)
             if f_elig(cs, c)
-                if c.t == lt and c.dir != ld
+                if f_ev(c) == lt and c.dir != ld
                     tie := true
-                if c.t < lt and c.seq > ps
-                    ps := c.seq
-                    pi := i
+                if f_ev(c) < lt
+                    if pi < 0
+                        pi := i
+                    else if f_newer(c, array.get(cs, pi))
+                        pi := i
         int pd = tie and pi >= 0 ? array.get(cs, pi).dir : ld
-        int bs = -1
+        int bi = -1
         for i = 0 to n - 1
             Cand c = array.get(cs, i)
-            if c.dir == pd and c.seq > bs
-                bs := c.seq
-                li := i
+            if c.dir == pd
+                if bi < 0
+                    bi := i
+                else if f_newer(c, array.get(cs, bi))
+                    bi := i
+        li := bi
     li
 
 f_colC(Cand c) => c.typ == 2 and c.inQ1 and q1Col ? colQ1 : c.pair ? colPair : c.dir == 1 ? colBull : colBear
