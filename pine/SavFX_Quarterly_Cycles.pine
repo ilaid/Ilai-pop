@@ -573,6 +573,42 @@ plot(0, "", display = display.none, editable = false)
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
+//  QUARTER DIVIDERS
+//
+//  A vertical line on the candles wherever the chart's own container turns over:
+//  the 90 min on a 5 minute chart, the 22.5 min on a 1 minute one, which is the
+//  sub cycle each of those charts is read against. They are the two charts this
+//  is wanted on, so no other timeframe draws one.
+//
+//  The line is placed half a bar before the opening candle of the new block,
+//  like every cell edge in the pane below, so it falls in the gap between two
+//  candles rather than through the middle of one, and it stands on exactly the
+//  same instant as the row boundary underneath it.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+g_vl = "Quarter Dividers"
+vlOn      = input.bool(true, "Enable", group = g_vl, tooltip = "A vertical line at every turn of the block the chart is read against: each 90 min on the 5 minute chart, each 22.5 min on the 1 minute chart. Nothing is drawn on any other timeframe.")
+vlCol     = input.color(color.new(#787b86, 35), "Colour", inline = "vl", group = g_vl)
+vlStyleIn = input.string("Dotted", "Line style", options = ["Solid", "Dotted", "Dashed"], inline = "vl", group = g_vl)
+vlWidth   = input.int(1, "Width", minval = 1, maxval = 5, inline = "vl", group = g_vl)
+vlKeep    = input.int(50, "Lines Kept", minval = 2, maxval = 200, group = g_vl, tooltip = "How many of them stay on the chart. TradingView allows 500 lines in total and the true opens and the Devil marks want their share, so this is where to give some back if they ever run out.")
+
+vlStyle = vlStyleIn == "Solid" ? line.style_solid : vlStyleIn == "Dotted" ? line.style_dotted : line.style_dashed
+
+// the block this chart is read against, and nothing on any other timeframe
+vlTf = tfs == 300 or tfs == 60
+vlAt = tfs == 300 ? l90 : l225
+
+var line[] vls = array.new<line>()
+
+if vlOn and vlTf and vlAt != vlAt[1]
+    // two points on one instant, extended both ways: a line up the whole pane
+    array.push(vls, line.new(vlAt - halfBar, close, vlAt - halfBar, close + syminfo.mintick, xloc = xloc.bar_time, extend = line.extend_both, color = vlCol, style = vlStyle, width = vlWidth, force_overlay = true))
+    while array.size(vls) > vlKeep
+        line.delete(array.shift(vls))
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
 //  TRUE OPENS
 //
 //  Drawn on the candles with force_overlay, while the rows above stay in this
