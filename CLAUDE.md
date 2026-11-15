@@ -64,11 +64,14 @@ comes in, so no chart stacks more than four rows.
 - The four year cycle is 2023, 2024, 2025, 2026, written `(year + 1) % 4 + 1`.
 - A week belongs to the month holding its **Tuesday**; a week whose Tuesday and
   Thursday fall in different months is dead and carries no number.
-- The quarter split divides the quarter's three months by **market days**
-  (Mon-Fri), not calendar days. Each of the first three cells holds exactly
-  `floor(market days / 4)` of them and the leftover stays in the last cell, so
-  Q4 2026 (66 market days) reads 16, 16, 16, 18 and its third cell opens on 16
-  November. Never spread the remainder between the cells.
+- The quarter split divides the quarter's **own days** by four — 92 days is 23
+  to a cell — and a cut that lands on a weekend steps to the nearest trading
+  day: a Saturday back to the Friday, a Sunday on to the Monday. Nothing about
+  the length is fixed; it comes out 21 to 24 days and 15 to 17 candles. Q3 2026
+  is 1/7, 24/7, 17/8, 8/9 and Q4 2026 is 1/10, 23/10, 16/11, 9/12. Counting
+  market days instead and dividing those by four, flat or in proportion, pulls
+  the middle cuts a day or two off: it is the days of the quarter that are
+  divided, not its candles.
 - Friday, a dead week and the weekend carry no number: colourless cell, and a
   mark holds the link's place in the chain so every row reads the same levels
   in the same order whatever the day.
