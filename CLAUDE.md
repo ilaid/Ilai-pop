@@ -69,9 +69,15 @@ comes in, so no chart stacks more than four rows.
 - Friday, a dead week and the weekend carry no number: colourless cell, and a
   mark holds the link's place in the chain so every row reads the same levels
   in the same order whatever the day.
-- Cell edges are measured off the open of the bar the cell starts on, in whole
-  days, then half a bar back, so an edge falls between two candles rather than
-  through the middle of one. Never off a calendar midnight.
+- Cell edges sit on real bars, never on a computed calendar time. A cell opens
+  half a bar before its own first candle, and `cell()` closes the cell before it
+  at that same coordinate, so two neighbours share one edge. A computed edge can
+  land in a hole in the data — 1 January 2027 is a Friday and a holiday, so the
+  quarter's first candle is Monday the 4th — and TradingView places a time
+  inside a gap by the average bar spacing, which drifts it on to candles that
+  belong to the cell before. The cell still running keeps its computed end, so
+  the row reaches to the right like the one below it, until its successor opens
+  and takes the edge over.
 
 ### Branch
 
