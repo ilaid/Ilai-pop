@@ -65,7 +65,10 @@ comes in, so no chart stacks more than four rows.
 - A week belongs to the month holding its **Tuesday**; a week whose Tuesday and
   Thursday fall in different months is dead and carries no number.
 - The quarter split divides the quarter's three months by **market days**
-  (Mon-Fri), not calendar days.
+  (Mon-Fri), not calendar days. Each of the first three cells holds exactly
+  `floor(market days / 4)` of them and the leftover stays in the last cell, so
+  Q4 2026 (66 market days) reads 16, 16, 16, 18 and its third cell opens on 16
+  November. Never spread the remainder between the cells.
 - Friday, a dead week and the weekend carry no number: colourless cell, and a
   mark holds the link's place in the chain so every row reads the same levels
   in the same order whatever the day.

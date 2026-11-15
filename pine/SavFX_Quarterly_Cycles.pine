@@ -30,9 +30,12 @@ indicator("Sav FX - Cycles, True Opens & Devil Marks", shorttitle="Sav FX", over
 //  days. Counting calendar days made the cells 14 to 17 bars wide, because a
 //  quarter holds 90 to 92 days but only 61 to 65 of them are opens: 1 January is
 //  not one. Counted in market days Q1 2026 is 64 of them and every cell holds
-//  16. The calendar month is three per quarter, not four, so it carries no
-//  number of its own and is only what the week is numbered inside. The split row
-//  is numbered Q1 to Q4 like the quarter above it.
+//  16. Where the count does not divide by four, the first three cells still hold
+//  a quarter of it rounded down and the leftover days stay in the last cell: Q4
+//  2026 is 66 market days and reads 16, 16, 16, 18, so its third cell opens on
+//  16 November. The calendar month is three per quarter, not four, so it carries
+//  no number of its own and is only what the week is numbered inside. The split
+//  row is numbered Q1 to Q4 like the quarter above it.
 //
 //  Cell edges sit on real bars, never on a computed calendar time. A cell opens
 //  half a bar before its own first candle, and it is closed where the next cell
@@ -115,7 +118,7 @@ shiftMs = int(shiftH * 3600000)
 g_cyc = "Time Cycles"
 showCyc4   = input.bool(true, "Quadrennial Cycles", group = g_cyc, tooltip = "One cell per year: which year of the four year cycle it is. 2023 opens the cycle and 2026 closes it, so 2023 is year 1 and 2026 is year 4.")
 showQtYear = input.bool(true, "Yearly Cycles",      group = g_cyc, tooltip = "One cell per quarter: which quarter of the year it is. Q1 Jan-Mar, Q2 Apr-Jun, Q3 Jul-Sep, Q4 Oct-Dec. April opens Q2, which is the true open of the year.")
-showSplit  = input.bool(true, "Quarter Split",      group = g_cyc, tooltip = "One cell per quarter of a quarter, on the daily chart only. The quarter's three months are divided in four by market days rather than calendar days, so each cell holds about 16 of them: Q1 2026 is 64 market days and splits 16 16 16 16. A public holiday can leave a cell one bar short, since Pine is not handed the exchange's holiday calendar.")
+showSplit  = input.bool(true, "Quarter Split",      group = g_cyc, tooltip = "One cell per quarter of a quarter, on the daily chart only. The quarter's three months are divided in four by market days rather than calendar days, so each cell holds about 16 of them: Q1 2026 is 64 market days and splits 16 16 16 16. When the count does not divide by four the first three cells still hold a quarter of it rounded down, and the leftover days stay in the last cell: Q4 2026 is 66 and splits 16 16 16 18. A public holiday can leave a cell one bar short, since Pine is not handed the exchange's holiday calendar.")
 showWeekly = input.bool(true, "Weekly Cycles",      group = g_cyc, tooltip = "One cell per week: which week of the month it is. A week belongs to the month holding its Tuesday.")
 showDaily  = input.bool(true, "Daily Cycles",       group = g_cyc, tooltip = "One cell per trading day: which day of the week it is, Mon 1 .. Thu 4. Friday carries no number.")
 show6H     = input.bool(true, "6 Hour Cycles",      group = g_cyc, tooltip = "One cell per session: Asia 1, London 2, AM 3, PM 4.")
@@ -308,9 +311,15 @@ qW     = (qW0 + qFirst) % 7              // 0 .. 4
 qWd    = wdCount(qW0, qDays)             // market days in the whole quarter
 dW     = wdCount(qW0, dayInQ)            // market days before this bar
 
-v1 = int(math.floor(qWd     / 4))
-v2 = int(math.floor(qWd * 2 / 4))
-v3 = int(math.floor(qWd * 3 / 4))
+// Each of the first three cells holds exactly a quarter of the market days,
+// rounded down, and whatever does not divide stays in the last one. A quarter
+// of 66 market days is 16.5, so Q4 2026 reads 16, 16, 16 and then 18, and the
+// third cell opens on 16 November rather than the 17th. Spreading the leftover
+// days between the cells instead would move the middle boundaries about by a
+// day from one quarter to the next, which is what it did before.
+v1 = int(math.floor(qWd / 4))
+v2 = v1 * 2
+v3 = v1 * 3
 
 iSplit = en3 ? (dW < v1 ? 1 : dW < v2 ? 2 : dW < v3 ? 3 : 4) : na
 sDay1  = dW < v1 ? wdOffset(qFirst, qW, v1) : dW < v2 ? wdOffset(qFirst, qW, v2) : dW < v3 ? wdOffset(qFirst, qW, v3) : qDays
