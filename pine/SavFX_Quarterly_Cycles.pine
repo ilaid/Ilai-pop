@@ -584,6 +584,11 @@ plot(0, "", display = display.none, editable = false)
 //  like every cell edge in the pane below, so it falls in the gap between two
 //  candles rather than through the middle of one, and it stands on exactly the
 //  same instant as the row boundary underneath it.
+//
+//  Each line is also numbered with the quarter it opens - Q1 to Q4, the same
+//  number the row below gives that block - written on the line itself. Pine is
+//  not told where the chart is scrolled to, so the height is taken from the
+//  last hundred candles: the middle of their range, or their high or their low.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 g_vl = "Quarter Dividers"
@@ -592,20 +597,35 @@ vlCol     = input.color(color.new(#787b86, 35), "Colour", inline = "vl", group =
 vlStyleIn = input.string("Dotted", "Line style", options = ["Solid", "Dotted", "Dashed"], inline = "vl", group = g_vl)
 vlWidth   = input.int(1, "Width", minval = 1, maxval = 5, inline = "vl", group = g_vl)
 vlKeep    = input.int(50, "Lines Kept", minval = 2, maxval = 200, group = g_vl, tooltip = "How many of them stay on the chart. TradingView allows 500 lines in total and the true opens and the Devil marks want their share, so this is where to give some back if they ever run out.")
+vlNumOn   = input.bool(true, "Number each line", inline = "vn", group = g_vl)
+vlNumCol  = input.color(#787b86, "", inline = "vn", group = g_vl)
+vlNumPos  = input.string("Middle", "Height", options = ["Top", "Middle", "Bottom"], inline = "vn2", group = g_vl, tooltip = "Which quarter of its container the block opening on this line is: Q1 to Q4, the same number the row below gives it. Pine cannot see where the chart is scrolled to, so the height is read off the last hundred candles - the middle of their range, their high, or their low.")
+vlNumSize = input.string("small", "Size", options = ["tiny", "small", "normal", "large"], inline = "vn2", group = g_vl)
 
-vlStyle = vlStyleIn == "Solid" ? line.style_solid : vlStyleIn == "Dotted" ? line.style_dotted : line.style_dashed
+vlStyle   = vlStyleIn == "Solid" ? line.style_solid : vlStyleIn == "Dotted" ? line.style_dotted : line.style_dashed
+vlTxtSize = vlNumSize == "tiny" ? size.tiny : vlNumSize == "normal" ? size.normal : vlNumSize == "large" ? size.large : size.small
 
 // the block this chart is read against, and nothing on any other timeframe
-vlTf = tfs == 300 or tfs == 60
-vlAt = tfs == 300 ? l90 : l225
+vlTf  = tfs == 300 or tfs == 60
+vlAt  = tfs == 300 ? l90 : l225
+vlNum = tfs == 300 ? i90 : i225
 
-var line[] vls = array.new<line>()
+// where the number sits, off the last hundred candles
+vlHi = nz(ta.highest(high, 100), high)
+vlLo = nz(ta.lowest(low, 100), low)
+vlY  = vlNumPos == "Top" ? vlHi : vlNumPos == "Bottom" ? vlLo : (vlHi + vlLo) / 2
+
+var line[]  vls  = array.new<line>()
+var label[] vlbs = array.new<label>()
 
 if vlOn and vlTf and vlAt != vlAt[1]
     // two points on one instant, extended both ways: a line up the whole pane
     array.push(vls, line.new(vlAt - halfBar, close, vlAt - halfBar, close + syminfo.mintick, xloc = xloc.bar_time, extend = extend.both, color = vlCol, style = vlStyle, width = vlWidth, force_overlay = true))
+    // the number rides on the line itself: no bubble, just the text
+    array.push(vlbs, label.new(vlAt - halfBar, vlY, vlNumOn ? "Q" + str.tostring(vlNum) : "", xloc = xloc.bar_time, style = label.style_none, textcolor = vlNumCol, size = vlTxtSize, force_overlay = true))
     while array.size(vls) > vlKeep
         line.delete(array.shift(vls))
+        label.delete(array.shift(vlbs))
 
 
 // ═══════════════════════════════════════════════════════════════════════════════

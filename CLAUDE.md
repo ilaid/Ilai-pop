@@ -7,7 +7,8 @@ Two unrelated things live here:
   four parts: the Quarterly Theory cycle ladder as rows of boxes in its own
   pane, the True Opens as lines on the candles, the Quarter Dividers (a
   vertical line at each turn of the block the chart is read against, 90 min on
-  5m and 22.5 min on 1m, those two timeframes only), and the Devil Marks.
+  5m and 22.5 min on 1m, those two timeframes only, each carrying the Q1 to Q4
+  of the block it opens), and the Devil Marks.
   Everything but the ladder reaches the price chart with `force_overlay` while
   the script itself is `overlay = false`, which is the only way to have both at
   once.
