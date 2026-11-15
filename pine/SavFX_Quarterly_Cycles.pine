@@ -603,7 +603,7 @@ var line[] vls = array.new<line>()
 
 if vlOn and vlTf and vlAt != vlAt[1]
     // two points on one instant, extended both ways: a line up the whole pane
-    array.push(vls, line.new(vlAt - halfBar, close, vlAt - halfBar, close + syminfo.mintick, xloc = xloc.bar_time, extend = line.extend_both, color = vlCol, style = vlStyle, width = vlWidth, force_overlay = true))
+    array.push(vls, line.new(vlAt - halfBar, close, vlAt - halfBar, close + syminfo.mintick, xloc = xloc.bar_time, extend = extend.both, color = vlCol, style = vlStyle, width = vlWidth, force_overlay = true))
     while array.size(vls) > vlKeep
         line.delete(array.shift(vls))
 
