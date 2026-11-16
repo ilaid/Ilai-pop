@@ -79,6 +79,7 @@ pspSize    = input.string("normal", "PSP — גודל הסימון", options = [
 pspGlyph   = input.string("עיגול ●", "PSP — צורת הסימון", options = ["עיגול ●", "נקודה •", "ריבוע ■", "יהלום ◆", "כוכב ★", "איקס ✕", "חץ ⬇", "משולש ▲", "טקסט משלי"], group = grpVis, tooltip = "חץ ומשולש מצביעים לפי הכיוון. טקסט משלי — שני השדות שמתחת.")
 pspTxBear  = input.string("▲", "טקסט משלי — דובי (מעל הנר)", group = grpVis)
 pspTxBull  = input.string("▼", "טקסט משלי — שורי (מתחת לנר)", group = grpVis)
+pspOffT    = input.int(20, "PSP ממתין על הגרף — שקיפות", minval = 0, maxval = 80, group = grpVis, tooltip = "PSP חי בכיוון ההפוך לשבירה האחרונה. 0 = בדיוק כמו פעיל. נפרד מהשקיפות של ה-✗ בצד.")
 pspGap     = input.int(15, "PSP — מרחק הסימון מהנר (% מ-ATR)", minval = 0, maxval = 300, group = grpVis, tooltip = "0 = הסימון יושב על הפתיל עצמו. נמדד באחוז מ-ATR, כדי שאותו מספר ייתן אותו מרווח בכל נכס ובכל מסגרת.")
 
 grpCor = "הצד"
@@ -1798,7 +1799,7 @@ if barstate.islast
                         PBrk b = array.get(st, i)
                         if not f_pspGone(eCh, b)
                             color pc = f_colP(b)
-                            f_drawPsp(eCh, b, b.dir == ld ? pc : color.new(pc, offFade))
+                            f_drawPsp(eCh, b, b.dir == ld ? pc : color.new(pc, pspOffT))
 
 // ═══════════════════════════════════════════════════════════════════
 // הצד — שורה לכל מסגרת, מהגבוהה לנמוכה:
