@@ -54,6 +54,8 @@ ymWeak   = input.bool(true, "כלול חולשת נכס 3 (יומי ומעלה)"
 wickKill = input.bool(true, "בטל PSP לפי פתיל", tooltip = "כבוי = רק סגירה מעבר לרמה מבטלת.", group = grpPsp)
 pspRule  = input.string("הנכס של הגרף", "מתי PSP נחשב נלקח", options = ["הנכס של הגרף", "שני המכריעים"], group = grpPsp, tooltip = "הנכס של הגרף = ברגע שהנכס שאתה רואה עבר את הקצה של נר הסווינג — גם בנר שעוד לא נסגר. מה שהעין רואה.\nשני המכריעים = כמו ב-ADI: 1 וגם 2 (בזוג: 3 וגם 4) צריכים לעבור, בסגירת נר.\nכשהגרף הוא לא אחד מנכסי השבירה — תמיד שני המכריעים.")
 pspDepth = input.int(5, "כמה PSP לזכור לכל מסגרת", minval = 1, maxval = 10, group = grpPsp)
+pspBoth  = input.bool(true, "נר שהוא גם סווינג היי וגם סווינג לואו — שני PSP", group = grpPsp, tooltip = "דלוק: נר כזה יוצר שני PSP נפרדים — לעליות (על השפל) ולירידות (על השיא). כל אחד חי ונלקח לבד.\nכבוי (כמו ב-ADI): רק אחד — לפי מספר הנכסים שעשו סווינג בכל צד, ובשוויון לירידות.")
+pspPartSt = input.string("צורה חלולה", "PSP שנכס אחר כבר לקח", options = ["צורה חלולה", "דהוי", "רגיל"], group = grpPsp, tooltip = "PSP שעדיין חי (הנכס של הגרף לא לקח אותו), אבל נכס אחר שבשבירה כבר עבר את הקצה של נר הסווינג אצלו.\nצורה חלולה: ● ← ○, ■ ← □, ◆ ← ◇, ★ ← ☆, ▲ ← △. בטקסט משלי — דהוי.")
 q1Mode   = input.string("בצבע נפרד", "PSP ברבע ראשון / זמן חסום", options = ["בצבע נפרד", "רגיל", "לא קיים"], group = grpPsp)
 showPend = input.bool(true, "סמן נר PCP שעוד לא הוכרע", tooltip = "נר שנסגר עם דיברגנס ומחכה לסגירה הבאה כדי לדעת אם הוא סווינג (PSP).\nעל הגרף — נקודה מעל הנר, והיא נעלמת ברגע שהנר כבר לא יכול להיות סווינג.\nבצד — מ-5m ומעלה: ◦PCP והשעה של הנר, בסוף השורה (בצבע הזוג כשזה 3·4).", group = grpPsp)
 colPend  = input.color(color.new(#000000, 0), "צבע PCP ממתין", tooltip = "על ערכת נושא כהה — להחליף ללבן.", group = grpPsp)
@@ -723,17 +725,21 @@ type PBrk
     int   regT = 0      // הנר שאישר — רגע הרישום
     float mkY  = na     // הקצה של נר הסווינג על נכס הגרף — למיקום הסימון
     float own  = na     // אותו קצה כרמה: נמחק כשנכס הגרף עובר אותו (גם בשבירת זוג)
+    bool  part = false  // נכס אחר בשבירה כבר לקח את הקצה שלו
 
 f_taken(float lvl, int dir, float tH, float tL) =>
     na(lvl) ? false : dir == -1 ? tH > lvl : tL < lvl
 
 f_kill(PBrk b, float nH, float nL, float eH, float eL, float yH, float yL) =>
     if not na(b.nq) and f_taken(b.nq, b.dir, nH, nL)
-        b.nq := na
+        b.nq   := na
+        b.part := true
     if not na(b.es) and f_taken(b.es, b.dir, eH, eL)
-        b.es := na
+        b.es   := na
+        b.part := true
     if not na(b.ym) and f_taken(b.ym, b.dir, yH, yL)
-        b.ym := na
+        b.ym   := na
+        b.part := true
     na(b.nq) and na(b.es)
 
 f_holds(PBrk b) =>
@@ -850,6 +856,21 @@ f_renew(Eng e, int k, string lb, int t) =>
                     if bb == t
                         rn := true
     rn
+
+// PSP חדש בכיוון אחד. בזוג: qa = נכס 3, qb = נכס 4, ואין רמה שלישית.
+f_addPsp(Eng e, bool pair, bool bear, bool weak, array<float> qa, array<float> qb, array<float> qy, array<float> qc, int lf, int born, bool inQ1, int t) =>
+    int   ix  = bear ? 10 : 11
+    float own = cA >= 0 ? array.get(qc, ix) : na
+    // הנר שאישר כבר עבר את הקצה על נכס הגרף — נלקח מיד
+    if not na(own) and f_taken(own, bear ? -1 : 1, f_tkH(qc), f_tkL(qc))
+        own := na
+    e.seq := e.seq + 1
+    PBrk b = PBrk.new(dir = bear ? -1 : 1, weak = weak, nq = array.get(qa, ix), es = array.get(qb, ix), ym = pair ? na : array.get(qy, ix), cont = lf, born = born, inQ1 = inQ1, pair = pair, seq = e.seq, regT = t, mkY = array.get(qc, ix), own = own)
+    array<PBrk> st = pair ? e.pP : e.pT
+    array.unshift(st, b)
+    while array.size(st) > pspDepth
+        array.pop(st)
+    e.seq
 
 f_step(Eng e, int t, array<float> q1, array<float> q2, array<float> q3, array<float> q4) =>
     bool did = false
@@ -1023,31 +1044,20 @@ f_step(Eng e, int t, array<float> q1, array<float> q2, array<float> q3, array<fl
                 bool ymIn = divY or divW
                 int  nHi  = (f_swH(q1) ? 1 : 0) + (f_swH(q2) ? 1 : 0) + ((ymIn and f_swH(q3)) ? 1 : 0)
                 int  nLo  = (f_swL(q1) ? 1 : 0) + (f_swL(q2) ? 1 : 0) + ((ymIn and f_swL(q3)) ? 1 : 0)
-                if nHi > 0 or nLo > 0
-                    bool bear = nHi >= nLo
-                    int  ix   = bear ? 10 : 11
-                    e.seq := e.seq + 1
-                    float ownT = cA >= 0 ? array.get(qc, ix) : na
-                    if not na(ownT) and f_taken(ownT, bear ? -1 : 1, f_tkH(qc), f_tkL(qc))
-                        ownT := na
-                    array.unshift(e.pT, PBrk.new(dir = bear ? -1 : 1, weak = divW, nq = array.get(q1, ix), es = array.get(q2, ix), ym = array.get(q3, ix), cont = lf, born = tMid, inQ1 = q1Mid, pair = false, seq = e.seq, regT = t, mkY = array.get(qc, ix), own = ownT))
-                    while array.size(e.pT) > pspDepth
-                        array.pop(e.pT)
+                // נר שהוא גם סווינג היי וגם סווינג לואו: שני PSP (או אחד — לפי הרוב)
+                if nHi > 0 and (pspBoth or nHi >= nLo)
+                    f_addPsp(e, false, true, divW, q1, q2, q3, qc, lf, tMid, q1Mid, t)
+                if nLo > 0 and (pspBoth or nLo > nHi)
+                    f_addPsp(e, false, false, divW, q1, q2, q3, qc, lf, tMid, q1Mid, t)
             if use4
                 int dR = f_d1(q4)
                 if okY and not na(dR) and dY != dR
                     int pHi = (f_swH(q3) ? 1 : 0) + (f_swH(q4) ? 1 : 0)
                     int pLo = (f_swL(q3) ? 1 : 0) + (f_swL(q4) ? 1 : 0)
-                    if pHi > 0 or pLo > 0
-                        bool pBear = pHi >= pLo
-                        int  px    = pBear ? 10 : 11
-                        e.seq := e.seq + 1
-                        float ownP = cA >= 0 ? array.get(qc, px) : na
-                        if not na(ownP) and f_taken(ownP, pBear ? -1 : 1, f_tkH(qc), f_tkL(qc))
-                            ownP := na
-                        array.unshift(e.pP, PBrk.new(dir = pBear ? -1 : 1, nq = array.get(q3, px), es = array.get(q4, px), cont = lf, born = tMid, inQ1 = q1Mid, pair = true, seq = e.seq, regT = t, mkY = array.get(qc, px), own = ownP))
-                        while array.size(e.pP) > pspDepth
-                            array.pop(e.pP)
+                    if pHi > 0 and (pspBoth or pHi >= pLo)
+                        f_addPsp(e, true, true, false, q3, q4, q3, qc, lf, tMid, q1Mid, t)
+                    if pLo > 0 and (pspBoth or pLo > pHi)
+                        f_addPsp(e, true, false, false, q3, q4, q3, qc, lf, tMid, q1Mid, t)
 
         // ══ PCP ממתין — הנר שנסגר עכשיו; ההכרעה בסגירה הבאה ══
         int  xN  = f_d0(q1)
@@ -1728,11 +1738,31 @@ f_glyph(bool bear) =>
 
 f_colP(PBrk b) => b.inQ1 and q1Col ? colQ1 : b.pair ? colPair : b.dir == 1 ? colBull : colBear
 
-f_drawPsp(Eng e, PBrk b, color col) =>
-    bool bear = b.dir == -1
+// נכס אחר בשבירה כבר לקח את הקצה שלו — בסגירה, או בנר שעוד לא נסגר
+f_pspPart(Eng e, PBrk b) =>
+    bool p = b.part
+    if not p and wickKill
+        int aN = b.pair ? 2 : 0
+        int aE = b.pair ? 3 : 1
+        float rN = b.dir == -1 ? array.get(e.rH, aN) : array.get(e.rL, aN)
+        float rE = b.dir == -1 ? array.get(e.rH, aE) : array.get(e.rL, aE)
+        float rY = b.dir == -1 ? array.get(e.rH, 2) : array.get(e.rL, 2)
+        p := f_taken(b.nq, b.dir, rN, rN) or f_taken(b.es, b.dir, rE, rE) or (not b.pair and f_taken(b.ym, b.dir, rY, rY))
+    p
+
+f_hollow(string g) =>
+    g == "●" ? "○" : g == "■" ? "□" : g == "◆" ? "◇" : g == "★" ? "☆" : g == "▲" ? "△" : g == "▼" ? "▽" : g == "•" ? "◦" : g == "⬇" ? "⇩" : g == "⬆" ? "⇧" : g
+
+f_drawPsp(Eng e, PBrk b, color col0) =>
+    bool  bear  = b.dir == -1
+    bool  part  = pspPartSt != "רגיל" and f_pspPart(e, b)
+    string gl0  = f_glyph(bear)
+    string hl   = f_hollow(gl0)
+    bool  useH  = part and pspPartSt == "צורה חלולה" and hl != gl0
+    color col   = part and not useH ? color.new(col0, math.min(color.t(col0) + 50, 90)) : col0
     string tip = "PSP " + (bear ? "▼ " : "▲ ") + f_holds(b) + " · " + str.format_time(b.born, e.cls >= 6 ? "dd.MM" : "HH:mm", TZ)
     float gap  = nz(atrCh) * pspGap / 100.0
-    string gl  = f_glyph(bear)
+    string gl  = useH ? hl : gl0
     if na(b.mkY)
         array.push(dLb, label.new(b.born, close, gl, xloc = xloc.bar_time, yloc = bear ? yloc.abovebar : yloc.belowbar, style = label.style_none, textcolor = col, size = pspSize, tooltip = tip))
     else
