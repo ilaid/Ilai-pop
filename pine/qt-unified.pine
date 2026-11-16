@@ -1,5 +1,5 @@
 //@version=5
-indicator("QT Unified | SSMT · Fill · PSP", shorttitle = "QT·U", overlay = true, max_labels_count = 100, max_lines_count = 100, max_boxes_count = 50)
+indicator("QT Cracking Correlations", shorttitle = "QT CC", overlay = true, max_labels_count = 100, max_lines_count = 100, max_boxes_count = 50)
 
 // ═══════════════════════════════════════════════════════════════════
 // QT Unified — SSMT/HSSMT · SSMT Fill · PSP באינדיקטור אחד
@@ -88,7 +88,7 @@ cornerPosI = input.string("שמאל למטה", "מיקום", options = ["שמא�
 cornerSz   = input.string("tiny", "גודל טקסט", options = ["tiny", "small", "normal"], group = grpCor)
 cornerWhen = input.bool(true, "Q ושעה ליד האחרונה", group = grpCor)
 cornerAllT = input.bool(true, "שעה ליד כל שבירה בצד", group = grpCor, tooltip = "גם ליד הפעילות וה-✗ — כדי לראות מה נוצר לפני מה. PSP — שעת נר הסווינג; Fill ו-SSMT — שעת הנר שעשה את השבירה.")
-fastFlash  = input.bool(true, "הדגש PSP חדש ב-5m וב-15m (⚡)", group = grpCor, tooltip = "PSP שנרשם בנר האחרון שנסגר ב-5m או ב-15m מקבל ⚡ ורקע צבעוני בצד, עד הסגירה הבאה של אותה מסגרת. נראה מכל גרף — גם PSP של NQ/ES כשאתה על RTY.")
+fastFlash  = input.bool(false, "הדגש PSP חדש ב-5m וב-15m (⚡)", group = grpCor, tooltip = "PSP שנרשם בנר האחרון שנסגר ב-5m או ב-15m מקבל ⚡ ורקע צבעוני בצד, עד הסגירה הבאה של אותה מסגרת. נראה מכל גרף — גם PSP של NQ/ES כשאתה על RTY.")
 offFade    = input.int(60, "שקיפות ממתינה (✗)", minval = 0, maxval = 90, group = grpCor, tooltip = "ממתינה נכתבת בצבע שלה (זוג 3·4 — בצבע הזוג), רק דהוי.")
 cornerLift = input.int(2, "הרם את השורות (שורות ריקות)", minval = 0, maxval = 8, group = grpCor, tooltip = "שורות ריקות בין השורות לקצה המסך — כדי שלא ייפלו על אינדיקטור אחר באותה פינה.")
 
@@ -1813,8 +1813,8 @@ cornerTop = cornerPosI == "שמאל למעלה" or cornerPosI == "ימין למ�
 rowOff    = cornerTop ? cornerLift : 0
 bgClr = color.new(color.black, 100)
 
-// זוג 3·4 מסומן גם בכתב (₃₄), לא רק בצבע — כדי שלא יתבלבל עם השלישייה
-f_itemTx(Cand c) => (c.dir == 1 ? "▲" : "▼") + c.tx + (c.pair ? "₃₄" : "")
+// זוג 3·4 — מובחן בצבע בלבד
+f_itemTx(Cand c) => (c.dir == 1 ? "▲" : "▼") + c.tx
 
 // פורמט השעה בצד: עד 4H — שעה בלבד (קצר). יומי ומעלה — תאריך.
 f_tmFmt(int cls) => cls <= 5 ? "HH:mm" : "dd/MM"
@@ -1832,7 +1832,7 @@ f_whenTx(Cand c, int cls) =>
 if barstate.islast
     table.clear(cTbl, 0, 0, 13, 8 + cornerLift)
     if cornerOn and tfClass == 0
-        table.cell(cTbl, 0, rowOff, "QT·U — מסגרת לא נתמכת (1m · 5m · 15m · 1H · 4H · D · W · M)", text_color = color.gray, text_size = cornerSz, bgcolor = bgClr)
+        table.cell(cTbl, 0, rowOff, "QT CC — מסגרת לא נתמכת (1m · 5m · 15m · 1H · 4H · D · W · M)", text_color = color.gray, text_size = cornerSz, bgcolor = bgClr)
     if cornerOn and tfClass != 0
         int row = 0
         for cls = 8 to 1
@@ -1875,7 +1875,7 @@ if barstate.islast
                         // נר ממתין אחד — גם כשהוא PCP גם של השלישייה וגם של הזוג, הוא כתוב פעם אחת
                         string pTm = str.format_time(e.pndT, f_tmFmt(cls), TZ)
                         if pdT or pdP
-                            string pTx = "◦PCP" + (pdT and pdP ? " +₃₄" : pdP ? "₃₄" : "") + " " + pTm + " "
+                            string pTx = "◦PCP " + pTm + " "
                             table.cell(cTbl, col, row + rowOff, pTx, text_color = pdT ? colPend : colPair, text_size = cornerSz, bgcolor = bgClr)
                         row += 1
         // השורות הריקות שמרימות את הטבלה מהקצה
