@@ -41,8 +41,9 @@ string tt3 = input.string("", "כותרת (ריק = אוטומטי)", group = G3
 // הגדרות — מיקום וגודל
 // ════════════════════════════════════════════
 const string GL = "מיקום וגודל"
-string setLayout    = input.string("אופקי", "סידור הסטים", options = ["אופקי", "אנכי"], group = GL)
-string vpos      = input.string("למעלה", "מיקום אנכי", options = ["למעלה", "אמצע", "למטה"], group = GL)
+string setLayout = input.string("אחד מתחת לשני", "סידור הסטים", options = ["אחד מתחת לשני", "אחד ליד השני"], group = GL)
+string vpos      = input.string("צמוד למחיר", "מיקום אנכי", options = ["צמוד למחיר", "מחירים אמיתיים", "פינה למעלה", "פינה באמצע", "פינה למטה"], group = GL,
+     tooltip = "צמוד למחיר = הסטים זזים יחד עם המחיר הנוכחי, בגודל מכווץ.\nמחירים אמיתיים = כל נר מצויר במחיר האמיתי שלו (הסטים תמיד אחד ליד השני).\nפינה = קבוע לפי החלק הנראה בגרף.")
 int    offBars   = input.int(5, "מרחק מהנר האחרון (נרות)", minval = 0, maxval = 300, group = GL)
 int    cw        = input.int(2, "רוחב נר (נרות)", minval = 2, maxval = 30, step = 2, group = GL)
 int    cgap      = input.int(1, "רווח בין נרות", minval = 0, maxval = 20, group = GL)
@@ -292,7 +293,7 @@ var array<label> gLabels = array.new<label>()
 f_y(float p, float hi, float lo, float yTop, float yBot) =>
     hi > lo ? yBot + (p - lo) / (hi - lo) * (yTop - yBot) : (yTop + yBot) / 2
 
-f_draw(int c, string ttl, int x0, float yTop, float yBot, int key, int cur, int aux, array<float> O, array<float> H, array<float> L, array<float> C) =>
+f_draw(int c, string ttl, int x0, float yTop0, float yBot0, bool real, int key, int cur, int aux, array<float> O, array<float> H, array<float> L, array<float> C) =>
     int n = f_nSlots(c, cur, O)
     float hi = na
     float lo = na
@@ -300,6 +301,9 @@ f_draw(int c, string ttl, int x0, float yTop, float yBot, int key, int cur, int 
         if not na(H.get(i))
             hi := na(hi) ? H.get(i) : math.max(hi, H.get(i))
             lo := na(lo) ? L.get(i) : math.min(lo, L.get(i))
+    // במצב "מחירים אמיתיים" גבולות הסט = High/Low של המיכל, ולכן אין כיווץ
+    float yTop = real and not na(hi) ? hi : yTop0
+    float yBot = real and not na(lo) ? lo : yBot0
     int xEnd = x0 + n * (cw + cgap) - cgap
     color cClr = color.new(color.black, 100)
     for i = 0 to n - 1
@@ -356,22 +360,27 @@ if barstate.islast
     float marg  = rng * marginPct / 100
 
     int nAct = (en1 ? 1 : 0) + (en2 ? 1 : 0) + (en3 ? 1 : 0)
-    bool vert = setLayout == "אנכי"
+    bool real = vpos == "מחירים אמיתיים"
+    bool vert = setLayout == "אחד מתחת לשני" and not real
     float totalH = vert ? nAct * bandH + math.max(nAct - 1, 0) * vgap : bandH
-    float top0 = vpos == "למעלה" ? vh - marg : vpos == "למטה" ? vl + marg + totalH : (vh + vl) / 2 + totalH / 2
+    float top0 = switch vpos
+        "פינה למעלה" => vh - marg
+        "פינה למטה"  => vl + marg + totalH
+        "פינה באמצע" => (vh + vl) / 2 + totalH / 2
+        => close + totalH / 2
 
     int x = bar_index + offBars
     int j = 0
     if en1
         float yT = top0 - (vert ? j * (bandH + vgap) : 0)
-        int xe = f_draw(c1, tt1, x, yT, yT - bandH, k1, s1, x1, array.from(o10, o11, o12, o13, o14), array.from(h10, h11, h12, h13, h14), array.from(l10, l11, l12, l13, l14), array.from(c10, c11, c12, c13, c14))
+        int xe = f_draw(c1, tt1, x, yT, yT - bandH, real, k1, s1, x1, array.from(o10, o11, o12, o13, o14), array.from(h10, h11, h12, h13, h14), array.from(l10, l11, l12, l13, l14), array.from(c10, c11, c12, c13, c14))
         x := vert ? x : xe + sgap
         j += 1
     if en2
         float yT = top0 - (vert ? j * (bandH + vgap) : 0)
-        int xe = f_draw(c2, tt2, x, yT, yT - bandH, k2, s2, x2, array.from(o20, o21, o22, o23, o24), array.from(h20, h21, h22, h23, h24), array.from(l20, l21, l22, l23, l24), array.from(c20, c21, c22, c23, c24))
+        int xe = f_draw(c2, tt2, x, yT, yT - bandH, real, k2, s2, x2, array.from(o20, o21, o22, o23, o24), array.from(h20, h21, h22, h23, h24), array.from(l20, l21, l22, l23, l24), array.from(c20, c21, c22, c23, c24))
         x := vert ? x : xe + sgap
         j += 1
     if en3
         float yT = top0 - (vert ? j * (bandH + vgap) : 0)
-        f_draw(c3, tt3, x, yT, yT - bandH, k3, s3, x3, array.from(o30, o31, o32, o33, o34), array.from(h30, h31, h32, h33, h34), array.from(l30, l31, l32, l33, l34), array.from(c30, c31, c32, c33, c34))
+        f_draw(c3, tt3, x, yT, yT - bandH, real, k3, s3, x3, array.from(o30, o31, o32, o33, o34), array.from(h30, h31, h32, h33, h34), array.from(l30, l31, l32, l33, l34), array.from(c30, c31, c32, c33, c34))
