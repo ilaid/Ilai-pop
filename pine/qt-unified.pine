@@ -1785,9 +1785,8 @@ bgClr = color.new(color.black, 100)
 // זוג 3·4 מסומן גם בכתב (₃₄), לא רק בצבע — כדי שלא יתבלבל עם השלישייה
 f_itemTx(Cand c) => (c.dir == 1 ? "▲" : "▼") + c.tx + (c.pair ? "₃₄" : "")
 
-// פורמט השעה בצד: עד 15m — שעה. 1H ו-4H — גם התאריך (המיכל שלהם הוא שבוע/חודש,
-// ושעה לבד לא אומרת באיזה יום). יומי ומעלה — תאריך.
-f_tmFmt(int cls) => cls <= 3 ? "HH:mm" : cls <= 5 ? "d/M HH:mm" : "dd/MM"
+// פורמט השעה בצד: עד 4H — שעה בלבד (קצר). יומי ומעלה — תאריך.
+f_tmFmt(int cls) => cls <= 5 ? "HH:mm" : "dd/MM"
 
 // PSP שנרשם בצעד האחרון של 5m/15m — חדש, עד הסגירה הבאה של אותה מסגרת
 f_fresh(Cand c, Eng e) => fastFlash and c.typ == 2 and (e.cls == 2 or e.cls == 3) and c.t == e.lastT
