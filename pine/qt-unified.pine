@@ -55,7 +55,7 @@ wickKill = input.bool(true, "בטל PSP לפי פתיל", tooltip = "כבוי = 
 pspRule  = input.string("הנכס של הגרף", "מתי PSP נחשב נלקח", options = ["הנכס של הגרף", "שני המכריעים"], group = grpPsp, tooltip = "הנכס של הגרף = ברגע שהנכס שאתה רואה עבר את הקצה של נר הסווינג — גם בנר שעוד לא נסגר. מה שהעין רואה.\nשני המכריעים = כמו ב-ADI: 1 וגם 2 (בזוג: 3 וגם 4) צריכים לעבור, בסגירת נר.\nכשהגרף הוא לא אחד מנכסי השבירה — תמיד שני המכריעים.")
 pspDepth = input.int(5, "כמה PSP לזכור לכל מסגרת", minval = 1, maxval = 10, group = grpPsp)
 pspBoth  = input.bool(true, "נר שהוא גם סווינג היי וגם סווינג לואו — שני PSP", group = grpPsp, tooltip = "דלוק: נר כזה יוצר שני PSP נפרדים — לעליות (על השפל) ולירידות (על השיא). כל אחד חי ונלקח לבד.\nכבוי (כמו ב-ADI): רק אחד — לפי מספר הנכסים שעשו סווינג בכל צד, ובשוויון לירידות.")
-pspPartSt = input.string("צורה חלולה", "PSP שנכס אחר כבר לקח", options = ["צורה חלולה", "דהוי", "רגיל"], group = grpPsp, tooltip = "PSP שעדיין חי (הנכס של הגרף לא לקח אותו), אבל נכס אחר שבשבירה כבר עבר את הקצה של נר הסווינג אצלו.\nצורה חלולה: ● ← ○, ■ ← □, ◆ ← ◇, ★ ← ☆, ▲ ← △. בטקסט משלי — דהוי.")
+pspPartSt = input.string("צורה חלולה", "PSP שנכס אחר כבר לקח", options = ["צורה חלולה", "רגיל"], group = grpPsp, tooltip = "PSP שעדיין חי (הנכס של הגרף לא לקח אותו), אבל נכס אחר שבשבירה כבר עבר את הקצה של נר הסווינג אצלו.\nצורה חלולה: ● ← ○, ■ ← □, ◆ ← ◇, ★ ← ☆, ▲ ← △ — באותו צבע ובאותו חוזק של PSP רגיל.")
 q1Mode   = input.string("בצבע נפרד", "PSP ברבע ראשון / זמן חסום", options = ["בצבע נפרד", "רגיל", "לא קיים"], group = grpPsp)
 showPend = input.bool(true, "סמן נר PCP שעוד לא הוכרע", tooltip = "נר שנסגר עם דיברגנס ומחכה לסגירה הבאה כדי לדעת אם הוא סווינג (PSP).\nעל הגרף — נקודה מעל הנר, והיא נעלמת ברגע שהנר כבר לא יכול להיות סווינג.\nבצד — מ-5m ומעלה: ◦PCP והשעה של הנר, בסוף השורה (בצבע הזוג כשזה 3·4).", group = grpPsp)
 colPend  = input.color(color.new(#000000, 0), "צבע PCP ממתין", tooltip = "על ערכת נושא כהה — להחליף ללבן.", group = grpPsp)
@@ -1758,8 +1758,8 @@ f_drawPsp(Eng e, PBrk b, color col0) =>
     bool  part  = pspPartSt != "רגיל" and f_pspPart(e, b)
     string gl0  = f_glyph(bear)
     string hl   = f_hollow(gl0)
-    bool  useH  = part and pspPartSt == "צורה חלולה" and hl != gl0
-    color col   = part and not useH ? color.new(col0, math.min(color.t(col0) + 50, 90)) : col0
+    bool  useH  = part and pspPartSt == "צורה חלולה"
+    color col   = col0
     string tip = "PSP " + (bear ? "▼ " : "▲ ") + f_holds(b) + " · " + str.format_time(b.born, e.cls >= 6 ? "dd.MM" : "HH:mm", TZ)
     float gap  = nz(atrCh) * pspGap / 100.0
     string gl  = useH ? hl : gl0
