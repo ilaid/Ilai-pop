@@ -20,7 +20,8 @@ indicator("QT Gap Odds", shorttitle = "Gap Odds", overlay = true, max_boxes_coun
 // הגדרות
 // ══════════════════════════════════════════════════════════════
 G1 = "סיכויים"
-minN    = input.int(20, "מינימום מקרים לצירוף", minval = 5, maxval = 200, group = G1, tooltip = "פחות מזה — יורדים לטבלה גסה יותר, והאחוז מסומן ~.")
+minN    = input.int(20, "מינימום מקרים לצירוף", minval = 5, maxval = 200, group = G1, tooltip = "פחות מזה — האחוז מסומן ~ (נשען בעיקר על הקבוצה הרחבה).")
+shrK    = input.float(15, "כיווץ לכיוון הקבוצה הרחבה", minval = 0, maxval = 100, step = 1, group = G1, tooltip = "כמה \"מקרים מדומים\" של הקבוצה הרחבה נוספים לכל צירוף. גבוה = אחוזים זהירים יותר. 0 = בלי כיווץ.")
 maxShow = input.int(15, "כמה גאפים להציג (הקרובים למחיר)", minval = 1, maxval = 60, group = G1)
 atrLen  = input.int(14, "ATR", minval = 2, maxval = 100, group = G1)
 
@@ -222,30 +223,22 @@ f_add(array<int> n, array<int> h, int k, bool hit) =>
     0
 
 // [סיכוי, מקרים, רמת ירידה 1..4]
+// כיווץ היררכי: כל רמה נמשכת לכיוון הרמה הגסה שמעליה, לפי כמות המקרים שלה.
+// תא עם מעט מקרים לא יכול לתת 90% על סמך מזל — הוא קרוב לממוצע של הקבוצה שלו.
+f_shr(array<int> h, array<int> n, int k, float prior) =>
+    na(prior) ? (n.get(k) > 0 ? float(h.get(k)) / n.get(k) : na) : (h.get(k) + shrK * prior) / (n.get(k) + shrK)
+
+// [סיכוי, מקרים בצירוף המלא, רמה: 1 = מספיק מקרים בצירוף המלא · 3 = מעט מקרים]
 f_prob(int a, int d, int r, int q) =>
-    float p  = na
-    int   nn = 0
-    int   lv = 4
     int k1 = f_k1(a, d, r, q)
     int k2 = f_k2(a, d, q)
     int k3 = f_k3(a, d)
-    if n1.get(k1) >= minN
-        p  := float(h1.get(k1)) / n1.get(k1)
-        nn := n1.get(k1)
-        lv := 1
-    else if n2.get(k2) >= minN
-        p  := float(h2.get(k2)) / n2.get(k2)
-        nn := n2.get(k2)
-        lv := 2
-    else if n3.get(k3) >= minN
-        p  := float(h3.get(k3)) / n3.get(k3)
-        nn := n3.get(k3)
-        lv := 3
-    else if n4.get(d) > 0
-        p  := float(h4.get(d)) / n4.get(d)
-        nn := n4.get(d)
-        lv := 4
-    [p, nn, lv]
+    float p4 = n4.get(d) > 0 ? float(h4.get(d)) / n4.get(d) : na
+    float p3 = f_shr(h3, n3, k3, p4)
+    float p2 = f_shr(h2, n2, k2, p3)
+    float p1 = f_shr(h1, n1, k1, p2)
+    int   nn = n1.get(k1)
+    [p1, nn, nn >= minN ? 1 : 3]
 
 // עד סוף המיכל: צירוף מלא, ואם אין — גיל × מרחק
 f_probC(int a, int d, int r, int q) =>
