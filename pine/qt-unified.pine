@@ -90,6 +90,8 @@ cornerWhen = input.bool(true, "Q ושעה ליד האחרונה", group = grpCor
 cornerAllT = input.bool(true, "שעה ליד כל שבירה בצד", group = grpCor, tooltip = "גם ליד הפעילות וה-✗ — כדי לראות מה נוצר לפני מה. PSP — שעת נר הסווינג; Fill ו-SSMT — שעת הנר שעשה את השבירה.")
 fastFlash  = input.bool(false, "הדגש PSP חדש ב-5m וב-15m (⚡)", group = grpCor, tooltip = "PSP שנרשם בנר האחרון שנסגר ב-5m או ב-15m מקבל ⚡ ורקע צבעוני בצד, עד הסגירה הבאה של אותה מסגרת. נראה מכל גרף — גם PSP של NQ/ES כשאתה על RTY.")
 offFade    = input.int(60, "שקיפות ממתינה (✗)", minval = 0, maxval = 90, group = grpCor, tooltip = "ממתינה נכתבת בצבע שלה (זוג 3·4 — בצבע הזוג), רק דהוי.")
+cornerLay  = input.string("עמודות", "סידור הצד", options = ["עמודות", "שורה"], group = grpCor, tooltip = "עמודות: עמודה קבועה לכל סוג — כיוון · Fill · SSMT · PSP · PCP. בכל סוג: הפעילה, ולידה הנגדית החיה (✗). השבירה שקבעה את הכיוון — ברקע עדין.\nשורה: הסידור הקודם — האחרונה ראשונה ואחריה השאר.")
+cornerHdr  = input.bool(true, "שורת כותרות (בעמודות)", group = grpCor)
 cornerLift = input.int(2, "הרם את השורות (שורות ריקות)", minval = 0, maxval = 8, group = grpCor, tooltip = "שורות ריקות בין השורות לקצה המסך — כדי שלא ייפלו על אינדיקטור אחר באותה פינה.")
 
 grpAl = "התראות"
@@ -1920,7 +1922,7 @@ if barstate.islast
 // ═══════════════════════════════════════════════════════════════════
 
 cornerPos = cornerPosI == "שמאל למעלה" ? position.top_left : cornerPosI == "ימין למטה" ? position.bottom_right : cornerPosI == "ימין למעלה" ? position.top_right : position.bottom_left
-var table cTbl = table.new(cornerPos, 14, 9 + cornerLift, border_width = 0)
+var table cTbl = table.new(cornerPos, 14, 10 + cornerLift, border_width = 0)
 cornerTop = cornerPosI == "שמאל למעלה" or cornerPosI == "ימין למעלה"
 rowOff    = cornerTop ? cornerLift : 0
 bgClr = color.new(color.black, 100)
@@ -1951,10 +1953,80 @@ f_whenTx(Cand c, int cls) =>
     (wn > 0 ? " Q" + str.tostring(wn) : "") + " " + f_tmTx(c, cls)
 
 if barstate.islast
-    table.clear(cTbl, 0, 0, 13, 8 + cornerLift)
+    table.clear(cTbl, 0, 0, 13, 9 + cornerLift)
     if cornerOn and tfClass == 0
         table.cell(cTbl, 0, rowOff, "QT CC — מסגרת לא נתמכת (1m · 5m · 15m · 1H · 4H · D · W · M)", text_color = color.gray, text_size = cornerSz, bgcolor = bgClr)
-    if cornerOn and tfClass != 0
+    // ── עמודות: מסגרת · כיוון · Fill (פעילה | ✗) · SSMT (פעילה | ✗) · PSP (פעילה | ✗) · PCP
+    if cornerOn and tfClass != 0 and cornerLay == "עמודות"
+        int row = 0
+        if cornerHdr
+            array<string> hd = array.from("", "כיוון", "Fill", "", "SSMT", "", "PSP", "", "")
+            for i = 0 to 8
+                table.cell(cTbl, i, rowOff, array.get(hd, i), text_color = color.gray, text_size = cornerSz, bgcolor = bgClr)
+            row := 1
+        for cls = 8 to 1
+            for k = 0 to array.size(allEng) - 1
+                Eng e = array.get(allEng, k)
+                if f_useE(k) and e.cls == cls and row <= 9
+                    array<Cand> cs = f_cands(e)
+                    int  eD  = array.get(effD, k)
+                    int  eS  = array.get(effS, k)
+                    int  li  = f_leadIn(cs, eD, cls)
+                    bool pdT = showPend and cls >= 2 and e.pnd
+                    bool pdP = showPend and cls >= 2 and use4 and e.pndP
+                    if array.size(cs) > 0 or pdT or pdP
+                        int r = row + rowOff
+                        table.cell(cTbl, 0, r, f_clsName(cls) + " ", text_color = cls == tfClass ? chart.fg_color : color.gray, text_size = cornerSz, bgcolor = bgClr)
+                        // הכיוון של המסגרת: חץ, ולידו ה-Q והשעה של השבירה שקבעה — או ⇡ המסגרת שממנה בא
+                        string dTx = eD == 0 ? "—" : (eD == 1 ? "▲" : "▼")
+                        if eD != 0 and eS != cls
+                            dTx := dTx + " ⇡" + f_clsName(eS)
+                        else if li >= 0 and cornerWhen
+                            dTx := dTx + f_whenTx(array.get(cs, li), cls)
+                        table.cell(cTbl, 1, r, dTx + "  ", text_color = eD == 1 ? colBull : eD == -1 ? colBear : color.gray, text_size = cornerSz, bgcolor = bgClr)
+                        for ty = 0 to 2
+                            int bA = -1
+                            int bI = -1
+                            if array.size(cs) > 0
+                                for i = 0 to array.size(cs) - 1
+                                    Cand c = array.get(cs, i)
+                                    if c.typ == ty
+                                        if f_act(c, cls, eD)
+                                            if bA < 0
+                                                bA := i
+                                            else if f_newer(c, array.get(cs, bA))
+                                                bA := i
+                                        else
+                                            if bI < 0
+                                                bI := i
+                                            else if f_newer(c, array.get(cs, bI))
+                                                bI := i
+                            string aTx = ""
+                            color  aCo = color.gray
+                            color  aBg = bgClr
+                            if bA >= 0
+                                Cand c = array.get(cs, bA)
+                                aTx := f_pre(c, e) + f_itemTx(c) + (cornerAllT ? " " + f_tmTx(c, cls) : "") + " "
+                                aCo := f_colC(c)
+                                // השבירה שקבעה את הכיוון — רקע עדין
+                                aBg := bA == li ? color.new(f_colC(c), 86) : f_bg(c, e)
+                            table.cell(cTbl, 2 + ty * 2, r, aTx, text_color = aCo, text_size = cornerSz, bgcolor = aBg)
+                            string iTx = ""
+                            color  iCo = color.gray
+                            if bI >= 0
+                                Cand c = array.get(cs, bI)
+                                iTx := "✗" + f_itemTx(c) + (cornerAllT ? " " + f_tmTx(c, cls) : "") + " "
+                                iCo := color.new(f_colC(c), offFade)
+                            table.cell(cTbl, 3 + ty * 2, r, iTx, text_color = iCo, text_size = cornerSz, bgcolor = bgClr)
+                        string pTx = pdT or pdP ? "◦PCP " + f_tmStr(e.pndT, cls) : ""
+                        table.cell(cTbl, 8, r, pTx, text_color = pdT ? colPend : colPair, text_size = cornerSz, bgcolor = bgClr)
+                        row += 1
+        if row > 0 and cornerLift > 0
+            for r = 0 to cornerLift - 1
+                table.cell(cTbl, 0, cornerTop ? r : row + r, " ", text_size = cornerSz, bgcolor = bgClr)
+
+    // ── שורה: הסידור הקודם
+    if cornerOn and tfClass != 0 and cornerLay == "שורה"
         int row = 0
         for cls = 8 to 1
             for k = 0 to array.size(allEng) - 1
