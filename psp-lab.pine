@@ -1,0 +1,1054 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0
+// © Ilai - PSP Lab v1.0 — when does a PCP become a PSP?
+// Pine Script V5
+//
+// A research indicator, not a signal. It walks the chart's history and, every
+// time a candle closes as a PCP, it writes down what was already known AT THAT
+// CLOSE — the context the candle was born in — and then waits for the answer:
+//
+//   PSP%     the next candle closed without going past it — the swing held
+//            (the same three-bar rule ADI uses, on every asset taking part).
+//   החזיק%   of those PSPs: the deciders' levels (1 and 2, or 3 and 4 in the
+//            pair) were not both taken before the Quarterly Theory container
+//            of the chart's timeframe ended.
+//   יעד%     of those PSPs: the chart's price moved X ATR away from the swing
+//            extreme before trading back through it.
+//
+// Every scenario is a row. A row counts only the PCPs where that scenario was
+// true, so its PSP% next to the base row (all PCPs) is the answer to "does
+// this make a PCP more likely to end as a PSP?". Δ is the difference.
+//
+// Two kinds of rows:
+//   · 0–23  known at the PCP's own close — the earliest possible moment.
+//   · 24–27 known INSIDE the third candle, read off a lower timeframe:
+//           "the extreme is still standing a third / two thirds of the way in,
+//           and price did X". Their PSP% is conditional on that — it answers
+//           "if I'm a third of the way into candle 3 and nothing took it, how
+//           often is it a PSP?".
+//
+// Each PCP is counted once per side it can still swing on — a candle above
+// the one before it on a participating asset is a swing-high candidate, below
+// it a swing-low candidate. The triad (1–2–3) and the 3–4 pair are counted
+// apart, in their own columns.
+//
+// Combinations: type scenario numbers ("4,9") into combination A or B and
+// that row counts only PCPs where ALL of them were true.
+//
+// Limits worth knowing:
+//   · FVG, NDOG/NWOG, the quarter sweep, the regional extreme and the third of
+//     the candle are read off the CHART's symbol. SMT and SSMT are read off
+//     the deciders (1 and 2, or 3 and 4).
+//   · The lower timeframe comes from request.security_lower_tf, which reaches
+//     back 100,000 intrabars at most — older chart bars have no lower-timeframe
+//     data and simply never set rows 16–19 and 24–27.
+//   · The higher-timeframe FVG is the nearest virgin one only.
+//   · A row with fewer cases than "minimum sample" is drawn grey: don't read it.
+
+//@version=5
+indicator("PSP Lab | מתי PCP הופך ל-PSP", shorttitle="PSP Lab", overlay = true)
+
+// ══════════════════════════════════════════════════════════════
+//  INPUTS
+// ══════════════════════════════════════════════════════════════
+
+grp_a = "═══  נכסים  ═══"
+i_sym1    = input.symbol("CME_MINI:MNQ1!",  title="נכס 1 (חזק)", group=grp_a)
+i_sym2    = input.symbol("CME_MINI:MES1!",  title="נכס 2 (חזק)", group=grp_a)
+i_sym3    = input.symbol("CBOT_MINI:MYM1!", title="נכס 3 (חלש)", group=grp_a)
+i_sym4    = input.symbol("CME_MINI:M2K1!",  title="נכס 4 (בן הזוג של 3)", group=grp_a)
+i_use4    = input.bool(true, title="כלול נכס 4 — זוג 3–4", group=grp_a)
+i_use_nq  = input.bool(true, title="כלול נכס 1", group=grp_a)
+i_use_es  = input.bool(true, title="כלול נכס 2", group=grp_a)
+i_use_ym  = input.bool(true, title="כלול נכס 3", group=grp_a)
+i_ym_weak = input.bool(true, title="חולשת נכס 3 (יומי ומעלה)", group=grp_a)
+i_ignore_doji = input.bool(false, title="התעלם מדוג'י", group=grp_a)
+i_adjust  = input.string("בלי יישור", title="נתוני חוזה רציף", options=["בלי יישור", "מיושר לגלגול", "ברירת המחדל של הסימבול"], group=grp_a)
+i_settle  = input.string("כבוי — כמו הגרף", title="Settlement כסגירה יומית", options=["כבוי — כמו הגרף", "דלוק", "ברירת המחדל של הסימבול"], group=grp_a)
+
+grp_r = "═══  מחקר  ═══"
+i_from  = input.time(timestamp("01 Jan 2000 00:00 +0000"), title="לספור החל מ-", group=grp_r)
+i_ltf   = input.string("אוטומטי", title="מסגרת נמוכה (בתוך הנר)", options=["אוטומטי", "1", "5", "15", "60", "240", "D"],
+     tooltip="ממנה נקראים: באיזה שליש של נר ה-PCP נוצר הקצה, האם יש PSP נמוך בקצה, ומה קרה בשליש ובשני שלישים של הנר השלישי.\nאוטומטי: 5m→1m, 15m→5m, 1H→15m, 4H→1H, יומי→4H, שבועי→יומי.", group=grp_r)
+i_htf   = input.string("אוטומטי", title="מסגרת גבוהה (הנר שמכיל)", options=["אוטומטי", "5", "15", "60", "240", "D", "W", "M"],
+     tooltip="ממנה נקראים: FVG בתול של המסגרת הגבוהה, האם הנר הגבוה שנבנה גם הוא בדיברגנס, ואיזה נר בתוכו הוא ה-PCP (ראשון / שני / שלישי).\nאוטומטי: 1m→5m, 5m→15m, 15m→1H, 1H→4H, 4H→יומי, יומי→שבועי.", group=grp_r)
+i_regN  = input.int(20, title="קיצון אזורי — כמה נרות אחורה", minval=5, maxval=300,
+     tooltip="הגבוה (הנמוך) של נר ה-PCP הוא הגבוה ביותר (הנמוך ביותר) של N הנרות האחרונים — שפל או שיא אזורי אמיתי, ולא רק שלושה נרות.", group=grp_r)
+i_smtL  = input.int(3, title="SMT — עוצמת פיבוט (נרות לכל צד)", minval=1, maxval=10, group=grp_r)
+i_qt    = input.bool(true, title="Quarterly Theory — רבעים ומיכלים",
+     tooltip="רבע קודם, רבע של ה-PCP, וסוף חלון המעקב של 'החזיק' ו'יעד'.\n1m: רבע 22.5 דק׳ במיקרו · 5m: מיקרו 90 דק׳ בסשן · 15m: סשן ביום · 1H: יום בשבוע · 4H: שבוע בחודש · יומי: רבע של רבעון · שבועי: רבעון בשנת QT.", group=grp_r)
+i_wick  = input.bool(true, title="פתיל לוקח רמה", tooltip="כבוי: רק סגירה מעבר לרמה.", group=grp_r)
+i_tgtX  = input.float(1.0, title="יעד — כמה ATR מהקצה", minval=0.1, step=0.1, group=grp_r)
+i_awayX = input.float(0.5, title="נר 3: התרחקות — כמה ATR", minval=0.1, step=0.1, group=grp_r)
+i_maxB  = input.int(0, title="חלון מעקב מקסימלי (נרות)", minval=0,
+     tooltip="0 = עד סוף המיכל של QT. בלי QT ובלי מספר — 50 נרות.", group=grp_r)
+i_cA    = input.string("4,9", title="שילוב A — מספרי תרחישים", tooltip="מספרים מהעמודה # מופרדים בפסיק. השורה סופרת רק PCP שבו כולם התקיימו.", group=grp_r)
+i_cB    = input.string("", title="שילוב B — מספרי תרחישים", group=grp_r)
+
+grp_t = "═══  טבלה  ═══"
+i_show  = input.string("שניהם", title="אילו עמודות", options=["שניהם", "שלישייה", "זוג"], group=grp_t)
+i_minN  = input.int(15, title="מדגם מינימלי", minval=1, tooltip="שורה עם פחות מקרים מזה יוצאת אפורה.", group=grp_t)
+i_tv    = input.string("למעלה", title="גובה", options=["למעלה", "באמצע", "למטה"], group=grp_t)
+i_th    = input.string("ימין", title="צד", options=["שמאל", "מרכז", "ימין"], group=grp_t)
+i_tsz   = input.string("זעיר", title="גודל טקסט", options=["זעיר", "קטן", "רגיל"], group=grp_t)
+i_tbg   = input.color(color.new(#131722, 10), title="רקע", group=grp_t)
+i_ttx   = input.color(color.new(#d1d4dc, 0), title="טקסט", group=grp_t)
+i_tup   = input.color(color.new(#00c853, 0), title="טוב מהבסיס", group=grp_t)
+i_tdn   = input.color(color.new(#ff1744, 0), title="גרוע מהבסיס", group=grp_t)
+i_tdim  = input.color(color.new(#787b86, 0), title="מדגם קטן", group=grp_t)
+
+// ══════════════════════════════════════════════════════════════
+//  CONSTANTS
+// ══════════════════════════════════════════════════════════════
+
+NF     = 28          // scenarios
+NR     = NF + 3      // + base, combination A, combination B
+NY     = "America/New_York"
+DAY_MS = 86400000
+SHIFT  = 21600000    // 18:00 New York becomes midnight
+
+// ══════════════════════════════════════════════════════════════
+//  TIMEFRAMES
+// ══════════════════════════════════════════════════════════════
+
+tf_str   = timeframe.period
+chartSec = timeframe.in_seconds(timeframe.period)
+is_1m  = tf_str == "1"
+is_5m  = tf_str == "5"
+is_15m = tf_str == "15"
+is_1h  = tf_str == "60"
+is_4h  = tf_str == "240"
+is_1d  = tf_str == "D"
+is_1w  = tf_str == "W"
+is_1mo = timeframe.ismonthly and timeframe.multiplier == 1
+chKind = is_1m ? 1 : is_5m ? 2 : is_15m ? 3 : is_1h ? 4 : is_4h ? 5 : is_1d ? 6 : is_1w ? 7 : is_1mo ? 8 : 0
+qk     = i_qt ? chKind : 0
+ymwTfOk = i_ym_weak and chartSec >= 86400
+intra  = chartSec < 86400
+
+f_up(int s) =>
+    s == 60 ? "5" : s == 300 ? "15" : s == 900 ? "60" : s == 3600 ? "240" : s == 14400 ? "D" : s == 86400 ? "W" : s == 604800 ? "M" : ""
+
+f_dn(int s) =>
+    s == 300 ? "1" : s == 900 ? "5" : s == 3600 ? "15" : s == 14400 ? "60" : s == 86400 ? "240" : s == 604800 ? "D" : ""
+
+htfR  = i_htf == "אוטומטי" ? f_up(chartSec) : i_htf
+htfOk = htfR != "" and timeframe.in_seconds(htfR) > chartSec
+htfS  = htfOk ? htfR : timeframe.period
+ltfR  = i_ltf == "אוטומטי" ? f_dn(chartSec) : i_ltf
+ltfOk = ltfR != "" and timeframe.in_seconds(ltfR) < chartSec
+ltfS  = ltfOk ? ltfR : timeframe.period
+
+f_tfn(string s) =>
+    s == "1" ? "1m" : s == "5" ? "5m" : s == "15" ? "15m" : s == "60" ? "1H" : s == "240" ? "4H" : s == "D" ? "1D" : s == "W" ? "1W" : s == "M" ? "1Mo" : s
+
+// ══════════════════════════════════════════════════════════════
+//  ASSETS
+// ══════════════════════════════════════════════════════════════
+
+f_nm(string s) =>
+    parts = str.split(s, ":")
+    r = str.replace_all(str.replace_all(array.get(parts, array.size(parts) - 1), "1!", ""), "2!", "")
+    r == "MNQ" ? "NQ" : r == "MES" ? "ES" : r == "MYM" ? "YM" : r == "M2K" ? "RTY" : r == "MGC" ? "GC" : r
+
+nmN = f_nm(i_sym1)
+nmE = f_nm(i_sym2)
+nmY = f_nm(i_sym3)
+nmR = f_nm(i_sym4)
+
+usePair = i_use4 and i_use_ym
+sym4    = i_use4 ? i_sym4 : i_sym3
+
+settleMode = i_settle == "דלוק" ? settlement_as_close.on : i_settle == "ברירת המחדל של הסימבול" ? settlement_as_close.inherit : settlement_as_close.off
+adjMode    = i_adjust == "מיושר לגלגול" ? backadjustment.on : i_adjust == "בלי יישור" ? backadjustment.off : backadjustment.inherit
+
+tk_nq = ticker.modify(i_sym1, backadjustment = adjMode, settlement_as_close = settleMode)
+tk_es = ticker.modify(i_sym2, backadjustment = adjMode, settlement_as_close = settleMode)
+tk_ym = ticker.modify(i_sym3, backadjustment = adjMode, settlement_as_close = settleMode)
+tk_rt = ticker.modify(sym4,   backadjustment = adjMode, settlement_as_close = settleMode)
+tk_ch = ticker.modify(syminfo.tickerid, backadjustment = adjMode, settlement_as_close = settleMode)
+
+f_sec(simple string sym) =>
+    [o, h, l, c] = request.security(sym, timeframe.period, [open, high, low, close], lookahead = barmerge.lookahead_off, gaps = barmerge.gaps_off)
+    [o, h, l, c]
+
+[a_nq_o, a_nq_h, a_nq_l, a_nq_c] = f_sec(tk_nq)
+[a_es_o, a_es_h, a_es_l, a_es_c] = f_sec(tk_es)
+[a_ym_o, a_ym_h, a_ym_l, a_ym_c] = f_sec(tk_ym)
+[a_rt_o, a_rt_h, a_rt_l, a_rt_c] = f_sec(tk_rt)
+
+f_dir(float o, float c) =>
+    c > o ? 1 : c < o ? -1 : 0
+
+nq_dir = f_dir(a_nq_o, a_nq_c)
+es_dir = f_dir(a_es_o, a_es_c)
+ym_dir = f_dir(a_ym_o, a_ym_c)
+rt_dir = f_dir(a_rt_o, a_rt_c)
+
+// ══════════════════════════════════════════════════════════════
+//  PCP — the same rules as ADI
+// ══════════════════════════════════════════════════════════════
+
+nq_ok = i_use_nq and (not i_ignore_doji or nq_dir != 0)
+es_ok = i_use_es and (not i_ignore_doji or es_dir != 0)
+ym_ok = i_use_ym and (not i_ignore_doji or ym_dir != 0)
+rt_ok = usePair  and (not i_ignore_doji or rt_dir != 0)
+
+div_es_nq = nq_ok and es_ok and nq_dir != es_dir
+div_ym    = ym_ok and ym_dir > 0 and ((es_ok and es_dir < 0) or (nq_ok and nq_dir < 0))
+div_ymw   = ymwTfOk and ym_ok and ym_dir < 0 and ((es_ok and es_dir > 0) or (nq_ok and nq_dir > 0)) and not div_es_nq and not div_ym
+is_pcp    = div_es_nq or div_ym or div_ymw
+div_pair  = usePair and ym_ok and rt_ok and ym_dir != rt_dir
+ymP       = div_ym or div_ymw
+
+// ══════════════════════════════════════════════════════════════
+//  QUARTERLY THEORY  (container from ADI, plus the quarter's own id)
+// ══════════════════════════════════════════════════════════════
+
+f_cyc(int t, int k) =>
+    int  cont = na
+    bool q1   = false
+    if not na(t) and k > 0
+        td   = t + SHIFT
+        y    = year(td, NY)
+        m    = month(td, NY)
+        w    = dayofweek(td, NY)
+        hh   = hour(td, NY)
+        mod  = hh * 60 + minute(td, NY)
+        d0   = timestamp(NY, y, m, dayofmonth(td, NY), 0, 0)
+        dsm  = w == dayofweek.sunday ? 6 : w - 2
+        mon  = d0 - dsm * DAY_MS
+        tue  = mon + DAY_MS
+        thu  = mon + 3 * DAY_MS
+        fri  = w == dayofweek.friday
+        dead = month(tue, NY) != month(thu, NY)
+        wkN  = dead ? 0 : math.floor((dayofmonth(tue, NY) - 1) / 7) + 1
+        if k == 1
+            cont := d0 + math.floor(mod / 90)
+            q1   := (mod % 90) * 2 < 45
+        else if k == 2
+            s6   = math.floor(hh / 6)
+            cont := d0 + s6
+            q1   := mod - s6 * 360 < 90
+        else if k == 3
+            cont := d0
+            q1   := hh < 6
+        else if k == 4
+            cont := mon
+            q1   := w == dayofweek.monday or fri
+        else if k == 5
+            own  = dead or wkN == 5
+            cont := own ? mon : year(tue, NY) * 12 + month(tue, NY)
+            q1   := own or wkN == 1 or (wkN == 4 and fri)
+        else if k == 6
+            qm = math.floor((m - 1) / 3)
+            qs = timestamp(NY, y, qm * 3 + 1, 1, 0, 0)
+            qe = qm == 3 ? timestamp(NY, y + 1, 1, 1, 0, 0) : timestamp(NY, y, qm * 3 + 4, 1, 0, 0)
+            di = math.round((d0 - qs) / DAY_MS)
+            ql = math.round((qe - qs) / DAY_MS)
+            cont := y * 4 + qm
+            q1   := math.floor(di * 4 / ql) == 0
+        else if k == 7
+            tm = month(tue, NY)
+            ty = year(tue, NY)
+            cont := tm >= 4 ? ty : ty - 1
+            q1   := tm >= 4 and tm <= 6
+        else if k == 8
+            cont := math.floor((y - 2023) / 4)
+            q1   := (y - 2023) % 4 == 0
+    [cont, q1]
+
+// The QUARTER a time falls in — an id that is equal for two times in the
+// same quarter. One step down from f_cyc's container on the same ladder.
+f_qid(int t, int k) =>
+    int id = na
+    if not na(t) and k > 0
+        td  = t + SHIFT
+        y   = year(td, NY)
+        m   = month(td, NY)
+        w   = dayofweek(td, NY)
+        hh  = hour(td, NY)
+        mod = hh * 60 + minute(td, NY)
+        d0  = timestamp(NY, y, m, dayofmonth(td, NY), 0, 0)
+        dsm = w == dayofweek.sunday ? 6 : w - 2
+        mon = d0 - dsm * DAY_MS
+        tue = mon + DAY_MS
+        if k == 1
+            id := d0 + math.floor(mod * 2 / 45)
+        else if k == 2
+            id := d0 + math.floor(mod / 90)
+        else if k == 3
+            id := d0 + math.floor(hh / 6)
+        else if k == 4
+            id := d0
+        else if k == 5
+            id := mon
+        else if k == 6
+            qm = math.floor((m - 1) / 3)
+            qs = timestamp(NY, y, qm * 3 + 1, 1, 0, 0)
+            qe = qm == 3 ? timestamp(NY, y + 1, 1, 1, 0, 0) : timestamp(NY, y, qm * 3 + 4, 1, 0, 0)
+            di = math.round((d0 - qs) / DAY_MS)
+            ql = math.round((qe - qs) / DAY_MS)
+            id := y * 16 + qm * 4 + math.floor(di * 4 / ql)
+        else if k == 7
+            id := year(tue, NY) * 4 + math.floor((month(tue, NY) - 1) / 3)
+        else if k == 8
+            id := y
+    id
+
+// Which quarter of its container, 1–4 (0 where there is none: Friday on 1H,
+// week 5 and a dead week on 4H, Sunday).
+f_qn(int t, int k) =>
+    int q = 0
+    if not na(t) and k > 0
+        td  = t + SHIFT
+        y   = year(td, NY)
+        m   = month(td, NY)
+        w   = dayofweek(td, NY)
+        hh  = hour(td, NY)
+        mod = hh * 60 + minute(td, NY)
+        d0  = timestamp(NY, y, m, dayofmonth(td, NY), 0, 0)
+        dsm = w == dayofweek.sunday ? 6 : w - 2
+        mon = d0 - dsm * DAY_MS
+        tue = mon + DAY_MS
+        thu = mon + 3 * DAY_MS
+        if k == 1
+            q := math.floor((mod % 90) * 2 / 45) + 1
+        else if k == 2
+            q := math.floor((mod - math.floor(hh / 6) * 360) / 90) + 1
+        else if k == 3
+            q := math.floor(hh / 6) + 1
+        else if k == 4
+            q := w == dayofweek.sunday or w == dayofweek.friday ? 0 : w - 1
+        else if k == 5
+            dead = month(tue, NY) != month(thu, NY)
+            wkN  = math.floor((dayofmonth(tue, NY) - 1) / 7) + 1
+            q := dead or wkN >= 5 ? 0 : wkN
+        else if k == 6
+            qm = math.floor((m - 1) / 3)
+            qs = timestamp(NY, y, qm * 3 + 1, 1, 0, 0)
+            qe = qm == 3 ? timestamp(NY, y + 1, 1, 1, 0, 0) : timestamp(NY, y, qm * 3 + 4, 1, 0, 0)
+            di = math.round((d0 - qs) / DAY_MS)
+            ql = math.round((qe - qs) / DAY_MS)
+            q := math.floor(di * 4 / ql) + 1
+        else if k == 7
+            tm = month(tue, NY)
+            q := tm >= 4 ? math.floor((tm - 4) / 3) + 1 : 4
+        else if k == 8
+            q := (y - 2023) % 4 + 1
+    q
+
+// The previous quarter's high and low, the current one's, and the current
+// one's BEFORE this bar — which is what says "this candle is the first to
+// take it".
+type QS
+    int   id = na
+    float pH = na
+    float pL = na
+    float cH = na
+    float cL = na
+    float bH = na
+    float bL = na
+
+f_qs(QS s, int id, float h, float l) =>
+    if not na(id) and (na(s.id) or id != s.id)
+        s.pH := s.cH
+        s.pL := s.cL
+        s.cH := na
+        s.cL := na
+        s.id := id
+    s.bH := s.cH
+    s.bL := s.cL
+    if not na(h) and not na(l)
+        s.cH := na(s.cH) ? h : math.max(s.cH, h)
+        s.cL := na(s.cL) ? l : math.min(s.cL, l)
+    s.pH
+
+qidNow = f_qid(time, qk)
+[cNow, q1Now] = f_cyc(time, qk)
+[cSw, q1Sw]   = f_cyc(time[1], qk)
+qNum = f_qn(time, qk)
+
+var QS qC = QS.new()
+var QS qN = QS.new()
+var QS qE = QS.new()
+var QS qY = QS.new()
+var QS qR = QS.new()
+var QS kC = QS.new()
+f_qs(qC, qidNow, high, low)
+f_qs(qN, qidNow, a_nq_h, a_nq_l)
+f_qs(qE, qidNow, a_es_h, a_es_l)
+f_qs(qY, qidNow, a_ym_h, a_ym_l)
+f_qs(qR, qidNow, a_rt_h, a_rt_l)
+f_qs(kC, cNow, high, low)
+
+// SSMT: within the quarter, one decider has taken the previous quarter's
+// extreme and the other has not.
+f_ss(QS a, QS b, bool hi) =>
+    na(a.pH) or na(b.pH) or na(a.pL) or na(b.pL) ? false : hi ? ((a.cH > a.pH) != (b.cH > b.pH)) : ((a.cL < a.pL) != (b.cL < b.pL))
+
+core2 = i_use_nq and i_use_es
+ssHT = core2 and f_ss(qN, qE, true)
+ssLT = core2 and f_ss(qN, qE, false)
+ssHP = usePair and f_ss(qY, qR, true)
+ssLP = usePair and f_ss(qY, qR, false)
+
+// ══════════════════════════════════════════════════════════════
+//  CONTEXT AT THE PCP'S CLOSE
+// ══════════════════════════════════════════════════════════════
+
+// ── FVG on the chart's own timeframe. A zone is VIRGIN until anything
+//    touches it; the first touch is recorded and the zone is gone.
+var array<float> fbB = array.new<float>()   // bearish zones above: their bottom
+var array<float> fuT = array.new<float>()   // bullish zones below: their top
+cfBear = false
+cfBull = false
+fi = 0
+while fi < array.size(fbB)
+    if high >= array.get(fbB, fi)
+        cfBear := true
+        array.remove(fbB, fi)
+    else
+        fi += 1
+fi := 0
+while fi < array.size(fuT)
+    if low <= array.get(fuT, fi)
+        cfBull := true
+        array.remove(fuT, fi)
+    else
+        fi += 1
+if low[2] > high
+    array.push(fbB, high)
+if high[2] < low
+    array.push(fuT, low)
+if array.size(fbB) > 40
+    array.remove(fbB, 0)
+if array.size(fuT) > 40
+    array.remove(fuT, 0)
+
+// ── FVG on the higher timeframe. Computed in that timeframe's context and
+//    returned AS OF THE END OF THE PREVIOUS higher bar — the output is read
+//    before this bar updates the zones — so lookahead_on leaks nothing.
+f_hfvg() =>
+    var array<float> bb = array.new<float>()
+    var array<float> ut = array.new<float>()
+    float ob = na
+    float ou = na
+    if array.size(bb) > 0
+        for k = 0 to array.size(bb) - 1
+            v = array.get(bb, k)
+            if na(ob) or v < ob
+                ob := v
+    if array.size(ut) > 0
+        for k = 0 to array.size(ut) - 1
+            v = array.get(ut, k)
+            if na(ou) or v > ou
+                ou := v
+    i = 0
+    while i < array.size(bb)
+        if high >= array.get(bb, i)
+            array.remove(bb, i)
+        else
+            i += 1
+    i := 0
+    while i < array.size(ut)
+        if low <= array.get(ut, i)
+            array.remove(ut, i)
+        else
+            i += 1
+    if low[2] > high
+        array.push(bb, high)
+    if high[2] < low
+        array.push(ut, low)
+    if array.size(bb) > 40
+        array.remove(bb, 0)
+    if array.size(ut) > 40
+        array.remove(ut, 0)
+    [ob, ou]
+
+[hfB, hfU] = request.security(tk_ch, htfS, f_hfvg(), lookahead = barmerge.lookahead_on)
+
+// A zone the chart already touched earlier inside the same higher bar is no
+// longer virgin, even though the higher timeframe has not noticed yet.
+var float usedB = na
+var float usedU = na
+hfBear = htfOk and not na(hfB) and high >= hfB and (na(usedB) or hfB != usedB)
+hfBull = htfOk and not na(hfU) and low <= hfU and (na(usedU) or hfU != usedU)
+if not na(hfB) and high >= hfB
+    usedB := hfB
+if not na(hfU) and low <= hfU
+    usedU := hfU
+
+// ── NDOG / NWOG: the gap between the last close before the 18:00 open and
+//    that open. Virgin until a later candle trades into it.
+dayId = f_qid(time, 4)
+wkId  = f_qid(time, 5)
+var array<float> ndB = array.new<float>()
+var array<float> ndT = array.new<float>()
+var array<float> nwB = array.new<float>()
+var array<float> nwT = array.new<float>()
+
+f_gap(array<float> B, array<float> T) =>
+    hit = false
+    i = 0
+    while i < array.size(B)
+        if high >= array.get(B, i) and low <= array.get(T, i)
+            hit := true
+            array.remove(B, i)
+            array.remove(T, i)
+        else
+            i += 1
+    hit
+
+ndHit = intra and f_gap(ndB, ndT)
+nwHit = intra and f_gap(nwB, nwT)
+gLo = math.min(close[1], open)
+gHi = math.max(close[1], open)
+if intra and not na(close[1]) and gHi > gLo
+    if dayId != dayId[1]
+        array.push(ndB, gLo)
+        array.push(ndT, gHi)
+        if array.size(ndB) > 5
+            array.remove(ndB, 0)
+            array.remove(ndT, 0)
+    if wkId != wkId[1]
+        array.push(nwB, gLo)
+        array.push(nwT, gHi)
+        if array.size(nwB) > 3
+            array.remove(nwB, 0)
+            array.remove(nwT, 0)
+
+// ── A regional extreme, not a three-candle one.
+regHi = high >= ta.highest(high, i_regN)
+regLo = low  <= ta.lowest(low, i_regN)
+
+// ── SMT between swings: the PCP candle takes the last swing on one decider
+//    and not on the other.
+pNh = ta.pivothigh(a_nq_h, i_smtL, i_smtL)
+pNl = ta.pivotlow(a_nq_l, i_smtL, i_smtL)
+pEh = ta.pivothigh(a_es_h, i_smtL, i_smtL)
+pEl = ta.pivotlow(a_es_l, i_smtL, i_smtL)
+pYh = ta.pivothigh(a_ym_h, i_smtL, i_smtL)
+pYl = ta.pivotlow(a_ym_l, i_smtL, i_smtL)
+pRh = ta.pivothigh(a_rt_h, i_smtL, i_smtL)
+pRl = ta.pivotlow(a_rt_l, i_smtL, i_smtL)
+var float lNh = na
+var float lNl = na
+var float lEh = na
+var float lEl = na
+var float lYh = na
+var float lYl = na
+var float lRh = na
+var float lRl = na
+lNh := na(pNh) ? lNh : pNh
+lNl := na(pNl) ? lNl : pNl
+lEh := na(pEh) ? lEh : pEh
+lEl := na(pEl) ? lEl : pEl
+lYh := na(pYh) ? lYh : pYh
+lYl := na(pYl) ? lYl : pYl
+lRh := na(pRh) ? lRh : pRh
+lRl := na(pRl) ? lRl : pRl
+
+f_smt(float xA, float pA, float xB, float pB, bool hi) =>
+    na(xA) or na(pA) or na(xB) or na(pB) ? false : hi ? ((xA > pA) != (xB > pB)) : ((xA < pA) != (xB < pB))
+
+smHT = core2 and f_smt(a_nq_h, lNh, a_es_h, lEh, true)
+smLT = core2 and f_smt(a_nq_l, lNl, a_es_l, lEl, false)
+smHP = usePair and f_smt(a_ym_h, lYh, a_rt_h, lRh, true)
+smLP = usePair and f_smt(a_ym_l, lYl, a_rt_l, lRl, false)
+
+// ── The higher candle being built: is it diverging too, and which of its
+//    candles is this one?
+hchg = timeframe.change(htfS)
+var float hoN = na
+var float hoE = na
+var float hoY = na
+var float hoR = na
+var int   hpos = 0
+if hchg or na(hoN)
+    hoN  := a_nq_o
+    hoE  := a_es_o
+    hoY  := a_ym_o
+    hoR  := a_rt_o
+    hpos := 1
+else
+    hpos += 1
+hdN = f_dir(hoN, a_nq_c)
+hdE = f_dir(hoE, a_es_c)
+hdY = f_dir(hoY, a_ym_c)
+hdR = f_dir(hoR, a_rt_c)
+hdT = (core2 and hdN != hdE) or (i_use_ym and hdY > 0 and ((i_use_es and hdE < 0) or (i_use_nq and hdN < 0)))
+hdP = usePair and hdY != hdR
+
+// ── The lower timeframe inside the candle.
+[lnH, lnL, lnO, lnC] = request.security_lower_tf(tk_nq, ltfS, [high, low, open, close])
+[leH, leL, leO, leC] = request.security_lower_tf(tk_es, ltfS, [high, low, open, close])
+[lyH, lyL, lyO, lyC] = request.security_lower_tf(tk_ym, ltfS, [high, low, open, close])
+[lrH, lrL, lrO, lrC] = request.security_lower_tf(tk_rt, ltfS, [high, low, open, close])
+[lcH, lcL]           = request.security_lower_tf(tk_ch, ltfS, [high, low])
+
+// Where inside the candle its extreme was made (third 1–3), and whether the
+// lower candle that made it is itself a PSP: a swing there, confirmed by the
+// next lower candle inside this one, on a lower candle that diverges.
+f_ltfAt(bool bear, bool pair) =>
+    n = array.size(lcH)
+    int  j     = -1
+    int  third = 0
+    bool psp   = false
+    if ltfOk and n >= 3
+        ext = bear ? array.max(lcH) : array.min(lcL)
+        for i = 0 to n - 1
+            v = bear ? array.get(lcH, i) : array.get(lcL, i)
+            if j < 0 and (bear ? v >= ext : v <= ext)
+                j := i
+        third := j * 3 < n ? 1 : j * 3 < 2 * n ? 2 : 3
+        same = array.size(lnO) == n and array.size(leO) == n and array.size(lyO) == n and array.size(lrO) == n
+        if same and j >= 1 and j <= n - 2
+            xj = bear ? array.get(lcH, j) : array.get(lcL, j)
+            xp = bear ? array.get(lcH, j - 1) : array.get(lcL, j - 1)
+            xn = bear ? array.get(lcH, j + 1) : array.get(lcL, j + 1)
+            sw = bear ? (xj > xp and xj > xn) : (xj < xp and xj < xn)
+            dN = f_dir(array.get(lnO, j), array.get(lnC, j))
+            dE = f_dir(array.get(leO, j), array.get(leC, j))
+            dY = f_dir(array.get(lyO, j), array.get(lyC, j))
+            dR = f_dir(array.get(lrO, j), array.get(lrC, j))
+            dv = pair ? (usePair and dY != dR) : ((core2 and dN != dE) or (i_use_ym and dY > 0 and ((i_use_es and dE < 0) or (i_use_nq and dN < 0))))
+            psp := sw and dv
+    [third, psp]
+
+[thTB, lpTB] = f_ltfAt(true, false)
+[thTL, lpTL] = f_ltfAt(false, false)
+[thPB, lpPB] = f_ltfAt(true, true)
+[thPL, lpPL] = f_ltfAt(false, true)
+
+// ══════════════════════════════════════════════════════════════
+//  THE SCENARIOS
+// ══════════════════════════════════════════════════════════════
+
+var array<string> FN = array.from(
+     "FVG בתול — מסגרת הגרף",
+     "FVG בתול — מסגרת גבוהה",
+     "NDOG בתול",
+     "NWOG בתול",
+     "לוקח קצה רבע קודם",
+     "…והוא הראשון שלוקח",
+     "…ונסגר בחזרה פנימה",
+     "קיצון אזורי (N נרות)",
+     "קיצון המיכל עד עכשיו",
+     "SMT בין סווינגים",
+     "SSMT ברבע",
+     "הנר הגבוה גם בדיברגנס",
+     "נר 1 בתוך הנר הגבוה",
+     "נר 2 בתוך הנר הגבוה",
+     "נר 3 בתוך הנר הגבוה",
+     "נר 4+ בתוך הנר הגבוה",
+     "PSP נמוך בקצה הנר",
+     "הקצה נוצר בשליש ראשון",
+     "…בשליש אמצעי",
+     "…בשליש אחרון",
+     "PCP ב-Q1 של המיכל",
+     "PCP ב-Q2",
+     "PCP ב-Q3",
+     "PCP ב-Q4",
+     "נר 3: לא נלקח אחרי ⅓",
+     "נר 3: לא נלקח אחרי ⅔",
+     "⅔ + שבר את הצד הנגדי",
+     "⅓ + התרחק X ATR")
+
+f_feat(bool bear, bool pair, int th, bool lp) =>
+    a = array.new<bool>(NF, false)
+    array.set(a, 0, bear ? cfBear : cfBull)
+    array.set(a, 1, bear ? hfBear : hfBull)
+    array.set(a, 2, ndHit)
+    array.set(a, 3, nwHit)
+    sw = bear ? (not na(qC.pH) and high > qC.pH) : (not na(qC.pL) and low < qC.pL)
+    array.set(a, 4, sw)
+    array.set(a, 5, sw and (bear ? (na(qC.bH) or qC.bH <= qC.pH) : (na(qC.bL) or qC.bL >= qC.pL)))
+    array.set(a, 6, sw and (bear ? close < qC.pH : close > qC.pL))
+    array.set(a, 7, bear ? regHi : regLo)
+    array.set(a, 8, qk > 0 and (bear ? (na(kC.bH) or high > kC.bH) : (na(kC.bL) or low < kC.bL)))
+    array.set(a, 9, pair ? (bear ? smHP : smLP) : (bear ? smHT : smLT))
+    array.set(a, 10, pair ? (bear ? ssHP : ssLP) : (bear ? ssHT : ssLT))
+    array.set(a, 11, htfOk and (pair ? hdP : hdT))
+    array.set(a, 12, htfOk and hpos == 1)
+    array.set(a, 13, htfOk and hpos == 2)
+    array.set(a, 14, htfOk and hpos == 3)
+    array.set(a, 15, htfOk and hpos >= 4)
+    array.set(a, 16, lp)
+    array.set(a, 17, th == 1)
+    array.set(a, 18, th == 2)
+    array.set(a, 19, th == 3)
+    array.set(a, 20, qNum == 1)
+    array.set(a, 21, qNum == 2)
+    array.set(a, 22, qNum == 3)
+    array.set(a, 23, qNum == 4)
+    a
+
+// ══════════════════════════════════════════════════════════════
+//  THE ANSWER, ONE CANDLE LATER
+// ══════════════════════════════════════════════════════════════
+
+// The PCP candle is [1] now, the one before it [2].
+cH1  = high[1]
+cL1  = low[1]
+atr  = ta.atr(14)
+atr1 = atr[1]
+nh1 = a_nq_h[1]
+nl1 = a_nq_l[1]
+nh2 = a_nq_h[2]
+nl2 = a_nq_l[2]
+eh1 = a_es_h[1]
+el1 = a_es_l[1]
+eh2 = a_es_h[2]
+el2 = a_es_l[2]
+yh1 = a_ym_h[1]
+yl1 = a_ym_l[1]
+yh2 = a_ym_h[2]
+yl2 = a_ym_l[2]
+rh1 = a_rt_h[1]
+rl1 = a_rt_l[1]
+rh2 = a_rt_h[2]
+rl2 = a_rt_l[2]
+ymP1 = ymP[1]
+
+f_sh(float h) => h[1] > h[2] and h[1] > h
+f_sl(float l) => l[1] < l[2] and l[1] < l
+
+shN = f_sh(a_nq_h)
+slN = f_sl(a_nq_l)
+shE = f_sh(a_es_h)
+slE = f_sl(a_es_l)
+shY = f_sh(a_ym_h)
+slY = f_sl(a_ym_l)
+shR = f_sh(a_rt_h)
+slR = f_sl(a_rt_l)
+
+pspTB = (i_use_nq and shN) or (i_use_es and shE) or (ymP1 and shY)
+pspTL = (i_use_nq and slN) or (i_use_es and slE) or (ymP1 and slY)
+pspPB = shY or shR
+pspPL = slY or slR
+
+// Inside the third candle: is the extreme still standing after the first
+// third / two thirds of it, on any asset that could still swing there?
+f_alive(array<float> a, float lvl, float frac, bool bear) =>
+    n = array.size(a)
+    bool r = false
+    if n > 0 and not na(lvl)
+        m  = math.max(1, math.ceil(n * frac))
+        sl = array.slice(a, 0, m)
+        ex = bear ? array.max(sl) : array.min(sl)
+        r := bear ? ex < lvl : ex > lvl
+    r
+
+f_b3(bool bear, bool pair) =>
+    a13 = false
+    a23 = false
+    if ltfOk
+        if pair
+            cY = bear ? yh1 > yh2 : yl1 < yl2
+            cR = bear ? rh1 > rh2 : rl1 < rl2
+            a13 := (cY and f_alive(bear ? lyH : lyL, bear ? yh1 : yl1, 1.0 / 3.0, bear)) or (cR and f_alive(bear ? lrH : lrL, bear ? rh1 : rl1, 1.0 / 3.0, bear))
+            a23 := (cY and f_alive(bear ? lyH : lyL, bear ? yh1 : yl1, 2.0 / 3.0, bear)) or (cR and f_alive(bear ? lrH : lrL, bear ? rh1 : rl1, 2.0 / 3.0, bear))
+        else
+            cN = i_use_nq and (bear ? nh1 > nh2 : nl1 < nl2)
+            cE = i_use_es and (bear ? eh1 > eh2 : el1 < el2)
+            cY = ymP1 and (bear ? yh1 > yh2 : yl1 < yl2)
+            a13 := (cN and f_alive(bear ? lnH : lnL, bear ? nh1 : nl1, 1.0 / 3.0, bear)) or (cE and f_alive(bear ? leH : leL, bear ? eh1 : el1, 1.0 / 3.0, bear)) or (cY and f_alive(bear ? lyH : lyL, bear ? yh1 : yl1, 1.0 / 3.0, bear))
+            a23 := (cN and f_alive(bear ? lnH : lnL, bear ? nh1 : nl1, 2.0 / 3.0, bear)) or (cE and f_alive(bear ? leH : leL, bear ? eh1 : el1, 2.0 / 3.0, bear)) or (cY and f_alive(bear ? lyH : lyL, bear ? yh1 : yl1, 2.0 / 3.0, bear))
+    opp  = false
+    away = false
+    nC = array.size(lcH)
+    if ltfOk and nC > 0
+        m13 = math.max(1, math.ceil(nC / 3.0))
+        m23 = math.max(1, math.ceil(nC * 2.0 / 3.0))
+        opp  := a23 and (bear ? array.min(array.slice(lcL, 0, m23)) < cL1 : array.max(array.slice(lcH, 0, m23)) > cH1)
+        away := a13 and (bear ? array.min(array.slice(lcL, 0, m13)) <= cH1 - i_awayX * atr1 : array.max(array.slice(lcH, 0, m13)) >= cL1 + i_awayX * atr1)
+    [a13, a23, opp, away]
+
+[b1TB, b2TB, boTB, baTB] = f_b3(true, false)
+[b1TL, b2TL, boTL, baTL] = f_b3(false, false)
+[b1PB, b2PB, boPB, baPB] = f_b3(true, true)
+[b1PL, b2PL, boPL, baPL] = f_b3(false, true)
+
+// ══════════════════════════════════════════════════════════════
+//  STATISTICS
+//  Index g*NR + row: g 0 = triad, 1 = pair. Rows 0..NF-1 the scenarios,
+//  NF the base, NF+1 and NF+2 the two combinations.
+// ══════════════════════════════════════════════════════════════
+
+f_parse(string s) =>
+    out = array.new<int>()
+    if str.length(s) > 0
+        parts = str.split(s, ",")
+        for p in parts
+            v = str.tonumber(str.replace_all(p, " ", ""))
+            if not na(v) and v >= 0 and v < NF
+                array.push(out, int(v))
+    out
+
+var array<int> cmbA = f_parse(i_cA)
+var array<int> cmbB = f_parse(i_cB)
+
+f_match(array<bool> f, array<int> c) =>
+    ok = array.size(c) > 0
+    if ok
+        for k = 0 to array.size(c) - 1
+            if not array.get(f, array.get(c, k))
+                ok := false
+    ok
+
+var array<int> sN = array.new<int>(NR * 2, 0)
+var array<int> sP = array.new<int>(NR * 2, 0)
+var array<int> hN = array.new<int>(NR * 2, 0)
+var array<int> hW = array.new<int>(NR * 2, 0)
+var array<int> tN = array.new<int>(NR * 2, 0)
+var array<int> tW = array.new<int>(NR * 2, 0)
+
+f_inc(array<int> a, int i) =>
+    array.set(a, i, array.get(a, i) + 1)
+    i
+
+f_rec(array<int> N, array<int> W, array<bool> f, int g, bool win) =>
+    base = g * NR
+    for i = 0 to NF - 1
+        if array.get(f, i)
+            f_inc(N, base + i)
+            if win
+                f_inc(W, base + i)
+    f_inc(N, base + NF)
+    if win
+        f_inc(W, base + NF)
+    if f_match(f, cmbA)
+        f_inc(N, base + NF + 1)
+        if win
+            f_inc(W, base + NF + 1)
+    if f_match(f, cmbB)
+        f_inc(N, base + NF + 2)
+        if win
+            f_inc(W, base + NF + 2)
+    win
+
+// A confirmed PSP is followed until its levels are taken, it reaches its
+// target, or its container ends.
+type Trk
+    bool        bear
+    bool        pair
+    array<bool> f
+    float       lA          // decider A's level (1, or 3 in the pair)
+    float       lB          // decider B's level (2, or 4 in the pair)
+    float       own         // the chart's own level
+    float       tgt
+    int         cont
+    int         born
+    int         hold = 0    // 0 open · 1 held · -1 taken · 2 not counted
+    int         tg   = 0    // 0 open · 1 reached · -1 failed · 2 not counted
+
+var array<Trk> trk = array.new<Trk>()
+
+f_open(array<bool> f, bool pair, bool bear, bool psp, bool a13, bool a23, bool opp, bool away) =>
+    array.set(f, 24, a13)
+    array.set(f, 25, a23)
+    array.set(f, 26, opp)
+    array.set(f, 27, away)
+    f_rec(sN, sP, f, pair ? 1 : 0, psp)
+    if psp
+        lA  = pair ? (bear ? yh1 : yl1) : (i_use_nq ? (bear ? nh1 : nl1) : na)
+        lB  = pair ? (bear ? rh1 : rl1) : (i_use_es ? (bear ? eh1 : el1) : na)
+        own = bear ? cH1 : cL1
+        tgt = bear ? own - i_tgtX * atr1 : own + i_tgtX * atr1
+        // its container already ended by the time it was confirmed
+        dead = qk > 0 and not na(cSw) and not na(cNow) and cSw != cNow
+        array.push(trk, Trk.new(bear, pair, f, lA, lB, own, tgt, cSw, bar_index, dead ? 2 : 0, dead ? 2 : 0))
+        if array.size(trk) > 400
+            array.remove(trk, 0)
+    psp
+
+f_tk(float lvl, bool bear, float h, float l, float c) =>
+    na(lvl) ? false : bear ? (i_wick ? h : c) > lvl : (i_wick ? l : c) < lvl
+
+var bool cTB = false
+var bool cTL = false
+var bool cPB = false
+var bool cPL = false
+var array<bool> fTB = array.new<bool>()
+var array<bool> fTL = array.new<bool>()
+var array<bool> fPB = array.new<bool>()
+var array<bool> fPL = array.new<bool>()
+var int firstT = na
+
+if barstate.isconfirmed and bar_index > 3
+    // ── 1. last candle's PCPs get their answer
+    if cTB
+        f_open(fTB, false, true,  pspTB, b1TB, b2TB, boTB, baTB)
+    if cTL
+        f_open(fTL, false, false, pspTL, b1TL, b2TL, boTL, baTL)
+    if cPB
+        f_open(fPB, true,  true,  pspPB, b1PB, b2PB, boPB, baPB)
+    if cPL
+        f_open(fPL, true,  false, pspPL, b1PL, b2PL, boPL, baPL)
+
+    // ── 2. the PSPs already being followed
+    ti = 0
+    while ti < array.size(trk)
+        t = array.get(trk, ti)
+        if t.born < bar_index
+            g    = t.pair ? 1 : 0
+            age  = bar_index - t.born
+            expd = (qk > 0 and not na(t.cont) and not na(cNow) and t.cont != cNow) or (i_maxB > 0 and age > i_maxB) or (qk == 0 and i_maxB == 0 and age > 50)
+            if t.hold == 0
+                if expd
+                    t.hold := 1
+                else
+                    if f_tk(t.lA, t.bear, t.pair ? a_ym_h : a_nq_h, t.pair ? a_ym_l : a_nq_l, t.pair ? a_ym_c : a_nq_c)
+                        t.lA := na
+                    if f_tk(t.lB, t.bear, t.pair ? a_rt_h : a_es_h, t.pair ? a_rt_l : a_es_l, t.pair ? a_rt_c : a_es_c)
+                        t.lB := na
+                    if na(t.lA) and na(t.lB)
+                        t.hold := -1
+                if t.hold != 0
+                    f_rec(hN, hW, t.f, g, t.hold == 1)
+            if t.tg == 0
+                if expd
+                    t.tg := -1
+                else if f_tk(t.own, t.bear, high, low, close)
+                    t.tg := -1
+                else if t.bear ? low <= t.tgt : high >= t.tgt
+                    t.tg := 1
+                if t.tg != 0
+                    f_rec(tN, tW, t.f, g, t.tg == 1)
+        if t.hold != 0 and t.tg != 0
+            array.remove(trk, ti)
+        else
+            ti += 1
+
+    // ── 3. this candle, as a PCP waiting for its answer
+    inRange = time >= i_from
+    cTB := inRange and is_pcp and ((i_use_nq and a_nq_h > nh1) or (i_use_es and a_es_h > eh1) or (ymP and a_ym_h > yh1))
+    cTL := inRange and is_pcp and ((i_use_nq and a_nq_l < nl1) or (i_use_es and a_es_l < el1) or (ymP and a_ym_l < yl1))
+    cPB := inRange and div_pair and (a_ym_h > yh1 or a_rt_h > rh1)
+    cPL := inRange and div_pair and (a_ym_l < yl1 or a_rt_l < rl1)
+    fTB := cTB ? f_feat(true,  false, thTB, lpTB) : array.new<bool>()
+    fTL := cTL ? f_feat(false, false, thTL, lpTL) : array.new<bool>()
+    fPB := cPB ? f_feat(true,  true,  thPB, lpPB) : array.new<bool>()
+    fPL := cPL ? f_feat(false, true,  thPL, lpPL) : array.new<bool>()
+    if na(firstT) and (cTB or cTL or cPB or cPL)
+        firstT := time
+
+// ══════════════════════════════════════════════════════════════
+//  THE TABLE
+// ══════════════════════════════════════════════════════════════
+
+tTop = i_th == "שמאל" ? position.top_left : i_th == "מרכז" ? position.top_center : position.top_right
+tMid = i_th == "שמאל" ? position.middle_left : i_th == "מרכז" ? position.middle_center : position.middle_right
+tBot = i_th == "שמאל" ? position.bottom_left : i_th == "מרכז" ? position.bottom_center : position.bottom_right
+tPos = i_tv == "למעלה" ? tTop : i_tv == "באמצע" ? tMid : tBot
+tSz  = i_tsz == "קטן" ? size.small : i_tsz == "רגיל" ? size.normal : size.tiny
+
+var table tb = table.new(tPos, 12, NR + 3, bgcolor = i_tbg, border_width = 0)
+
+f_pc(int w, int n) =>
+    n > 0 ? str.tostring(100.0 * w / n, "#") + "%" : "—"
+
+f_txt(int col, int row, string s, color c) =>
+    table.cell(tb, col, row, s, text_color = c, text_size = tSz, text_halign = text.align_center)
+    col
+
+// One group's five cells for one row.
+f_grp(int c0, int row, int g, int ri) =>
+    i   = g * NR + ri
+    n   = array.get(sN, i)
+    p   = array.get(sP, i)
+    n0  = array.get(sN, g * NR + NF)
+    p0  = array.get(sP, g * NR + NF)
+    pr  = n > 0 ? 100.0 * p / n : na
+    pr0 = n0 > 0 ? 100.0 * p0 / n0 : na
+    d   = pr - pr0
+    dim = n < i_minN
+    tc  = dim ? i_tdim : i_ttx
+    dc  = dim or na(d) ? tc : d >= 5 ? i_tup : d <= -5 ? i_tdn : tc
+    f_txt(c0, row, str.tostring(n), tc)
+    f_txt(c0 + 1, row, f_pc(p, n), dc)
+    f_txt(c0 + 2, row, ri == NF or na(d) ? "" : (d >= 0 ? "+" : "") + str.tostring(d, "#"), dc)
+    f_txt(c0 + 3, row, f_pc(array.get(hW, i), array.get(hN, i)), tc)
+    f_txt(c0 + 4, row, f_pc(array.get(tW, i), array.get(tN, i)), tc)
+    n
+
+f_cmbName(string tag, array<int> c) =>
+    s = "שילוב " + tag + ":"
+    if array.size(c) > 0
+        for k = 0 to array.size(c) - 1
+            s := s + (k == 0 ? " " : " + ") + str.tostring(array.get(c, k))
+    s
+
+showT = i_show != "זוג"
+showP = i_show != "שלישייה" and usePair
+
+if barstate.islast
+    table.clear(tb, 0, 0, 11, NR + 2)
+    cT = 2
+    cP = showT ? 7 : 2
+    last = showP ? cP + 4 : cT + 4
+
+    title = "PSP Lab · " + f_tfn(tf_str) + (ltfOk ? " · בתוך: " + f_tfn(ltfS) : "") + (htfOk ? " · מכיל: " + f_tfn(htfS) : "") + (na(firstT) ? "" : " · מאז " + str.format_time(firstT, "dd/MM/yy", NY))
+    table.cell(tb, 0, 0, title, text_color = i_ttx, text_size = tSz, text_halign = text.align_center)
+    table.merge_cells(tb, 0, 0, last, 0)
+
+    f_txt(0, 1, "", i_ttx)
+    f_txt(1, 1, "", i_ttx)
+    if showT
+        f_txt(cT, 1, "שלישייה " + nmN + " " + nmE + " " + nmY, i_ttx)
+        table.merge_cells(tb, cT, 1, cT + 4, 1)
+    if showP
+        f_txt(cP, 1, "זוג " + nmY + "/" + nmR, i_ttx)
+        table.merge_cells(tb, cP, 1, cP + 4, 1)
+
+    f_txt(0, 2, "#", i_ttx)
+    f_txt(1, 2, "תרחיש", i_ttx)
+    if showT
+        f_txt(cT, 2, "N", i_ttx)
+        f_txt(cT + 1, 2, "PSP", i_ttx)
+        f_txt(cT + 2, 2, "Δ", i_ttx)
+        f_txt(cT + 3, 2, "החזיק", i_ttx)
+        f_txt(cT + 4, 2, "יעד", i_ttx)
+    if showP
+        f_txt(cP, 2, "N", i_ttx)
+        f_txt(cP + 1, 2, "PSP", i_ttx)
+        f_txt(cP + 2, 2, "Δ", i_ttx)
+        f_txt(cP + 3, 2, "החזיק", i_ttx)
+        f_txt(cP + 4, 2, "יעד", i_ttx)
+
+    // base first, then the scenarios, then the combinations
+    row = 3
+    f_txt(0, row, "", i_ttx)
+    table.cell(tb, 1, row, "כל ה-PCP (בסיס)", text_color = i_ttx, text_size = tSz, text_halign = text.align_right)
+    if showT
+        f_grp(cT, row, 0, NF)
+    if showP
+        f_grp(cP, row, 1, NF)
+    for ri = 0 to NF - 1
+        row += 1
+        f_txt(0, row, str.tostring(ri), i_tdim)
+        table.cell(tb, 1, row, array.get(FN, ri), text_color = i_ttx, text_size = tSz, text_halign = text.align_right)
+        if showT
+            f_grp(cT, row, 0, ri)
+        if showP
+            f_grp(cP, row, 1, ri)
+    if array.size(cmbA) > 0
+        row += 1
+        f_txt(0, row, "A", i_tdim)
+        table.cell(tb, 1, row, f_cmbName("A", cmbA), text_color = i_ttx, text_size = tSz, text_halign = text.align_right)
+        if showT
+            f_grp(cT, row, 0, NF + 1)
+        if showP
+            f_grp(cP, row, 1, NF + 1)
+    if array.size(cmbB) > 0
+        row += 1
+        f_txt(0, row, "B", i_tdim)
+        table.cell(tb, 1, row, f_cmbName("B", cmbB), text_color = i_ttx, text_size = tSz, text_halign = text.align_right)
+        if showT
+            f_grp(cT, row, 0, NF + 2)
+        if showP
+            f_grp(cP, row, 1, NF + 2)
+
+// ══════════════════════════════════════════════════════════════
+//  END OF SCRIPT
+// ══════════════════════════════════════════════════════════════
