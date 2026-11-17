@@ -1,5 +1,5 @@
 //@version=5
-strategy("QT CC Backtest", shorttitle = "QT CC BT", overlay = true, max_labels_count = 100, max_lines_count = 100, max_boxes_count = 50, pyramiding = 100, process_orders_on_close = true, default_qty_type = strategy.fixed, default_qty_value = 1, commission_value = 0, slippage = 0)
+indicator("QT CC Test", shorttitle = "QT CC Test", overlay = true, max_labels_count = 100, max_lines_count = 100, max_boxes_count = 50)
 
 // ═══════════════════════════════════════════════════════════════════
 // QT Unified — SSMT/HSSMT · SSMT Fill · PSP באינדיקטור אחד
@@ -100,7 +100,7 @@ grpMtf = "מסגרות זמן"
 lowerLevels = input.int(4, "כמה מדרגות מתחת לגרף", minval = 0, maxval = 4, group = grpMtf, tooltip = "אם מופיעה שגיאת Memory limits — להוריד ל-3 או 2.")
 heavyLow    = input.bool(false, "כלול גם מסגרות כבדות מתחת לגרף", group = grpMtf, tooltip = "כבוי (מומלץ): מסגרת מתחת לגרף נכנסת רק אם בנר אחד של הגרף יש עד 16 נרות שלה — למשל בגרף 15m: 5m ו-1m · בגרף 1H: 15m ו-5m · בגרף 4H: 1H ו-15m.\nדלוק: גם 1m בגרף שעתי, 5m בגרף 4H וכו'. כל נר כזה = עשרות תת-נרות × 4 נכסים, ובהיסטוריה ארוכה או ב-Replay זה חורג ממגבלת הזיכרון של TradingView (Memory limits exceeded).")
 
-mtfOn = input.bool(true, "חשב גם את המסגרות האחרות (לצד)", group = grpMtf, tooltip = "הבדיקה משתמשת רק במסגרת הגרף. כבוי = הרבה יותר מהיר ופחות זיכרון — מומלץ ל-Deep Backtesting.")
+mtfOn = input.bool(true, "חשב גם את המסגרות האחרות (לצד)", group = grpMtf, tooltip = "הבדיקה משתמשת רק במסגרת הגרף. כבוי = הרבה יותר מהיר ופחות זיכרון.")
 
 grpT0   = "בדיקה — צד נכון של ה-True Open"
 btToRef = input.string("המחזור הקטן", "True Open של איזה מחזור", options = ["המחזור הקטן", "המיכל"], group = grpT0, tooltip = "המחזור הקטן = פתיחת רבע 2 של המחזור שבתוכו המסגרת עובדת:\n1m — 22.5 דק' · 5m — ה-90 דקות · 15m — הסשן · 1H — היום (לונדון) · 4H — השבוע (שלישי).\n\nהמיכל = כמו ה-ᴾ/ᴰ בצד:\n1m — ה-90 דקות · 5m — הסשן · 15m — היום · 1H — השבוע · 4H — החודש.\n\nיומי ומעלה — תמיד המיכל.")
@@ -2148,15 +2148,10 @@ btStp  = input.float(1.0, "סטופ — כמה ATR נגד השבירה", minval 
 btHor  = input.int(12, "חלון — תוך כמה נרות", minval = 1, maxval = 300, group = grpT2, tooltip = "לא הגיע ליעד תוך החלון = לא עבדה.")
 btAtrL = input.int(14, "אורך ATR", minval = 1, group = grpT2)
 
-grpT3   = "בדיקה — Strategy Tester (Deep Backtesting)"
-btTrade = input.bool(true, "פתח עסקאות ב-Strategy Tester", group = grpT3, tooltip = "רק בשביל Deep Backtesting — היסטוריה ארוכה יותר מהגרף. התשובה הרגילה היא בטבלה.")
-btDir   = input.string("▼ ירידות", "כיוון", options = ["▼ ירידות", "▲ עליות", "שניהם"], group = grpT3, tooltip = "אסטרטגיה לא מחזיקה לונג ושורט ביחד — לכן כל כיוון בריצה נפרדת.")
-btSide  = input.string("צד נכון", "איזה צד", options = ["צד נכון", "צד הפוך", "הכל"], group = grpT3, tooltip = "מריצים פעם \"צד נכון\" ופעם \"צד הפוך\", ומשווים את ה-Percent profitable.")
-
 grpT4  = "בדיקה — תצוגה"
 btTbl  = input.bool(true, "טבלת תוצאות", group = grpT4)
-btMk   = input.bool(true, "סמן כל שבירה (צבע = צד נכון, אפור = צד הפוך)", group = grpT4)
-btPosI = input.string("ימין למטה", "מיקום הטבלה", options = ["ימין למטה", "ימין למעלה", "אמצע למטה", "אמצע למעלה"], group = grpT4)
+btMk   = input.bool(false, "סמן כל שבירה (צבע = צד נכון, אפור = צד הפוך)", group = grpT4)
+btPosI = input.string("ימין באמצע", "מיקום הטבלה", options = ["ימין באמצע", "שמאל באמצע", "ימין למטה", "ימין למעלה", "אמצע למטה", "אמצע למעלה"], group = grpT4)
 btSz   = input.string("normal", "גודל טקסט", options = ["tiny", "small", "normal"], group = grpT4)
 
 f_btHas(int m, int bit) => math.floor(m / bit) % 2 == 1
@@ -2214,15 +2209,6 @@ if barstate.isconfirmed and array.size(btTrs) > 0
             f_btRec(t)
             array.remove(btTrs, i)
 
-var array<string> btIds = array.new_string()
-var array<int>    btBar = array.new_int()
-if array.size(btIds) > 0
-    for i = array.size(btIds) - 1 to 0
-        if bar_index - array.get(btBar, i) >= btHor
-            strategy.close(array.get(btIds, i), comment = "זמן")
-            array.remove(btIds, i)
-            array.remove(btBar, i)
-
 // 2. שבירות חדשות בנר הזה
 bool btBeAl = false
 bool btBeCt = false
@@ -2252,15 +2238,6 @@ if btStep and not na(btAtr) and btAtr > 0
             else
                 btBuAl := gA == 0
                 btBuCt := gA == 1
-            bool dirOk  = btDir == "שניהם" or (btDir == "▼ ירידות" ? dir == -1 : dir == 1)
-            bool sideOk = btSide == "הכל" ? gA != 2 : btSide == "צד נכון" ? gA == 0 : gA == 1
-            if btTrade and dirOk and sideOk
-                string btId = (dir == -1 ? "▼" : "▲") + str.tostring(bar_index)
-                string tag  = (f ? "F" : "") + (s ? "S" : "") + (p ? "P" : "") + (gA == 0 ? " נכון" : " הפוך")
-                strategy.entry(btId, dir == 1 ? strategy.long : strategy.short, comment = tag)
-                strategy.exit("x" + btId, from_entry = btId, stop = close - dir * btStp * btAtr, limit = close + dir * btTgt * btAtr, comment_loss = "סטופ", comment_profit = "יעד")
-                array.push(btIds, btId)
-                array.push(btBar, bar_index)
 
 plotshape(btMk and btBeAl, "▼ בצד הנכון", shape.triangledown, location.abovebar, color.new(colBear, 0), size = size.tiny)
 plotshape(btMk and btBeCt, "▼ בצד ההפוך", shape.triangledown, location.abovebar, color.new(color.gray, 40), size = size.tiny)
@@ -2268,7 +2245,7 @@ plotshape(btMk and btBuAl, "▲ בצד הנכון", shape.triangleup, location.b
 plotshape(btMk and btBuCt, "▲ בצד ההפוך", shape.triangleup, location.belowbar, color.new(color.gray, 40), size = size.tiny)
 
 // 3. הטבלה
-btPos = btPosI == "ימין למעלה" ? position.top_right : btPosI == "אמצע למטה" ? position.bottom_center : btPosI == "אמצע למעלה" ? position.top_center : position.bottom_right
+btPos = btPosI == "ימין למעלה" ? position.top_right : btPosI == "ימין למטה" ? position.bottom_right : btPosI == "שמאל באמצע" ? position.middle_left : btPosI == "אמצע למטה" ? position.bottom_center : btPosI == "אמצע למעלה" ? position.top_center : position.middle_right
 var table btTb = table.new(btPos, 8, 11, bgcolor = color.new(color.black, 10), border_color = color.new(color.gray, 70), border_width = 1)
 
 f_btRowNm(int r) => r == 0 ? "הכל" : r == 1 ? "Fill" : r == 2 ? "SSMT" : r == 3 ? "PSP" : r == 4 ? "▼ ירידות" : "▲ עליות"
