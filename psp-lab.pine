@@ -125,18 +125,22 @@ qk     = i_qt ? chKind : 0
 ymwTfOk = i_ym_weak and chartSec >= 86400
 intra  = chartSec < 86400
 
-f_up(int s) =>
-    s == 60 ? "5" : s == 300 ? "15" : s == 900 ? "60" : s == 3600 ? "240" : s == 14400 ? "D" : s == 86400 ? "W" : s == 604800 ? "M" : ""
+// Everything here stays a SIMPLE string: request.security, security_lower_tf
+// and timeframe.change refuse a series one. So no functions and no
+// timeframe.in_seconds — plain ternaries on the period and the inputs only.
+// The ladder: 1 = 1m · 2 = 5m · 3 = 15m · 4 = 1H · 5 = 4H · 6 = D · 7 = W · 8 = M
+chRank = tf_str == "1" ? 1 : tf_str == "5" ? 2 : tf_str == "15" ? 3 : tf_str == "60" ? 4 : tf_str == "240" ? 5 : tf_str == "D" ? 6 : tf_str == "W" ? 7 : tf_str == "M" ? 8 : 0
+upAuto = chRank == 1 ? "5" : chRank == 2 ? "15" : chRank == 3 ? "60" : chRank == 4 ? "240" : chRank == 5 ? "D" : chRank == 6 ? "W" : chRank == 7 ? "M" : ""
+dnAuto = chRank == 2 ? "1" : chRank == 3 ? "5" : chRank == 4 ? "15" : chRank == 5 ? "60" : chRank == 6 ? "240" : chRank == 7 ? "D" : ""
 
-f_dn(int s) =>
-    s == 300 ? "1" : s == 900 ? "5" : s == 3600 ? "15" : s == 14400 ? "60" : s == 86400 ? "240" : s == 604800 ? "D" : ""
-
-htfR  = i_htf == "אוטומטי" ? f_up(chartSec) : i_htf
-htfOk = htfR != "" and timeframe.in_seconds(htfR) > chartSec
-htfS  = htfOk ? htfR : timeframe.period
-ltfR  = i_ltf == "אוטומטי" ? f_dn(chartSec) : i_ltf
-ltfOk = ltfR != "" and timeframe.in_seconds(ltfR) < chartSec
-ltfS  = ltfOk ? ltfR : timeframe.period
+htfR  = i_htf == "אוטומטי" ? upAuto : i_htf
+hRank = htfR == "1" ? 1 : htfR == "5" ? 2 : htfR == "15" ? 3 : htfR == "60" ? 4 : htfR == "240" ? 5 : htfR == "D" ? 6 : htfR == "W" ? 7 : htfR == "M" ? 8 : 0
+htfOk = chRank > 0 and hRank > chRank
+htfS  = htfOk ? htfR : tf_str
+ltfR  = i_ltf == "אוטומטי" ? dnAuto : i_ltf
+lRank = ltfR == "1" ? 1 : ltfR == "5" ? 2 : ltfR == "15" ? 3 : ltfR == "60" ? 4 : ltfR == "240" ? 5 : ltfR == "D" ? 6 : ltfR == "W" ? 7 : ltfR == "M" ? 8 : 0
+ltfOk = chRank > 0 and lRank > 0 and lRank < chRank
+ltfS  = ltfOk ? ltfR : tf_str
 
 f_tfn(string s) =>
     s == "1" ? "1m" : s == "5" ? "5m" : s == "15" ? "15m" : s == "60" ? "1H" : s == "240" ? "4H" : s == "D" ? "1D" : s == "W" ? "1W" : s == "M" ? "1Mo" : s
