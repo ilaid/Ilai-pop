@@ -1,0 +1,466 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0
+// QT Gap Odds — הסיכוי שהמחיר יחזור לכל גאפ פתוח במיכל
+//
+// הבסיס: כל תת-מחזור (רבע) חוזר בדרך כלל לגאפ של הרבע הקודם. האינדיקטור לומד
+// מההיסטוריה של הגרף עצמו: בכל תחילת רבע-של-מחזור (4 נקודות בדיקה בכל מחזור)
+// הוא מצלם כל גאפ פתוח שעוד לא נגעו בו במחזור הזה, רושם את המאפיינים שלו,
+// ובסוף המחזור — האם המחיר הגיע אליו. מכאן טבלת שכיחויות.
+// על כל גאפ פתוח עכשיו מוצג הסיכוי לפי המקרים הדומים בהיסטוריה:
+//     1H · 64% · 1.25 ATR
+// המאפיינים (כולם QT, בלי קורלציה):
+//   גיל — מהמחזור הנוכחי / הקודם / לפני שניים / ישן יותר (בתוך המיכל)
+//   מרחק מהמחיר ב-ATR · סדר בדרך (ראשון / שני / שלישי+) · כמה מהמחזור כבר עבר
+// כשאין מספיק מקרים לצירוף המלא, יורדים לטבלה גסה יותר (מסומן ~).
+// גאפ שהמחיר בתוכו: IN · fill X% = הסיכוי שימולא עד הקצה הרחוק עד סוף המחזור.
+// גאפ = SSMT Fill (FVG + VI + הרחבה לגופים), שייך לתת-המחזור של הנר האמצעי.
+//@version=6
+indicator("QT Gap Odds", shorttitle = "Gap Odds", overlay = true, max_boxes_count = 200, max_labels_count = 200)
+
+// ══════════════════════════════════════════════════════════════
+// הגדרות
+// ══════════════════════════════════════════════════════════════
+G1 = "סיכויים"
+minN    = input.int(20, "מינימום מקרים לצירוף", minval = 5, maxval = 200, group = G1, tooltip = "פחות מזה — יורדים לטבלה גסה יותר, והאחוז מסומן ~.")
+maxShow = input.int(15, "כמה גאפים להציג (הקרובים למחיר)", minval = 1, maxval = 60, group = G1)
+atrLen  = input.int(14, "ATR", minval = 2, maxval = 100, group = G1)
+
+GG = "הגדרת גאפ (זהה ל-SSMT Fill)"
+fvgOn        = input.bool(true, "זהה FVG (שלושה נרות)", group = GG)
+volImbOn     = input.bool(true, "זהה VI — גאפ סגירה/פתיחה בין שני נרות", group = GG)
+extendBodies = input.bool(true, "הרחב גאפים לגופי הנרות", group = GG)
+viMinTicks   = input.int(4, "VI לבד — מינימום טיקים", minval = 1, maxval = 100, group = GG)
+viMergeTicks = input.int(1, "הרחבה — מינימום טיקים", minval = 1, maxval = 100, group = GG)
+
+G3 = "תצוגה"
+pHi    = input.int(60, "סיכוי גבוה מ-", minval = 1, maxval = 99, group = G3)
+pLo    = input.int(35, "סיכוי נמוך מ-", minval = 1, maxval = 99, group = G3)
+cHi    = input.color(#26a69a, "סיכוי גבוה", group = G3)
+cMid   = input.color(#ffb74d, "סיכוי בינוני", group = G3)
+cLo    = input.color(#ef5350, "סיכוי נמוך", group = G3)
+cIn    = input.color(#42a5f5, "המחיר בתוך הגאפ", group = G3)
+cDone  = input.color(#9598a1, "כבר חזר במחזור הזה", group = G3)
+fillT  = input.int(85, "שקיפות המילוי", minval = 50, maxval = 98, group = G3)
+txtSz  = input.string("קטן", "גודל כתב", options = ["זעיר", "קטן", "רגיל"], group = G3)
+extR   = input.int(8, "הארכה ימינה (נרות)", minval = 0, maxval = 100, group = G3)
+showDone = input.bool(true, "הצג גאפים שכבר חזרו אליהם במחזור הזה", group = G3)
+
+// ══════════════════════════════════════════════════════════════
+// מחזורי QT — רמה לפי מסגרת הגרף
+// 1 = 22.5 דק' (1m) · 2 = 90 דק' (5m) · 3 = סשן (15m) · 4 = יום (1H)
+// 5 = שבוע (4H) · 6 = רבע-רבעון (1D) · 7 = רבעון QT (1W) · 8 = שנה (1M)
+// ══════════════════════════════════════════════════════════════
+TZ  = "America/New_York"
+tfS = timeframe.in_seconds()
+L   = timeframe.ismonthly ? 8 : timeframe.isweekly ? 7 : timeframe.isdaily ? 6 : tfS >= 14400 ? 5 : tfS >= 3600 ? 4 : tfS >= 900 ? 3 : tfS >= 300 ? 2 : 1
+TFN  = array.from("", "1m", "5m", "15m", "1H", "4H", "1D", "1W", "1M")
+SUBN = array.from("", "22.5 דק'", "90 דק'", "סשן", "יום", "שבוע", "רבע-רבעון", "רבעון QT", "שנה")
+CONN = array.from("", "90 דק'", "סשן", "יום", "שבוע", "חודש", "רבעון QT", "שנת QT", "מחזור 4 שנים")
+
+f_ser(int y, int m, int d) =>
+    int(math.floor(timestamp("UTC", y, m, d, 0, 0) / 86400000.0))
+f_y(int s) =>
+    year(s * 86400000, "UTC")
+f_mo(int s) =>
+    month(s * 86400000, "UTC")
+f_d(int s) =>
+    dayofmonth(s * 86400000, "UTC")
+
+// [תת-מחזור, מיכל, מיקום, חסום]
+f_cyc(int lv, int t) =>
+    int  sub  = na
+    int  cont = na
+    int  pos  = na
+    bool blk  = false
+    if not na(t)
+        int td   = t + 21600000
+        int dS   = f_ser(year(td, TZ), month(td, TZ), dayofmonth(td, TZ))
+        int sod  = ((hour(t, TZ) * 3600 + minute(t, TZ) * 60 + second(t, TZ)) - 64800 + 86400) % 86400
+        int dw   = (dS + 4) % 7
+        int mon  = dw == 0 ? dS - 6 : dS - (dw - 1)
+        int tue  = mon + 1
+        int tM   = f_mo(tue)
+        bool dead = f_mo(mon + 3) != tM
+        int wk   = int(math.floor((f_d(tue) - 1) / 7.0)) + 1
+        if lv == 1
+            int qi = int(math.floor(sod / 1350.0))
+            sub  := dS * 64 + qi
+            cont := dS * 16 + int(math.floor(qi / 4.0))
+            pos  := qi % 4
+        else if lv == 2
+            int mi = int(math.floor(sod / 5400.0))
+            sub  := dS * 16 + mi
+            cont := dS * 4 + int(math.floor(mi / 4.0))
+            pos  := mi % 4
+        else if lv == 3
+            int se = int(math.floor(sod / 21600.0))
+            sub  := dS * 4 + se
+            cont := dS
+            pos  := se
+        else if lv == 4
+            sub  := dS
+            cont := mon
+            pos  := math.max(0, math.min(4, dw - 1))
+            blk  := dw == 5 or dw == 6 or dw == 0
+        else if lv == 5
+            bool own = dead or wk == 5
+            sub  := mon
+            cont := own ? -mon : f_y(tue) * 12 + tM
+            pos  := own ? 0 : wk - 1
+            blk  := own or (wk == 4 and dw == 5)
+        else if lv == 6
+            int y  = f_y(dS)
+            int m  = f_mo(dS)
+            int qm = m >= 10 ? 10 : m >= 7 ? 7 : m >= 4 ? 4 : 1
+            int qS = f_ser(y, qm, 1)
+            int qE = qm == 10 ? f_ser(y + 1, 1, 1) : f_ser(y, qm + 3, 1)
+            int k  = math.max(0, math.min(3, int(math.floor((dS - qS) * 4.0 / (qE - qS)))))
+            cont := y * 12 + qm
+            sub  := cont * 4 + k
+            pos  := k
+        else if lv == 7
+            int m  = f_mo(tue)
+            int y  = f_y(tue)
+            int qi = m >= 10 ? 2 : m >= 7 ? 1 : m >= 4 ? 0 : 3
+            int qy = m >= 4 ? y : y - 1
+            sub  := qy * 4 + qi
+            cont := qy
+            pos  := qi
+        else
+            int y = f_y(dS)
+            sub  := y
+            cont := int(math.floor((y - 2023) / 4.0))
+            pos  := ((y - 2023) % 4 + 4) % 4
+    [sub, cont, pos, blk]
+
+// ══════════════════════════════════════════════════════════════
+// רגל של גאפ — העתק של f_leg מ-SSMT Fill
+// ══════════════════════════════════════════════════════════════
+f_leg(int d, bool ok, float o0, float h0, float l0, float c0, float o1, float c1, float h2, float l2, float cX2, float o2, float tk, bool edge) =>
+    float b  = na
+    float t  = na
+    int   ti = math.round(math.abs(o0 - c1) / tk)
+    int   pi = math.round(math.abs(o1 - cX2) / tk)
+    bool  f  = fvgOn and ok and (d == 1 ? l0 > h2 : h0 < l2)
+    bool  r  = ok and (d == 1 ? (o0 > c1 and (edge or (c1 > o1 and c0 > o0))) : (o0 < c1 and (edge or (c1 < o1 and c0 < o0))))
+    bool  m  = extendBodies and r and ti >= viMergeTicks
+    bool  p  = extendBodies and pi >= viMergeTicks and (d == 1 ? (o1 > cX2 and cX2 > o2 and c1 > o1) : (o1 < cX2 and cX2 < o2 and c1 < o1))
+    bool  v  = volImbOn and r and ti >= viMinTicks
+    if f
+        if d == 1
+            b := (extendBodies and o1 > h2 and pi >= viMergeTicks) ? cX2 : h2
+            t := (extendBodies and l0 > c1 and ti >= viMergeTicks) ? o0 : l0
+            if p
+                b := math.min(b, cX2)
+        else
+            t := (extendBodies and o1 < l2 and pi >= viMergeTicks) ? cX2 : l2
+            b := (extendBodies and h0 < c1 and ti >= viMergeTicks) ? o0 : h0
+            if p
+                t := math.max(t, cX2)
+    if (f and m) or (v and (not f or extendBodies))
+        if d == 1
+            b := na(b) ? c1 : math.min(b, c1)
+            t := na(t) ? o0 : math.max(t, o0)
+        else
+            t := na(t) ? c1 : math.max(t, c1)
+            b := na(b) ? o0 : math.min(b, o0)
+    [b, t, f, m]
+
+// ══════════════════════════════════════════════════════════════
+// גאפים
+// ══════════════════════════════════════════════════════════════
+type G
+    int   dir           // 1 = שורי (מתחת למחיר) · -1 = דובי (מעל)
+    float top
+    float bot
+    int   cont          // המיכל של המחזור שהגאפ שייך אליו
+    int   pos           // מיקום המחזור שלו במיכל
+    int   org           // הנר הראשון — לציור
+    int   bar           // נר הלידה
+    int   lastT         // הנר האחרון שבו המחיר נגע בו
+    bool  dead = false  // IFVG
+
+var array<G> gs = array.new<G>()
+
+// ══════════════════════════════════════════════════════════════
+// טבלאות שכיחויות
+// צירוף מלא: גיל(4) × מרחק(5) × סדר(3) × רבע במחזור(4)
+// ירידות: גיל × מרחק × רבע · גיל × מרחק · מרחק
+// לכל תא: n = מקרים, h = הגיע עד סוף המחזור, nC/hC = עד סוף המיכל
+// ══════════════════════════════════════════════════════════════
+var array<int> n1 = array.new_int(240, 0)
+var array<int> h1 = array.new_int(240, 0)
+var array<int> n2 = array.new_int(80, 0)
+var array<int> h2 = array.new_int(80, 0)
+var array<int> n3 = array.new_int(20, 0)
+var array<int> h3 = array.new_int(20, 0)
+var array<int> n4 = array.new_int(5, 0)
+var array<int> h4 = array.new_int(5, 0)
+var array<int> c1n = array.new_int(240, 0)
+var array<int> c1h = array.new_int(240, 0)
+var array<int> c3n = array.new_int(20, 0)
+var array<int> c3h = array.new_int(20, 0)
+// מילוי עד הקצה הרחוק, כשהמחיר נכנס לגאפ: גיל × רבע
+var array<int> fN = array.new_int(16, 0)
+var array<int> fH = array.new_int(16, 0)
+
+f_db(float d) =>
+    d < 0.5 ? 0 : d < 1.0 ? 1 : d < 2.0 ? 2 : d < 3.0 ? 3 : 4
+
+f_k1(int a, int d, int r, int q) =>
+    a * 60 + d * 12 + r * 4 + q
+f_k2(int a, int d, int q) =>
+    a * 20 + d * 4 + q
+f_k3(int a, int d) =>
+    a * 5 + d
+
+f_add(array<int> n, array<int> h, int k, bool hit) =>
+    n.set(k, n.get(k) + 1)
+    if hit
+        h.set(k, h.get(k) + 1)
+    0
+
+// [סיכוי, מקרים, רמת ירידה 1..4]
+f_prob(int a, int d, int r, int q) =>
+    float p  = na
+    int   nn = 0
+    int   lv = 4
+    int k1 = f_k1(a, d, r, q)
+    int k2 = f_k2(a, d, q)
+    int k3 = f_k3(a, d)
+    if n1.get(k1) >= minN
+        p  := float(h1.get(k1)) / n1.get(k1)
+        nn := n1.get(k1)
+        lv := 1
+    else if n2.get(k2) >= minN
+        p  := float(h2.get(k2)) / n2.get(k2)
+        nn := n2.get(k2)
+        lv := 2
+    else if n3.get(k3) >= minN
+        p  := float(h3.get(k3)) / n3.get(k3)
+        nn := n3.get(k3)
+        lv := 3
+    else if n4.get(d) > 0
+        p  := float(h4.get(d)) / n4.get(d)
+        nn := n4.get(d)
+        lv := 4
+    [p, nn, lv]
+
+// עד סוף המיכל: צירוף מלא, ואם אין — גיל × מרחק
+f_probC(int a, int d, int r, int q) =>
+    float p = na
+    int k1 = f_k1(a, d, r, q)
+    int k3 = f_k3(a, d)
+    if c1n.get(k1) >= minN
+        p := float(c1h.get(k1)) / c1n.get(k1)
+    else if c3n.get(k3) > 0
+        p := float(c3h.get(k3)) / c3n.get(k3)
+    p
+
+// צילום של גאפ בנקודת בדיקה
+type SN
+    G    g
+    int  a
+    int  d
+    int  r
+    int  q
+    int  cyc
+    int  cnt
+    bool hitC  = false   // הגיע עד סוף המחזור
+    bool hitK  = false   // הגיע עד סוף המיכל
+    bool done1 = false
+
+// כניסה לגאפ — לסטטיסטיקת המילוי
+type SF
+    G    g
+    int  k
+    int  cyc
+    bool full = false
+
+var array<SN> pend = array.new<SN>()
+var array<SF> fpend = array.new<SF>()
+
+// ══════════════════════════════════════════════════════════════
+// נתונים ומחזור
+// ══════════════════════════════════════════════════════════════
+atr = ta.atr(atrLen)
+[key, cont, pos, blk] = f_cyc(L, time)
+[kP, cP_, pP_, bP_] = f_cyc(L, time[1])
+
+var int   cS = na
+var int   cC = na
+var int   cPs = na
+var bool  cBk = false
+var int   cStart = na
+var float avgBars = na
+var int   nCyc = 0
+var int   qNow = -1
+
+// ══════════════════════════════════════════════════════════════
+// 1. גאפים חדשים (לפני החלפת המחזור)
+// ══════════════════════════════════════════════════════════════
+bool okLeg = not na(close[2]) and not na(open[2])
+bool edge  = na(kP) or key != kP
+for d in array.from(1, -1)
+    [b, t, f, m] = f_leg(d, okLeg, open, high, low, close, open[1], close[1], high[2], low[2], close[2], open[2], syminfo.mintick, edge)
+    if not na(t) and not na(b) and t > b
+        bool tagNow = (edge and m) or not f
+        int  gc = tagNow ? cont : cP_
+        int  gp = tagNow ? pos : pP_
+        if not na(gc)
+            gs.push(G.new(dir = d, top = t, bot = b, cont = gc, pos = gp, org = f ? bar_index - 2 : bar_index - 1, bar = bar_index, lastT = na))
+
+// ══════════════════════════════════════════════════════════════
+// 2. החלפת מחזור: סגירת הצילומים, ממוצע אורך מחזור, ניקוי
+// ══════════════════════════════════════════════════════════════
+if not na(key) and (na(cS) or key != cS)
+    bool newCont = na(cC) or cont != cC
+    // סוף המחזור — התוצאה של כל צילום מהמחזור הזה
+    for sn in pend
+        if not sn.done1 and sn.cyc == cS
+            f_add(n1, h1, f_k1(sn.a, sn.d, sn.r, sn.q), sn.hitC)
+            f_add(n2, h2, f_k2(sn.a, sn.d, sn.q), sn.hitC)
+            f_add(n3, h3, f_k3(sn.a, sn.d), sn.hitC)
+            f_add(n4, h4, sn.d, sn.hitC)
+            sn.done1 := true
+    for sf in fpend
+        if sf.cyc == cS
+            f_add(fN, fH, sf.k, sf.full)
+    fpend.clear()
+    // סוף המיכל — התוצאה עד סוף המיכל
+    if newCont
+        for sn in pend
+            if sn.cnt == cC
+                f_add(c1n, c1h, f_k1(sn.a, sn.d, sn.r, sn.q), sn.hitK)
+                f_add(c3n, c3h, f_k3(sn.a, sn.d), sn.hitK)
+        pend.clear()
+    // אורך מחזור ממוצע בנרות — לחלוקה לרבעים
+    if not na(cStart) and not cBk
+        int ln = bar_index - cStart
+        nCyc += 1
+        avgBars := na(avgBars) ? ln : avgBars + (ln - avgBars) / math.min(nCyc, 50)
+    cS  := key
+    cC  := cont
+    cPs := pos
+    cBk := blk
+    cStart := bar_index
+    qNow := -1
+    // רק גאפים של המיכל הנוכחי, ושלא מתו
+    int n = gs.size()
+    if n > 0
+        for i = n - 1 to 0
+            G g = gs.get(i)
+            if g.dead or g.cont != cC
+                gs.remove(i)
+
+// ══════════════════════════════════════════════════════════════
+// 3. נגיעות
+// ══════════════════════════════════════════════════════════════
+for g in gs
+    if not g.dead and g.bar < bar_index and (g.dir == 1 ? low <= g.top : high >= g.bot)
+        bool first = na(g.lastT) or g.lastT < cStart
+        g.lastT := bar_index
+        if first
+            int ag = math.max(0, math.min(3, cPs - g.pos))
+            fpend.push(SF.new(g, ag * 4 + math.max(qNow, 0), cS))
+for sn in pend
+    if sn.g.lastT == bar_index
+        sn.hitK := true
+        if sn.cyc == cS
+            sn.hitC := true
+for sf in fpend
+    if not sf.full and (sf.g.dir == 1 ? low <= sf.g.bot : high >= sf.g.top)
+        sf.full := true
+
+// ══════════════════════════════════════════════════════════════
+// 4. נקודת בדיקה בתחילת כל רבע של המחזור — צילום כל גאפ פתוח
+// ══════════════════════════════════════════════════════════════
+int qLive = na(avgBars) or avgBars <= 0 ? 0 : math.min(3, int(math.floor(4.0 * (bar_index - cStart) / avgBars)))
+
+f_dist(G g, float px) =>
+    math.max(0.0, g.dir == 1 ? px - g.top : g.bot - px) / nz(atr, 1)
+
+f_open(G g) =>
+    not g.dead and g.bar < bar_index and (na(g.lastT) or g.lastT < cStart)
+
+f_rank(G g, float px) =>
+    float me = f_dist(g, px)
+    int r = 0
+    for o in gs
+        if o.dir == g.dir and f_open(o) and f_dist(o, px) < me
+            r += 1
+    math.min(r, 2)
+
+if qLive != qNow and not cBk and not na(atr)
+    qNow := qLive
+    for g in gs
+        if f_open(g) and g.cont == cC
+            int ag = math.max(0, math.min(3, cPs - g.pos))
+            pend.push(SN.new(g, ag, f_db(f_dist(g, close)), f_rank(g, close), qLive, cS, cC))
+    while pend.size() > 3000
+        pend.shift()
+
+// ══════════════════════════════════════════════════════════════
+// 5. IFVG — סגירה מעבר לגאפ
+// ══════════════════════════════════════════════════════════════
+for g in gs
+    if not g.dead and g.bar < bar_index and (g.dir == 1 ? close < g.bot : close > g.top)
+        g.dead := true
+
+// ══════════════════════════════════════════════════════════════
+// ציור — רק בנר האחרון
+// ══════════════════════════════════════════════════════════════
+AGEN = array.from("מהמחזור הנוכחי", "מהמחזור הקודם", "מלפני שני מחזורים", "ישן יותר במיכל")
+RNKN = array.from("ראשון בדרך", "שני בדרך", "שלישי ומעלה")
+tSz = txtSz == "זעיר" ? size.tiny : txtSz == "קטן" ? size.small : size.normal
+
+var array<box> bxs = array.new<box>()
+var array<label> lbs = array.new<label>()
+if barstate.islast
+    while bxs.size() > 0
+        box.delete(bxs.pop())
+    while lbs.size() > 0
+        label.delete(lbs.pop())
+    // הקרובים למחיר קודם
+    array<float> ds = array.new_float()
+    array<G>     og = array.new<G>()
+    for g in gs
+        if not g.dead and g.cont == cC and g.bar < bar_index
+            bool done = not na(g.lastT) and g.lastT >= cStart
+            bool inG  = close <= g.top and close >= g.bot
+            if showDone or not done or inG
+                ds.push(f_dist(g, close))
+                og.push(g)
+    int cnt = 0
+    while ds.size() > 0 and cnt < maxShow
+        int bi = ds.indexof(ds.min())
+        G g = og.get(bi)
+        ds.remove(bi)
+        og.remove(bi)
+        cnt += 1
+        int   ag   = math.max(0, math.min(3, cPs - g.pos))
+        float dist = f_dist(g, close)
+        bool  inG  = close <= g.top and close >= g.bot
+        bool  done = not na(g.lastT) and g.lastT >= cStart and not inG
+        string tx = ""
+        string tp = ""
+        color  cc = cDone
+        if inG
+            int k = ag * 4 + qLive
+            float pf = fN.get(k) > 0 ? float(fH.get(k)) / fN.get(k) : na
+            tx := TFN.get(L) + " · IN · fill " + (na(pf) ? "–" : str.tostring(math.round(100 * pf)) + "%")
+            tp := "המחיר בתוך הגאפ\nסיכוי למלא אותו עד הקצה הרחוק עד סוף ה" + SUBN.get(L) + ": " + (na(pf) ? "אין מספיק מקרים" : str.tostring(math.round(100 * pf)) + "% (" + str.tostring(fN.get(k)) + " מקרים)") + "\nהגאפ " + AGEN.get(ag)
+            cc := cIn
+        else if done
+            tx := TFN.get(L) + " · ✓ חזר"
+            tp := "המחיר כבר הגיע לגאפ הזה במחזור הנוכחי · הגאפ " + AGEN.get(ag)
+            cc := cDone
+        else
+            int rk = f_rank(g, close)
+            [p, nn, lv] = f_prob(ag, f_db(dist), rk, qLive)
+            float pc = f_probC(ag, f_db(dist), rk, qLive)
+            int   pi = na(p) ? na : math.round(100 * p)
+            tx := TFN.get(L) + " · " + (na(p) ? "–" : (lv >= 3 ? "~" : "") + str.tostring(pi) + "%") + " · " + str.tostring(dist, "#.##") + " ATR"
+            tp := "סיכוי להגיע עד סוף ה" + SUBN.get(L) + ": " + (na(p) ? "אין נתונים" : str.tostring(pi) + "% (" + str.tostring(nn) + " מקרים" + (lv >= 3 ? ", טבלה גסה" : "") + ")") + "\nעד סוף ה" + CONN.get(L) + ": " + (na(pc) ? "–" : str.tostring(math.round(100 * pc)) + "%") + "\nהגאפ " + AGEN.get(ag) + " · " + RNKN.get(rk) + "\nעבר " + str.tostring(qLive + 1) + "/4 מהמחזור"
+            cc := na(p) ? cDone : pi >= pHi ? cHi : pi >= pLo ? cMid : cLo
+        bxs.push(box.new(g.org, g.top, bar_index + extR, g.bot, border_color = color.new(cc, 60), bgcolor = color.new(cc, fillT)))
+        lbs.push(label.new(bar_index + extR, (g.top + g.bot) / 2, tx, style = label.style_label_left, color = color.new(color.black, 100), textcolor = cc, size = tSz, tooltip = tp))
