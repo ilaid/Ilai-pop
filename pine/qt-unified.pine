@@ -1975,15 +1975,15 @@ if barstate.islast
                     bool pdT = showPend and cls >= 2 and e.pnd
                     bool pdP = showPend and cls >= 2 and use4 and e.pndP
                     if array.size(cs) > 0 or pdT or pdP
-                        int r = row + rowOff
-                        table.cell(cTbl, 0, r, f_clsName(cls) + " ", text_color = cls == tfClass ? chart.fg_color : color.gray, text_size = cornerSz, bgcolor = bgClr)
+                        int rr = row + rowOff
+                        table.cell(cTbl, 0, rr, f_clsName(cls) + " ", text_color = cls == tfClass ? chart.fg_color : color.gray, text_size = cornerSz, bgcolor = bgClr)
                         // הכיוון של המסגרת: חץ, ולידו ה-Q והשעה של השבירה שקבעה — או ⇡ המסגרת שממנה בא
                         string dTx = eD == 0 ? "—" : (eD == 1 ? "▲" : "▼")
                         if eD != 0 and eS != cls
                             dTx := dTx + " ⇡" + f_clsName(eS)
                         else if li >= 0 and cornerWhen
                             dTx := dTx + f_whenTx(array.get(cs, li), cls)
-                        table.cell(cTbl, 1, r, dTx + "  ", text_color = eD == 1 ? colBull : eD == -1 ? colBear : color.gray, text_size = cornerSz, bgcolor = bgClr)
+                        table.cell(cTbl, 1, rr, dTx + "  ", text_color = eD == 1 ? colBull : eD == -1 ? colBear : color.gray, text_size = cornerSz, bgcolor = bgClr)
                         for ty = 0 to 2
                             int bA = -1
                             int bI = -1
@@ -2010,16 +2010,16 @@ if barstate.islast
                                 aCo := f_colC(c)
                                 // השבירה שקבעה את הכיוון — רקע עדין
                                 aBg := bA == li ? color.new(f_colC(c), 86) : f_bg(c, e)
-                            table.cell(cTbl, 2 + ty * 2, r, aTx, text_color = aCo, text_size = cornerSz, bgcolor = aBg)
+                            table.cell(cTbl, 2 + ty * 2, rr, aTx, text_color = aCo, text_size = cornerSz, bgcolor = aBg)
                             string iTx = ""
                             color  iCo = color.gray
                             if bI >= 0
                                 Cand c = array.get(cs, bI)
                                 iTx := "✗" + f_itemTx(c) + (cornerAllT ? " " + f_tmTx(c, cls) : "") + " "
                                 iCo := color.new(f_colC(c), offFade)
-                            table.cell(cTbl, 3 + ty * 2, r, iTx, text_color = iCo, text_size = cornerSz, bgcolor = bgClr)
+                            table.cell(cTbl, 3 + ty * 2, rr, iTx, text_color = iCo, text_size = cornerSz, bgcolor = bgClr)
                         string pTx = pdT or pdP ? "◦PCP " + f_tmStr(e.pndT, cls) : ""
-                        table.cell(cTbl, 8, r, pTx, text_color = pdT ? colPend : colPair, text_size = cornerSz, bgcolor = bgClr)
+                        table.cell(cTbl, 8, rr, pTx, text_color = pdT ? colPend : colPair, text_size = cornerSz, bgcolor = bgClr)
                         row += 1
         if row > 0 and cornerLift > 0
             for r = 0 to cornerLift - 1
