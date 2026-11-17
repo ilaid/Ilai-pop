@@ -428,44 +428,32 @@ if array.size(fuT) > 40
 // ── FVG on the higher timeframe. Computed in that timeframe's context and
 //    returned AS OF THE END OF THE PREVIOUS higher bar — the output is read
 //    before this bar updates the zones — so lookahead_on leaks nothing.
-f_hfvg() =>
-    var array<float> bb = array.new<float>()
-    var array<float> ut = array.new<float>()
-    float ob = na
-    float ou = na
-    if array.size(bb) > 0
-        for k = 0 to array.size(bb) - 1
-            v = array.get(bb, k)
-            if na(ob) or v < ob
-                ob := v
-    if array.size(ut) > 0
-        for k = 0 to array.size(ut) - 1
-            v = array.get(ut, k)
-            if na(ou) or v > ou
-                ou := v
+f_hfvg(bool bear) =>
+    var array<float> z = array.new<float>()
+    nb = low[2] > high
+    nu = high[2] < low
+    float o = na
+    if array.size(z) > 0
+        for k = 0 to array.size(z) - 1
+            v = array.get(z, k)
+            if na(o) or (bear ? v < o : v > o)
+                o := v
     i = 0
-    while i < array.size(bb)
-        if high >= array.get(bb, i)
-            array.remove(bb, i)
+    while i < array.size(z)
+        if bear ? high >= array.get(z, i) : low <= array.get(z, i)
+            array.remove(z, i)
         else
             i += 1
-    i := 0
-    while i < array.size(ut)
-        if low <= array.get(ut, i)
-            array.remove(ut, i)
-        else
-            i += 1
-    if low[2] > high
-        array.push(bb, high)
-    if high[2] < low
-        array.push(ut, low)
-    if array.size(bb) > 40
-        array.remove(bb, 0)
-    if array.size(ut) > 40
-        array.remove(ut, 0)
-    [ob, ou]
+    if bear and nb
+        array.push(z, high)
+    if not bear and nu
+        array.push(z, low)
+    if array.size(z) > 40
+        array.remove(z, 0)
+    o
 
-[hfB, hfU] = request.security(tk_ch, htfS, f_hfvg(), lookahead = barmerge.lookahead_on)
+hfB = request.security(tk_ch, htfS, f_hfvg(true),  lookahead = barmerge.lookahead_on)
+hfU = request.security(tk_ch, htfS, f_hfvg(false), lookahead = barmerge.lookahead_on)
 
 // A zone the chart already touched earlier inside the same higher bar is no
 // longer virgin, even though the higher timeframe has not noticed yet.
