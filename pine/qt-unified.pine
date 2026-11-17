@@ -90,7 +90,7 @@ cornerWhen = input.bool(true, "Q ושעה ליד האחרונה", group = grpCor
 cornerAllT = input.bool(true, "שעה ליד כל שבירה בצד", group = grpCor, tooltip = "גם ליד הפעילות וה-✗ — כדי לראות מה נוצר לפני מה. PSP — שעת נר הסווינג; Fill ו-SSMT — שעת הנר שעשה את השבירה.")
 fastFlash  = input.bool(false, "הדגש PSP חדש ב-5m וב-15m (⚡)", group = grpCor, tooltip = "PSP שנרשם בנר האחרון שנסגר ב-5m או ב-15m מקבל ⚡ ורקע צבעוני בצד, עד הסגירה הבאה של אותה מסגרת. נראה מכל גרף — גם PSP של NQ/ES כשאתה על RTY.")
 offFade    = input.int(60, "שקיפות ממתינה (✗)", minval = 0, maxval = 90, group = grpCor, tooltip = "ממתינה נכתבת בצבע שלה (זוג 3·4 — בצבע הזוג), רק דהוי.")
-cornerLay  = input.string("עמודות", "סידור הצד", options = ["עמודות", "שורה"], group = grpCor, tooltip = "עמודות: עמודה קבועה לכל סוג — כיוון · Fill · SSMT · PSP · PCP. בכל סוג: הפעילה, ולידה הנגדית החיה (✗). השבירה שקבעה את הכיוון — ברקע עדין.\nשורה: הסידור הקודם — האחרונה ראשונה ואחריה השאר.")
+cornerLay  = input.string("שורה", "סידור הצד", options = ["עמודות", "שורה"], group = grpCor, tooltip = "עמודות: עמודה קבועה לכל סוג — כיוון · Fill · SSMT · PSP · PCP. בכל סוג: הפעילה, ולידה הנגדית החיה (✗). השבירה שקבעה את הכיוון — ברקע עדין.\nשורה: הסידור הקודם — האחרונה ראשונה ואחריה השאר.")
 cornerHdr  = input.bool(true, "שורת כותרות (בעמודות)", group = grpCor)
 cornerLift = input.int(2, "הרם את השורות (שורות ריקות)", minval = 0, maxval = 8, group = grpCor, tooltip = "שורות ריקות בין השורות לקצה המסך — כדי שלא ייפלו על אינדיקטור אחר באותה פינה.")
 
