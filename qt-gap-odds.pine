@@ -43,6 +43,8 @@ fillT  = input.int(85, "שקיפות המילוי", minval = 50, maxval = 98, gr
 txtSz  = input.string("קטן", "גודל כתב", options = ["זעיר", "קטן", "רגיל"], group = G3)
 extR   = input.int(8, "הארכה ימינה (נרות)", minval = 0, maxval = 100, group = G3)
 showDone = input.bool(true, "הצג גאפים שכבר חזרו אליהם במחזור הזה", group = G3)
+showCal  = input.bool(true, "טבלת בדיקת דיוק", group = G3, tooltip = "כל תחזית נרשמת ברגע שהיא נעשית — רק מנתונים שהיו ידועים אז — ונבדקת מול מה שקרה. כך רואים אם 60% באמת קורה בערך ב-60% מהמקרים.")
+calPos   = input.string("ימין למטה", "מיקום טבלת הדיוק", options = ["ימין למעלה", "ימין למטה", "שמאל למעלה", "שמאל למטה"], group = G3)
 
 // ══════════════════════════════════════════════════════════════
 // מחזורי QT — רמה לפי מסגרת הגרף
@@ -268,6 +270,8 @@ type SN
     bool hitC  = false   // הגיע עד סוף המחזור
     bool hitK  = false   // הגיע עד סוף המיכל
     bool done1 = false
+    float pp             // התחזית שהוצגה ברגע הצילום (na = עוד לא היו נתונים)
+    float pb             // תחזית "פשוטה" לאותו רגע: אחוז החזרה הכללי עד אז
 
 // כניסה לגאפ — לסטטיסטיקת המילוי
 type SF
@@ -277,6 +281,13 @@ type SF
     bool full = false
 
 var array<SN> pend = array.new<SN>()
+// בדיקת דיוק: 5 סלים של תחזית (0–20 … 80–100)
+var array<int>   calN = array.new_int(5, 0)
+var array<int>   calH = array.new_int(5, 0)
+var array<float> calP = array.new_float(5, 0.0)
+var float brM = 0.0     // Brier של האינדיקטור
+var float brB = 0.0     // Brier של הניחוש הפשוט
+var int   brN = 0
 var array<SF> fpend = array.new<SF>()
 
 // ══════════════════════════════════════════════════════════════
@@ -321,6 +332,15 @@ if not na(key) and (na(cS) or key != cS)
             f_add(n2, h2, f_k2(sn.a, sn.d, sn.q), sn.hitC)
             f_add(n3, h3, f_k3(sn.a, sn.d), sn.hitC)
             f_add(n4, h4, sn.d, sn.hitC)
+            if not na(sn.pp) and not na(sn.pb)
+                int cb = math.min(4, int(math.floor(sn.pp * 5)))
+                calN.set(cb, calN.get(cb) + 1)
+                calH.set(cb, calH.get(cb) + (sn.hitC ? 1 : 0))
+                calP.set(cb, calP.get(cb) + sn.pp)
+                float y = sn.hitC ? 1.0 : 0.0
+                brM += (sn.pp - y) * (sn.pp - y)
+                brB += (sn.pb - y) * (sn.pb - y)
+                brN += 1
             sn.done1 := true
     for sf in fpend
         if sf.cyc == cS
@@ -395,7 +415,15 @@ if qLive != qNow and not cBk and not na(atr)
     for g in gs
         if f_open(g) and g.cont == cC
             int ag = math.max(0, math.min(3, cPs - g.pos))
-            pend.push(SN.new(g, ag, f_db(f_dist(g, close)), f_rank(g, close), qLive, cS, cC))
+            int dd = f_db(f_dist(g, close))
+            int rr = f_rank(g, close)
+            [pp, pn, plv] = f_prob(ag, dd, rr, qLive)
+            float tot = 0.0
+            float hit = 0.0
+            for j = 0 to 4
+                tot += n4.get(j)
+                hit += h4.get(j)
+            pend.push(SN.new(g = g, a = ag, d = dd, r = rr, q = qLive, cyc = cS, cnt = cC, pp = pp, pb = tot > 0 ? hit / tot : na))
     while pend.size() > 3000
         pend.shift()
 
@@ -464,3 +492,41 @@ if barstate.islast
             cc := na(p) ? cDone : pi >= pHi ? cHi : pi >= pLo ? cMid : cLo
         bxs.push(box.new(g.org, g.top, bar_index + extR, g.bot, border_color = color.new(cc, 60), bgcolor = color.new(cc, fillT)))
         lbs.push(label.new(bar_index + extR, (g.top + g.bot) / 2, tx, style = label.style_label_left, color = color.new(color.black, 100), textcolor = cc, size = tSz, tooltip = tp))
+
+// ══════════════════════════════════════════════════════════════
+// טבלת בדיקת דיוק — האם 60% באמת קורה ב-60%
+// ══════════════════════════════════════════════════════════════
+cpP = calPos == "ימין למעלה" ? position.top_right : calPos == "ימין למטה" ? position.bottom_right : calPos == "שמאל למעלה" ? position.top_left : position.bottom_left
+var table ct = table.new(cpP, 4, 9, border_width = 1, border_color = color.new(#363a45, 0), frame_width = 1, frame_color = color.new(#363a45, 0))
+var bool ctM = false
+if barstate.islast and showCal
+    color BG  = color.new(#131722, 5)
+    color BGS = color.new(#2a2e39, 0)
+    color TX  = #d1d4dc
+    color DM  = #9598a1
+    if not ctM
+        ct.merge_cells(0, 0, 3, 0)
+        ct.merge_cells(0, 7, 3, 7)
+        ct.merge_cells(0, 8, 3, 8)
+        ctM := true
+    ct.cell(0, 0, "בדיקת דיוק · " + str.tostring(brN) + " תחזיות שנבדקו", text_color = color.white, bgcolor = BGS, text_size = tSz)
+    ct.cell(3, 1, "תחזית", text_color = DM, bgcolor = BGS, text_size = tSz)
+    ct.cell(2, 1, "מקרים", text_color = DM, bgcolor = BGS, text_size = tSz)
+    ct.cell(1, 1, "ניבא בממוצע", text_color = DM, bgcolor = BGS, text_size = tSz)
+    ct.cell(0, 1, "קרה בפועל", text_color = DM, bgcolor = BGS, text_size = tSz)
+    array<string> bn = array.from("0–20%", "20–40%", "40–60%", "60–80%", "80–100%")
+    for b = 0 to 4
+        int   n  = calN.get(b)
+        float pr = n > 0 ? 100 * calP.get(b) / n : na
+        float ac = n > 0 ? 100.0 * calH.get(b) / n : na
+        float df = na(pr) ? na : math.abs(ac - pr)
+        color cc = n < 30 ? DM : df <= 5 ? cHi : df <= 10 ? cMid : cLo
+        ct.cell(3, 2 + b, bn.get(b), text_color = TX, bgcolor = BG, text_size = tSz)
+        ct.cell(2, 2 + b, str.tostring(n), text_color = n < 30 ? DM : TX, bgcolor = BG, text_size = tSz)
+        ct.cell(1, 2 + b, na(pr) ? "–" : str.tostring(math.round(pr)) + "%", text_color = TX, bgcolor = BG, text_size = tSz)
+        ct.cell(0, 2 + b, na(ac) ? "–" : str.tostring(math.round(ac)) + "%", text_color = cc, bgcolor = BG, text_size = tSz)
+    float bm = brN > 0 ? brM / brN : na
+    float bb = brN > 0 ? brB / brN : na
+    float imp = na(bm) or na(bb) or bb == 0 ? na : 100 * (bb - bm) / bb
+    ct.cell(0, 7, na(imp) ? "עוד אין מספיק תחזיות" : "שיפור מול ניחוש פשוט: " + str.tostring(math.round(imp)) + "%", text_color = na(imp) ? DM : imp > 10 ? cHi : imp > 0 ? cMid : cLo, bgcolor = BG, text_size = tSz)
+    ct.cell(0, 8, "ירוק = ההפרש עד 5% · כתום = עד 10% · אדום = יותר · אפור = פחות מ-30 מקרים", text_color = DM, bgcolor = BG, text_size = size.tiny)
