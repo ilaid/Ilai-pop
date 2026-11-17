@@ -102,6 +102,10 @@ heavyLow    = input.bool(false, "כלול גם מסגרות כבדות מתחת 
 
 mtfOn = input.bool(true, "חשב גם את המסגרות האחרות (לצד)", group = grpMtf, tooltip = "הבדיקה משתמשת רק במסגרת הגרף. כבוי = הרבה יותר מהיר ופחות זיכרון — מומלץ ל-Deep Backtesting.")
 
+grpT0   = "בדיקה — צד נכון של ה-True Open"
+btToRef = input.string("המחזור הקטן", "True Open של איזה מחזור", options = ["המחזור הקטן", "המיכל"], group = grpT0, tooltip = "המחזור הקטן = פתיחת רבע 2 של המחזור שבתוכו המסגרת עובדת:\n1m — 22.5 דק' · 5m — ה-90 דקות · 15m — הסשן · 1H — היום (לונדון) · 4H — השבוע (שלישי).\n\nהמיכל = כמו ה-ᴾ/ᴰ בצד:\n1m — ה-90 דקות · 5m — הסשן · 15m — היום · 1H — השבוע · 4H — החודש.\n\nיומי ומעלה — תמיד המיכל.")
+btTolP  = input.float(0.0, "\"ממש קרוב\" ל-True Open — עד (% מהמחיר)", minval = 0.0, maxval = 1.0, step = 0.01, group = grpT0, tooltip = "0 = רק מעל / מתחת ממש.\nלמשל 0.03% ב-NQ בסביבות 27,000 = כ-8 נקודות.")
+
 q1Col  = q1Mode == "בצבע נפרד"
 q1Drop = q1Mode == "לא קיים"
 
@@ -814,8 +818,15 @@ type Eng
     array<string> alT
     int           evBe       = 0      // בדיקה: שבירות לירידות שנרשמו בצעד הזה (סכום ביטים)
     int           evBu       = 0      // בדיקה: שבירות לעליות
+    int           alBe       = 0      // בדיקה: מהן — בצד הנכון (לפחות נכס אחד)
+    int           alBu       = 0
+    int           ctBe       = 0      // בדיקה: מהן — בצד ההפוך (כל הנכסים)
+    int           ctBu       = 0
+    array<float>  toA                 // בדיקה: True Open לכל נכס
+    array<bool>   toPd
+    bool          pQ2x       = false
 
-f_newEng(int c) => Eng.new(cls = c, h1 = array.new_float(8, na), h2 = array.new_float(8, na), h3 = array.new_float(8, na), h4 = array.new_float(8, na), gaps = array.new<Gap>(), a1 = f_newAcc(), a2 = f_newAcc(), a3 = f_newAcc(), a4 = f_newAcc(), sTy = array.new_int(4, 0), sRi = array.new_int(4, -1), sSq = array.new_int(4, 0), sTm = array.new_int(4, 0), sLb = array.new_string(4, ""), pT = array.new<PBrk>(), pP = array.new<PBrk>(), rH = array.new_float(4, na), rL = array.new_float(4, na), sZn = array.new_int(4, 0), alS = array.new_int(), alT = array.new_string())
+f_newEng(int c) => Eng.new(cls = c, h1 = array.new_float(8, na), h2 = array.new_float(8, na), h3 = array.new_float(8, na), h4 = array.new_float(8, na), gaps = array.new<Gap>(), a1 = f_newAcc(), a2 = f_newAcc(), a3 = f_newAcc(), a4 = f_newAcc(), sTy = array.new_int(4, 0), sRi = array.new_int(4, -1), sSq = array.new_int(4, 0), sTm = array.new_int(4, 0), sLb = array.new_string(4, ""), pT = array.new<PBrk>(), pP = array.new<PBrk>(), rH = array.new_float(4, na), rL = array.new_float(4, na), sZn = array.new_int(4, 0), alS = array.new_int(), alT = array.new_string(), toA = array.new_float(4, na), toPd = array.new_bool(4, false))
 
 f_engAcc(Eng e, int a) => a == 0 ? e.a1 : a == 1 ? e.a2 : a == 2 ? e.a3 : e.a4
 
@@ -893,14 +904,53 @@ f_addAl(Eng e, string tx) =>
     e.seq
 
 // בדיקה: 1 = Fill · 2 = Fill זוג · 4 = SSMT · 8 = SSMT זוג · 16 = PSP · 32 = PSP זוג
-f_flag(Eng e, int dir, int bit) =>
-    int cur = dir == 1 ? e.evBu : e.evBe
-    if math.floor(cur / bit) % 2 == 0
-        if dir == 1
-            e.evBu := cur + bit
-        else
-            e.evBe := cur + bit
+f_bitAdd(int cur, int bit) => math.floor(cur / bit) % 2 == 0 ? cur + bit : cur
+
+// צד של נכס אחד: 1 = נכון · -1 = הפוך · 0 = אין True Open / אין מחיר
+f_side1(Eng e, int dir, int a, float px) =>
+    float tOp = array.get(e.toA, a)
+    na(tOp) or na(px) ? 0 : (dir == -1 ? px >= tOp * (1 - btTolP / 100) : px <= tOp * (1 + btTolP / 100)) ? 1 : -1
+
+// צד של שבירה: נכון אם לפחות נכס אחד שבשבירה בצד הנכון. ix = 3 סגירת הנר הזה · 5 סגירת הקודם
+f_sideG(Eng e, int dir, bool pair, array<float> qa, array<float> qb, array<float> qy, int ix) =>
+    int sa = f_side1(e, dir, pair ? 2 : 0, array.get(qa, ix))
+    int sb = f_side1(e, dir, pair ? 3 : 1, array.get(qb, ix))
+    int sy = pair ? 0 : f_side1(e, dir, 2, array.get(qy, ix))
+    sa == 1 or sb == 1 or sy == 1 ? 1 : (sa == -1 or sb == -1 or sy == -1) ? -1 : 0
+
+f_flag(Eng e, int dir, int bit, int side) =>
+    if dir == 1
+        e.evBu := f_bitAdd(e.evBu, bit)
+        if side == 1
+            e.alBu := f_bitAdd(e.alBu, bit)
+        else if side == -1
+            e.ctBu := f_bitAdd(e.ctBu, bit)
+    else
+        e.evBe := f_bitAdd(e.evBe, bit)
+        if side == 1
+            e.alBe := f_bitAdd(e.alBe, bit)
+        else if side == -1
+            e.ctBe := f_bitAdd(e.ctBe, bit)
     bit
+
+// מספר הרבע (1–4) בתוך המחזור הקטן של המסגרת
+f_refQ(int c, int t) =>
+    int q = 0
+    if c == 1
+        int mnd = hour(t, TZ) * 60 + minute(t, TZ)
+        int mfd = mnd >= 1080 ? mnd - 1080 : mnd + 360
+        int sIn = (mfd * 60 + second(t, TZ)) % 1350
+        q := int(math.floor(sIn / 337.5)) + 1
+    else
+        [r0, l0, b0, x0, n0] = f_cyc(c - 1, t)
+        q := n0
+    q
+
+f_toSet(Eng e, int a, array<float> q) =>
+    if array.get(e.toPd, a) and not na(array.get(q, 0))
+        array.set(e.toA, a, array.get(q, 0))
+        array.set(e.toPd, a, false)
+    a
 
 // PSP חדש בכיוון אחד. בזוג: qa = נכס 3, qb = נכס 4, ואין רמה שלישית.
 f_addPsp(Eng e, bool pair, bool bear, bool weak, array<float> qa, array<float> qb, array<float> qy, array<float> qc, int lf, int born, bool inQ1, int t) =>
@@ -912,7 +962,7 @@ f_addPsp(Eng e, bool pair, bool bear, bool weak, array<float> qa, array<float> q
     e.seq := e.seq + 1
     PBrk b = PBrk.new(dir = bear ? -1 : 1, weak = weak, nq = array.get(qa, ix), es = array.get(qb, ix), ym = pair ? na : array.get(qy, ix), cont = lf, born = born, inQ1 = inQ1, pair = pair, seq = e.seq, regT = t, mkY = array.get(qc, ix), own = own, zone = f_zone(e, array.get(qc, 5)))
     f_addAl(e, (bear ? "▼" : "▲") + "PSP" + (pair ? " " + nm3 + "/" + nm4 : ""))
-    f_flag(e, bear ? -1 : 1, pair ? 32 : 16)
+    f_flag(e, bear ? -1 : 1, pair ? 32 : 16, f_sideG(e, bear ? -1 : 1, pair, qa, qb, qy, 5))
     array<PBrk> st = pair ? e.pP : e.pT
     array.unshift(st, b)
     while array.size(st) > pspDepth
@@ -925,6 +975,10 @@ f_step(Eng e, int t, array<float> q1, array<float> q2, array<float> q3, array<fl
         did := true
         e.evBe := 0
         e.evBu := 0
+        e.alBe := 0
+        e.alBu := 0
+        e.ctBe := 0
+        e.ctBu := 0
         int tMid = e.lastT
         int tFst = e.prevT
         e.prevT := e.lastT
@@ -951,6 +1005,19 @@ f_step(Eng e, int t, array<float> q1, array<float> q2, array<float> q3, array<fl
                 e.pQ2 := true
         else
             e.pQ2 := inQ2
+        // בדיקה: True Open לכל נכס
+        bool inQ2x = btToRef == "המחזור הקטן" and e.cls <= 5 ? f_refQ(e.cls, t) == 2 : inQ2
+        if inQ2x and not e.pQ2x
+            for a = 0 to 3
+                array.set(e.toPd, a, true)
+        if not inQ2x
+            for a = 0 to 3
+                array.set(e.toPd, a, false)
+        e.pQ2x := inQ2x
+        f_toSet(e, 0, q1)
+        f_toSet(e, 1, q2)
+        f_toSet(e, 2, q3)
+        f_toSet(e, 3, q4)
         e.started := true
 
         // ══ FILL ══
@@ -1017,7 +1084,7 @@ f_step(Eng e, int t, array<float> q1, array<float> q2, array<float> q3, array<fl
                     gr.fZone := f_zone(e, array.get(qz, 3))
                     f_addAl(e, (gr.dir == 1 ? "▲" : "▼") + "F" + str.tostring(gr.fDeg) + " " + gr.fLead)
                     if gr.fFirst == t
-                        f_flag(e, gr.dir, gr.kind == 0 ? 1 : 2)
+                        f_flag(e, gr.dir, gr.kind == 0 ? 1 : 2, gr.kind == 0 ? f_sideG(e, gr.dir, false, q1, q2, q3, 3) : f_sideG(e, gr.dir, true, q3, q4, q3, 3))
 
         // ══ SSMT ══
         bool canP  = not na(e.a1.hi) and not na(e.a2.hi) and not na(e.a3.hi) and not na(e.a4.hi)
@@ -1062,7 +1129,7 @@ f_step(Eng e, int t, array<float> q1, array<float> q2, array<float> q3, array<fl
                 array.set(e.sTy, k, nT)
                 array.set(e.sLb, k, nS)
                 if isNew and not f_closed(nS)
-                    f_flag(e, isBull ? 1 : -1, k >= 2 ? 8 : 4)
+                    f_flag(e, isBull ? 1 : -1, k >= 2 ? 8 : 4, k >= 2 ? f_sideG(e, isBull ? 1 : -1, true, q3, q4, q3, 3) : f_sideG(e, isBull ? 1 : -1, false, q1, q2, q3, 3))
                 // חדשה, או קיימת שנלקחה שוב בנר הזה — רגע הרישום מתעדכן
                 if isNew or f_renew(e, k, nS, t)
                     e.seq := e.seq + 1
@@ -2058,17 +2125,14 @@ if tfClass != 0
         alert("QT CC · " + syminfo.ticker + "\n" + all, alert.freq_all)
 
 // ═══════════════════════════════════════════════════════════════════
-// בדיקה — האם שבירה בצד הנכון של ה-True Open עובדת טוב יותר
+// בדיקה — כמה פעמים שבירה עבדה כשהיא בצד הנכון של ה-True Open, וכמה כשלא
 //
-//   צד נכון: ▼ מעל ה-True Open (או ממש קרוב אליו) · ▲ מתחתיו (או ממש קרוב)
+//   צד נכון: ▲ — לפחות נכס אחד שבשבירה מתחת ל-True Open שלו (דיסקאונט)
+//            ▼ — לפחות נכס אחד שבשבירה מעל ה-True Open שלו (פרימיום)
+//   צד הפוך: כל הנכסים שבשבירה בצד השני
 //   Fill ו-SSMT — לפי סגירת הנר שעשה את השבירה · PSP — לפי סגירת נר הסווינג
-//   רק שבירות של מסגרת הגרף. כניסה בסגירת הנר שבו השבירה נרשמה.
-//
-// שתי דרכים לקרוא את התוצאה:
-//   1. הטבלה על הגרף — הכל ביחד: צד נכון מול צד הפוך, לכל סוג ולכל כיוון.
-//      רצה על כל הנרות שטעונים בגרף.
-//   2. ה-Strategy Tester (כולל Deep Backtesting — היסטוריה ארוכה בהרבה).
-//      מריצים פעמיים: "צד נכון" ואז "צד הפוך", ומשווים את ה-Win rate וה-Profit factor.
+//   "עבדה" = המחיר הגיע ליעד בכיוון השבירה לפני שהגיע לסטופ, תוך החלון.
+//   רק שבירות של מסגרת הגרף (5m על גרף 5m וכו').
 // ═══════════════════════════════════════════════════════════════════
 
 grpT1  = "בדיקה — אילו שבירות"
@@ -2078,24 +2142,22 @@ btPsp  = input.bool(true, "PSP", group = grpT1, inline = "bt1")
 btTri  = input.bool(true, "שלישייה", group = grpT1, inline = "bt2")
 btPair = input.bool(true, "זוג 3·4", group = grpT1, inline = "bt2")
 
-grpT2  = "בדיקה — צד נכון ותוצאה"
-btTol  = input.float(0.10, "\"ממש קרוב\" ל-True Open — עד (ATR)", minval = 0.0, maxval = 2.0, step = 0.05, group = grpT2, tooltip = "לירידות: מעל ה-True Open, או מתחתיו בפחות מזה = צד נכון.\nלעליות: מתחת, או מעליו בפחות מזה.\n0 = רק מעל / מתחת ממש (כמו ᴾ/ᴰ).")
-btHor  = input.int(12, "חלון — כמה נרות אחרי השבירה", minval = 1, maxval = 300, group = grpT2)
-btTgt  = input.float(1.0, "יעד (ATR)", minval = 0.1, step = 0.1, group = grpT2)
-btStp  = input.float(1.0, "סטופ (ATR)", minval = 0.1, step = 0.1, group = grpT2)
+grpT2  = "בדיקה — מתי שבירה \"עבדה\""
+btTgt  = input.float(1.0, "יעד — כמה ATR בכיוון השבירה", minval = 0.1, step = 0.1, group = grpT2)
+btStp  = input.float(1.0, "סטופ — כמה ATR נגד השבירה", minval = 0.1, step = 0.1, group = grpT2, tooltip = "יעד וסטופ באותו נר = נחשב שלא עבדה.")
+btHor  = input.int(12, "חלון — תוך כמה נרות", minval = 1, maxval = 300, group = grpT2, tooltip = "לא הגיע ליעד תוך החלון = לא עבדה.")
 btAtrL = input.int(14, "אורך ATR", minval = 1, group = grpT2)
 
-grpT3  = "בדיקה — Strategy Tester"
-btTrade = input.bool(true, "פתח עסקאות ב-Strategy Tester", group = grpT3)
-btDir   = input.string("▼ ירידות", "כיוון", options = ["▼ ירידות", "▲ עליות", "שניהם"], group = grpT3, tooltip = "אסטרטגיה לא יכולה להחזיק לונג ושורט ביחד — שבירה הפוכה סוגרת את הפתוחות ומעוותת את התוצאה. לכן כל כיוון בריצה נפרדת.")
-btSide  = input.string("צד נכון", "איזה צד", options = ["צד נכון", "צד הפוך", "הכל"], group = grpT3, tooltip = "מריצים פעם עם \"צד נכון\" ופעם עם \"צד הפוך\", ומשווים ב-Strategy Tester.\nהטבלה על הגרף לא תלויה בזה — היא תמיד מראה את שניהם.")
+grpT3   = "בדיקה — Strategy Tester (Deep Backtesting)"
+btTrade = input.bool(true, "פתח עסקאות ב-Strategy Tester", group = grpT3, tooltip = "רק בשביל Deep Backtesting — היסטוריה ארוכה יותר מהגרף. התשובה הרגילה היא בטבלה.")
+btDir   = input.string("▼ ירידות", "כיוון", options = ["▼ ירידות", "▲ עליות", "שניהם"], group = grpT3, tooltip = "אסטרטגיה לא מחזיקה לונג ושורט ביחד — לכן כל כיוון בריצה נפרדת.")
+btSide  = input.string("צד נכון", "איזה צד", options = ["צד נכון", "צד הפוך", "הכל"], group = grpT3, tooltip = "מריצים פעם \"צד נכון\" ופעם \"צד הפוך\", ומשווים את ה-Percent profitable.")
 
 grpT4  = "בדיקה — תצוגה"
 btTbl  = input.bool(true, "טבלת תוצאות", group = grpT4)
 btMk   = input.bool(true, "סמן כל שבירה (צבע = צד נכון, אפור = צד הפוך)", group = grpT4)
-btShTO = input.bool(false, "צייר את ה-True Open", group = grpT4)
-btPosI = input.string("ימין למעלה", "מיקום הטבלה", options = ["ימין למעלה", "ימין למטה", "אמצע למעלה", "אמצע למטה"], group = grpT4)
-btSz   = input.string("small", "גודל טקסט", options = ["tiny", "small", "normal"], group = grpT4)
+btPosI = input.string("ימין למטה", "מיקום הטבלה", options = ["ימין למטה", "ימין למעלה", "אמצע למטה", "אמצע למעלה"], group = grpT4)
+btSz   = input.string("normal", "גודל טקסט", options = ["tiny", "small", "normal"], group = grpT4)
 
 f_btHas(int m, int bit) => math.floor(m / bit) % 2 == 1
 
@@ -2106,8 +2168,7 @@ f_btSel(int m) =>
     [f, s, p]
 
 // 0 = צד נכון · 1 = צד הפוך · 2 = אין עדיין True Open
-f_btGrp(int dir, float px, float tOp, float tol) =>
-    na(tOp) or na(px) ? 2 : dir == -1 ? (px >= tOp - tol ? 0 : 1) : (px <= tOp + tol ? 0 : 1)
+f_btG(bool al, bool ct) => al ? 0 : ct ? 1 : 2
 
 // שורות: 0 = הכל · 1 = Fill · 2 = SSMT · 3 = PSP · 4 = ▼ · 5 = ▲
 BT_R = 6
@@ -2120,59 +2181,39 @@ type BtTr
     float entry
     float unit
     int   age = 0
-    float mfe = 0.0
-    float mae = 0.0
-    float res = na
-    int   win = 0
+    int   win = 0   // 1 = עבדה · -1 = סטופ · 0 = עוד פתוחה
 
 var array<BtTr>  btTrs = array.new<BtTr>()
 var array<float> btN   = array.new_float(BT_R * BT_G, 0.0)
 var array<float> btW   = array.new_float(BT_R * BT_G, 0.0)
-var array<float> btR   = array.new_float(BT_R * BT_G, 0.0)
-var array<float> btUp  = array.new_float(BT_R * BT_G, 0.0)
-var array<float> btDn  = array.new_float(BT_R * BT_G, 0.0)
 var int          btT0  = 0
-
-f_btAdd(array<float> a, int k, float v) =>
-    array.set(a, k, array.get(a, k) + v)
 
 f_btRec(BtTr t) =>
     int k = t.row * BT_G + t.grp
-    f_btAdd(btN, k, 1.0)
-    f_btAdd(btW, k, t.win == 1 ? 1.0 : 0.0)
-    f_btAdd(btR, k, t.res)
-    f_btAdd(btUp, k, t.mfe)
-    f_btAdd(btDn, k, t.mae)
+    array.set(btN, k, array.get(btN, k) + 1)
+    if t.win == 1
+        array.set(btW, k, array.get(btW, k) + 1)
     k
 
 btAtr  = ta.atr(btAtrL)
-btPrvC = close[1]
 btStep = tfClass != 0 and barstate.isconfirmed and eCh.lastT == time
-btTO   = tfClass != 0 ? eCh.toP : na
 
-// 1. עדכון העסקאות שנפתחו בנרות קודמים (לטבלה)
+// 1. מעקב אחרי שבירות מנרות קודמים: יעד לפני סטופ?
 if barstate.isconfirmed and array.size(btTrs) > 0
     for i = array.size(btTrs) - 1 to 0
         BtTr t = array.get(btTrs, i)
         t.age := t.age + 1
-        float fav = (t.dir == 1 ? high - t.entry : t.entry - low) / t.unit
-        float adv = (t.dir == 1 ? t.entry - low : high - t.entry) / t.unit
-        t.mfe := math.max(t.mfe, fav)
-        t.mae := math.max(t.mae, adv)
-        if na(t.res)
-            if adv >= btStp
-                t.res := -btStp
+        if t.win == 0
+            float fav = t.dir == 1 ? high - t.entry : t.entry - low
+            float adv = t.dir == 1 ? t.entry - low : high - t.entry
+            if adv >= btStp * t.unit
                 t.win := -1
-            else if fav >= btTgt
-                t.res := btTgt
+            else if fav >= btTgt * t.unit
                 t.win := 1
-        if t.age >= btHor
-            if na(t.res)
-                t.res := t.dir * (close - t.entry) / t.unit
+        if t.win != 0 or t.age >= btHor
             f_btRec(t)
             array.remove(btTrs, i)
 
-// עסקאות פתוחות ב-Strategy Tester: סגירה אחרי החלון
 var array<string> btIds = array.new_string()
 var array<int>    btBar = array.new_int()
 if array.size(btIds) > 0
@@ -2188,23 +2229,21 @@ bool btBeCt = false
 bool btBuAl = false
 bool btBuCt = false
 if btStep and not na(btAtr) and btAtr > 0
-    float tol = btTol * btAtr
     for d = 0 to 1
         int dir = d == 0 ? -1 : 1
-        int m   = dir == -1 ? eCh.evBe : eCh.evBu
-        [f, s, p] = f_btSel(m)
+        [f, s, p]    = f_btSel(dir == -1 ? eCh.evBe : eCh.evBu)
+        [fA, sA, pA] = f_btSel(dir == -1 ? eCh.alBe : eCh.alBu)
+        [fC, sC, pC] = f_btSel(dir == -1 ? eCh.ctBe : eCh.ctBu)
         if f or s or p
             if btT0 == 0
                 btT0 := time
-            int gC = f_btGrp(dir, close, btTO, tol)
-            int gP = f_btGrp(dir, btPrvC, btTO, tol)
             if f
-                array.push(btTrs, BtTr.new(row = 1, grp = gC, dir = dir, entry = close, unit = btAtr))
+                array.push(btTrs, BtTr.new(row = 1, grp = f_btG(fA, fC), dir = dir, entry = close, unit = btAtr))
             if s
-                array.push(btTrs, BtTr.new(row = 2, grp = gC, dir = dir, entry = close, unit = btAtr))
+                array.push(btTrs, BtTr.new(row = 2, grp = f_btG(sA, sC), dir = dir, entry = close, unit = btAtr))
             if p
-                array.push(btTrs, BtTr.new(row = 3, grp = gP, dir = dir, entry = close, unit = btAtr))
-            int gA = (f or s) ? gC : gP
+                array.push(btTrs, BtTr.new(row = 3, grp = f_btG(pA, pC), dir = dir, entry = close, unit = btAtr))
+            int gA = f_btG(fA or sA or pA, fC or sC or pC)
             array.push(btTrs, BtTr.new(row = 0, grp = gA, dir = dir, entry = close, unit = btAtr))
             array.push(btTrs, BtTr.new(row = dir == -1 ? 4 : 5, grp = gA, dir = dir, entry = close, unit = btAtr))
             if dir == -1
@@ -2213,12 +2252,11 @@ if btStep and not na(btAtr) and btAtr > 0
             else
                 btBuAl := gA == 0
                 btBuCt := gA == 1
-            // Strategy Tester
             bool dirOk  = btDir == "שניהם" or (btDir == "▼ ירידות" ? dir == -1 : dir == 1)
             bool sideOk = btSide == "הכל" ? gA != 2 : btSide == "צד נכון" ? gA == 0 : gA == 1
             if btTrade and dirOk and sideOk
                 string btId = (dir == -1 ? "▼" : "▲") + str.tostring(bar_index)
-                string tag = (f ? "F" : "") + (s ? "S" : "") + (p ? "P" : "") + (gA == 0 ? " נכון" : " הפוך")
+                string tag  = (f ? "F" : "") + (s ? "S" : "") + (p ? "P" : "") + (gA == 0 ? " נכון" : " הפוך")
                 strategy.entry(btId, dir == 1 ? strategy.long : strategy.short, comment = tag)
                 strategy.exit("x" + btId, from_entry = btId, stop = close - dir * btStp * btAtr, limit = close + dir * btTgt * btAtr, comment_loss = "סטופ", comment_profit = "יעד")
                 array.push(btIds, btId)
@@ -2228,61 +2266,52 @@ plotshape(btMk and btBeAl, "▼ בצד הנכון", shape.triangledown, location
 plotshape(btMk and btBeCt, "▼ בצד ההפוך", shape.triangledown, location.abovebar, color.new(color.gray, 40), size = size.tiny)
 plotshape(btMk and btBuAl, "▲ בצד הנכון", shape.triangleup, location.belowbar, color.new(colBull, 0), size = size.tiny)
 plotshape(btMk and btBuCt, "▲ בצד ההפוך", shape.triangleup, location.belowbar, color.new(color.gray, 40), size = size.tiny)
-plot(btShTO ? btTO : na, "True Open", color.new(color.orange, 30), 1, plot.style_stepline)
 
 // 3. הטבלה
-btPos = btPosI == "ימין למטה" ? position.bottom_right : btPosI == "אמצע למעלה" ? position.top_center : btPosI == "אמצע למטה" ? position.bottom_center : position.top_right
-var table btTb = table.new(btPos, 13, 11, bgcolor = color.new(color.black, 15), border_color = color.new(color.gray, 70), border_width = 1)
+btPos = btPosI == "ימין למעלה" ? position.top_right : btPosI == "אמצע למטה" ? position.bottom_center : btPosI == "אמצע למעלה" ? position.top_center : position.bottom_right
+var table btTb = table.new(btPos, 8, 11, bgcolor = color.new(color.black, 10), border_color = color.new(color.gray, 70), border_width = 1)
 
 f_btRowNm(int r) => r == 0 ? "הכל" : r == 1 ? "Fill" : r == 2 ? "SSMT" : r == 3 ? "PSP" : r == 4 ? "▼ ירידות" : "▲ עליות"
-f_btNum(float v) => na(v) ? "–" : str.tostring(v, "0.00")
-f_btSgn(float v) => na(v) ? "–" : (v > 0 ? "+" : "") + str.tostring(v, "0.00")
 f_btCell(int c, int r, string tx, color tc) =>
     table.cell(btTb, c, r, tx, text_color = tc, text_size = btSz)
-f_btAvg(array<float> a, int k) =>
-    float n = array.get(btN, k)
-    n > 0 ? array.get(a, k) / n : na
+f_btPct(float w, float n) => n > 0 ? w / n * 100 : na
 
 if barstate.islast and btTbl
-    table.clear(btTb, 0, 0, 12, 10)
+    table.clear(btTb, 0, 0, 7, 10)
     color fg  = color.white
     color dim = color.new(color.white, 45)
-    color gd  = colBull
-    color bd  = colBear
-    string since = btT0 == 0 ? "אין עדיין שבירות" : "מ-" + str.format_time(btT0, "dd/MM/yy", TZ)
-    f_btCell(0, 0, "בדיקת True Open · " + f_clsName(tfClass) + " · " + since, fg)
-    table.merge_cells(btTb, 0, 0, 12, 0)
-    f_btCell(1, 1, "צד נכון (▼ מעל · ▲ מתחת)", gd)
-    table.merge_cells(btTb, 1, 1, 5, 1)
-    f_btCell(6, 1, "צד הפוך", bd)
-    table.merge_cells(btTb, 6, 1, 10, 1)
-    f_btCell(11, 1, "פער", fg)
-    f_btCell(12, 1, "בלי TO", dim)
-    array<string> hd = array.from("", "n", "Win%", "ממוצע", "MFE", "MAE", "n", "Win%", "ממוצע", "MFE", "MAE", "ממוצע", "n")
-    for c = 0 to 12
+    string since = btT0 == 0 ? "אין עדיין שבירות" : "מ-" + str.format_time(btT0, "dd/MM/yy", TZ) + " עד היום"
+    f_btCell(0, 0, "True Open · שבירות " + f_clsName(tfClass) + " · " + since, fg)
+    table.merge_cells(btTb, 0, 0, 7, 0)
+    f_btCell(1, 1, "בצד הנכון", colBull)
+    table.merge_cells(btTb, 1, 1, 3, 1)
+    f_btCell(4, 1, "בצד ההפוך", colBear)
+    table.merge_cells(btTb, 4, 1, 6, 1)
+    f_btCell(7, 1, "", fg)
+    array<string> hd = array.from("", "שבירות", "עבדו", "%", "שבירות", "עבדו", "%", "פער")
+    for c = 0 to 7
         f_btCell(c, 2, array.get(hd, c), dim)
+    float noTO = 0
     for r = 0 to BT_R - 1
         int   kA = r * BT_G
         int   kC = kA + 1
         float nA = array.get(btN, kA)
         float nC = array.get(btN, kC)
-        float aA = f_btAvg(btR, kA)
-        float aC = f_btAvg(btR, kC)
-        float wA = nA > 0 ? array.get(btW, kA) / nA * 100 : na
-        float wC = nC > 0 ? array.get(btW, kC) / nC * 100 : na
-        float df = na(aA) or na(aC) ? na : aA - aC
+        float wA = array.get(btW, kA)
+        float wC = array.get(btW, kC)
+        float pA = f_btPct(wA, nA)
+        float pC = f_btPct(wC, nC)
+        float df = na(pA) or na(pC) ? na : pA - pC
+        if r == 0
+            noTO := array.get(btN, kA + 2)
         f_btCell(0, r + 3, f_btRowNm(r), fg)
         f_btCell(1, r + 3, str.tostring(nA, "#"), fg)
-        f_btCell(2, r + 3, na(wA) ? "–" : str.tostring(wA, "#") + "%", na(wA) or na(wC) ? fg : wA > wC ? gd : wA < wC ? bd : fg)
-        f_btCell(3, r + 3, f_btSgn(aA), na(aA) ? fg : aA > 0 ? gd : bd)
-        f_btCell(4, r + 3, f_btNum(f_btAvg(btUp, kA)), fg)
-        f_btCell(5, r + 3, f_btNum(f_btAvg(btDn, kA)), fg)
-        f_btCell(6, r + 3, str.tostring(nC, "#"), fg)
-        f_btCell(7, r + 3, na(wC) ? "–" : str.tostring(wC, "#") + "%", fg)
-        f_btCell(8, r + 3, f_btSgn(aC), na(aC) ? fg : aC > 0 ? gd : bd)
-        f_btCell(9, r + 3, f_btNum(f_btAvg(btUp, kC)), fg)
-        f_btCell(10, r + 3, f_btNum(f_btAvg(btDn, kC)), fg)
-        f_btCell(11, r + 3, f_btSgn(df), na(df) ? fg : df > 0 ? gd : bd)
-        f_btCell(12, r + 3, str.tostring(array.get(btN, kA + 2), "#"), dim)
-    f_btCell(0, 9, "יעד " + str.tostring(btTgt) + " ATR · סטופ " + str.tostring(btStp) + " ATR · חלון " + str.tostring(btHor) + " נרות · \"קרוב\" = " + str.tostring(btTol) + " ATR · ממוצע / MFE / MAE ביחידות ATR · יעד וסטופ באותו נר = סטופ", dim)
-    table.merge_cells(btTb, 0, 9, 12, 9)
+        f_btCell(2, r + 3, str.tostring(wA, "#"), fg)
+        f_btCell(3, r + 3, na(pA) ? "–" : str.tostring(pA, "#") + "%", fg)
+        f_btCell(4, r + 3, str.tostring(nC, "#"), fg)
+        f_btCell(5, r + 3, str.tostring(wC, "#"), fg)
+        f_btCell(6, r + 3, na(pC) ? "–" : str.tostring(pC, "#") + "%", fg)
+        f_btCell(7, r + 3, na(df) ? "–" : (df > 0 ? "+" : "") + str.tostring(df, "#") + "%", na(df) ? fg : df > 0 ? colBull : df < 0 ? colBear : fg)
+    string toTx = btToRef == "המחזור הקטן" and tfClass <= 5 ? "True Open של המחזור הקטן" : "True Open של המיכל"
+    f_btCell(0, 9, "עבדה = " + str.tostring(btTgt) + " ATR בכיוון לפני " + str.tostring(btStp) + " ATR נגד, תוך " + str.tostring(btHor) + " נרות · " + toTx + " · צד נכון = לפחות נכס אחד · בלי True Open (לא נספרו): " + str.tostring(noTO, "#"), dim)
+    table.merge_cells(btTb, 0, 9, 7, 9)
