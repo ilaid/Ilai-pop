@@ -1,0 +1,237 @@
+//@version=5
+indicator("QT CC — בודק True Open", shorttitle = "QT CC Test", overlay = true, max_labels_count = 50)
+
+// ═══════════════════════════════════════════════════════════════════
+// בודק את ההשערה: שבירה לירידות שנוצרת מעל ה-True Open (או ממש קרוב אליו)
+// ושבירה לעליות שנוצרת מתחתיו — עובדות טוב יותר משבירות בצד ההפוך.
+//
+// לא מחשב שבירות בעצמו. קורא אותן מ-QT CC (שלושת ה-plot-ים "ייצוא"),
+// ולכל שבירה בודק מה המחיר עשה אחריה:
+//   • יעד / סטופ ב-ATR — מה הגיע קודם (באותו נר — נספר כסטופ)
+//   • אם אף אחד לא הגיע תוך N נרות — התוצאה היא התנועה בסוף החלון
+//   • MFE / MAE — התנועה הכי רחוקה בעד ונגד, לאורך כל החלון
+// התוצאות בטבלה: "בצד הנכון" מול "בצד ההפוך", לכל סוג ולכל כיוון.
+// ═══════════════════════════════════════════════════════════════════
+
+grpSrc  = "חיבור ל-QT CC"
+srcBear = input.source(close, "שבירות לירידות", group = grpSrc, tooltip = "לבחור: QT CC › ייצוא — שבירות לירידות")
+srcBull = input.source(close, "שבירות לעליות", group = grpSrc, tooltip = "לבחור: QT CC › ייצוא — שבירות לעליות")
+srcTO   = input.source(close, "True Open", group = grpSrc, tooltip = "לבחור: QT CC › ייצוא — True Open")
+
+grpFlt  = "אילו שבירות לבדוק"
+useFill = input.bool(true, "Fill", group = grpFlt, inline = "t")
+useSS   = input.bool(true, "SSMT / HSSMT", group = grpFlt, inline = "t")
+usePsp  = input.bool(true, "PSP", group = grpFlt, inline = "t")
+useTri  = input.bool(true, "שלישייה", group = grpFlt, inline = "k")
+usePair = input.bool(true, "זוג 3·4", group = grpFlt, inline = "k")
+useRng  = input.bool(false, "רק בטווח תאריכים", group = grpFlt)
+tFrom   = input.time(timestamp("2026-01-01T00:00:00"), "מ-", group = grpFlt)
+tTo     = input.time(timestamp("2030-01-01T00:00:00"), "עד", group = grpFlt)
+
+grpZone = "צד נכון"
+tolAtr  = input.float(0.10, "\"ממש קרוב\" ל-True Open — עד (ATR)", minval = 0.0, maxval = 2.0, step = 0.05, group = grpZone, tooltip = "לירידות: מעל ה-True Open, או מתחתיו בפחות מזה = צד נכון.\nלעליות: מתחת, או מעליו בפחות מזה = צד נכון.\n0 = רק מעל / מתחת ממש.\nFill ו-SSMT — לפי סגירת הנר שעשה את השבירה. PSP — לפי סגירת נר הסווינג (כמו ᴾ/ᴰ ב-QT CC).")
+
+grpOut  = "איך מודדים הצלחה"
+horizon = input.int(12, "חלון — כמה נרות אחרי השבירה", minval = 1, maxval = 300, group = grpOut)
+tgtAtr  = input.float(1.0, "יעד (ATR)", minval = 0.1, step = 0.1, group = grpOut)
+stpAtr  = input.float(1.0, "סטופ (ATR)", minval = 0.1, step = 0.1, group = grpOut)
+atrLen  = input.int(14, "אורך ATR", minval = 1, group = grpOut)
+
+grpVis  = "תצוגה"
+showMk  = input.bool(true, "סמן כל שבירה על הגרף (צבע = צד נכון, אפור = צד הפוך)", group = grpVis)
+showTO  = input.bool(false, "צייר את ה-True Open", group = grpVis)
+tblPosI = input.string("ימין למעלה", "מיקום הטבלה", options = ["ימין למעלה", "ימין למטה", "שמאל למעלה", "שמאל למטה", "אמצע למעלה"], group = grpVis)
+tblSz   = input.string("small", "גודל טקסט", options = ["tiny", "small", "normal"], group = grpVis)
+colGood = input.color(#26a69a, "טוב", group = grpVis)
+colBad  = input.color(#ef5350, "רע", group = grpVis)
+
+// ═══════════════════════════════════════════════════════════════════
+// קידוד הייצוא (סכום של ביטים):
+//   1 = Fill שלישייה · 2 = Fill זוג · 4 = SSMT שלישייה · 8 = SSMT זוג
+//   16 = PSP שלישייה · 32 = PSP זוג
+// ═══════════════════════════════════════════════════════════════════
+
+f_has(int m, int bit) => math.floor(m / bit) % 2 == 1
+
+f_sel(int m) =>
+    bool f = useFill and ((useTri and f_has(m, 1)) or (usePair and f_has(m, 2)))
+    bool s = useSS and ((useTri and f_has(m, 4)) or (usePair and f_has(m, 8)))
+    bool p = usePsp and ((useTri and f_has(m, 16)) or (usePair and f_has(m, 32)))
+    [f, s, p]
+
+f_isMask(float v) => na(v) or (v >= 0 and v <= 63 and v == math.round(v))
+
+// 0 = צד נכון · 1 = צד הפוך · 2 = אין True Open
+f_grp(int dir, float px, float to, float tol) =>
+    na(to) or na(px) ? 2 : dir == -1 ? (px >= to - tol ? 0 : 1) : (px <= to + tol ? 0 : 1)
+
+// ═══════════════════════════════════════════════════════════════════
+// עסקאות פתוחות וסטטיסטיקה
+// שורות: 0 = הכל · 1 = Fill · 2 = SSMT · 3 = PSP · 4 = רק ▼ · 5 = רק ▲
+// ═══════════════════════════════════════════════════════════════════
+
+NROW = 6
+NGRP = 3
+
+type Tr
+    int   row
+    int   grp
+    int   dir
+    float entry
+    float unit
+    int   age = 0
+    float mfe = 0.0
+    float mae = 0.0
+    float res = na
+    int   win = 0   // 1 = יעד · -1 = סטופ · 0 = עוד לא / זמן
+
+var array<Tr>    trs  = array.new<Tr>()
+var array<float> stN  = array.new_float(NROW * NGRP, 0.0)
+var array<float> stW  = array.new_float(NROW * NGRP, 0.0)
+var array<float> stL  = array.new_float(NROW * NGRP, 0.0)
+var array<float> stR  = array.new_float(NROW * NGRP, 0.0)
+var array<float> stUp = array.new_float(NROW * NGRP, 0.0)
+var array<float> stDn = array.new_float(NROW * NGRP, 0.0)
+
+f_add(array<float> a, int k, float v) =>
+    array.set(a, k, array.get(a, k) + v)
+
+f_rec(Tr t) =>
+    int k = t.row * NGRP + t.grp
+    f_add(stN, k, 1.0)
+    f_add(stW, k, t.win == 1 ? 1.0 : 0.0)
+    f_add(stL, k, t.win == -1 ? 1.0 : 0.0)
+    f_add(stR, k, t.res)
+    f_add(stUp, k, t.mfe)
+    f_add(stDn, k, t.mae)
+    k
+
+atrV  = ta.atr(atrLen)
+prevC = close[1]
+
+var bool bad = false
+if not f_isMask(srcBear) or not f_isMask(srcBull)
+    bad := true
+
+bool inRange = not useRng or (time >= tFrom and time <= tTo)
+bool canGo   = not bad and barstate.isconfirmed
+
+// 1. עדכון העסקאות שנפתחו בנרות קודמים
+if canGo and array.size(trs) > 0
+    for i = array.size(trs) - 1 to 0
+        Tr t = array.get(trs, i)
+        t.age := t.age + 1
+        float fav = (t.dir == 1 ? high - t.entry : t.entry - low) / t.unit
+        float adv = (t.dir == 1 ? t.entry - low : high - t.entry) / t.unit
+        t.mfe := math.max(t.mfe, fav)
+        t.mae := math.max(t.mae, adv)
+        if na(t.res)
+            if adv >= stpAtr
+                t.res := -stpAtr
+                t.win := -1
+            else if fav >= tgtAtr
+                t.res := tgtAtr
+                t.win := 1
+        if t.age >= horizon
+            if na(t.res)
+                t.res := t.dir * (close - t.entry) / t.unit
+            f_rec(t)
+            array.remove(trs, i)
+
+// 2. שבירות חדשות בנר הזה
+bool beAl = false
+bool beCt = false
+bool buAl = false
+bool buCt = false
+if canGo and inRange and not na(atrV) and atrV > 0
+    float tol = tolAtr * atrV
+    for d = 0 to 1
+        int dir = d == 0 ? -1 : 1
+        int m   = int(nz(dir == -1 ? srcBear : srcBull))
+        [f, s, p] = f_sel(m)
+        if f or s or p
+            int gC = f_grp(dir, close, srcTO, tol)
+            int gP = f_grp(dir, prevC, srcTO, tol)
+            if f
+                array.push(trs, Tr.new(row = 1, grp = gC, dir = dir, entry = close, unit = atrV))
+            if s
+                array.push(trs, Tr.new(row = 2, grp = gC, dir = dir, entry = close, unit = atrV))
+            if p
+                array.push(trs, Tr.new(row = 3, grp = gP, dir = dir, entry = close, unit = atrV))
+            int gA = (f or s) ? gC : gP
+            array.push(trs, Tr.new(row = 0, grp = gA, dir = dir, entry = close, unit = atrV))
+            array.push(trs, Tr.new(row = dir == -1 ? 4 : 5, grp = gA, dir = dir, entry = close, unit = atrV))
+            if dir == -1
+                beAl := gA == 0
+                beCt := gA == 1
+            else
+                buAl := gA == 0
+                buCt := gA == 1
+
+plotshape(showMk and beAl, "▼ בצד הנכון", shape.triangledown, location.abovebar, color.new(colBad, 0), size = size.tiny)
+plotshape(showMk and beCt, "▼ בצד ההפוך", shape.triangledown, location.abovebar, color.new(color.gray, 40), size = size.tiny)
+plotshape(showMk and buAl, "▲ בצד הנכון", shape.triangleup, location.belowbar, color.new(colGood, 0), size = size.tiny)
+plotshape(showMk and buCt, "▲ בצד ההפוך", shape.triangleup, location.belowbar, color.new(color.gray, 40), size = size.tiny)
+plot(showTO and not bad ? srcTO : na, "True Open", color.new(color.orange, 30), 1, plot.style_stepline)
+
+// ═══════════════════════════════════════════════════════════════════
+// הטבלה
+// ═══════════════════════════════════════════════════════════════════
+
+tblPos = tblPosI == "ימין למטה" ? position.bottom_right : tblPosI == "שמאל למעלה" ? position.top_left : tblPosI == "שמאל למטה" ? position.bottom_left : tblPosI == "אמצע למעלה" ? position.top_center : position.top_right
+var table tb = table.new(tblPos, 13, 11, bgcolor = color.new(color.black, 15), border_color = color.new(color.gray, 70), border_width = 1)
+
+f_rowName(int r) => r == 0 ? "הכל" : r == 1 ? "Fill" : r == 2 ? "SSMT" : r == 3 ? "PSP" : r == 4 ? "▼ ירידות" : "▲ עליות"
+f_num(float v, string f) => na(v) ? "–" : str.tostring(v, f)
+f_sgn(float v) => na(v) ? "–" : (v > 0 ? "+" : "") + str.tostring(v, "0.00")
+f_cell(int c, int r, string tx, color tc) =>
+    table.cell(tb, c, r, tx, text_color = tc, text_size = tblSz)
+
+f_avg(array<float> a, int k) =>
+    float n = array.get(stN, k)
+    n > 0 ? array.get(a, k) / n : na
+
+if barstate.islast
+    table.clear(tb, 0, 0, 12, 10)
+    color fg = color.white
+    color dim = color.new(color.white, 45)
+    if bad
+        f_cell(0, 0, "QT CC Test — לא מחובר.\nבהגדרות › חיבור ל-QT CC: לבחור את שלושת המקורות \"ייצוא\" של QT CC.\n(QT CC צריך להיות על אותו גרף, עם קוד הייצוא.)", colBad)
+    else
+        f_cell(0, 0, "QT CC Test · " + timeframe.period, fg)
+        table.merge_cells(tb, 0, 0, 12, 0)
+        f_cell(1, 1, "בצד הנכון (▼ מעל TO · ▲ מתחת)", colGood)
+        table.merge_cells(tb, 1, 1, 5, 1)
+        f_cell(6, 1, "בצד ההפוך", colBad)
+        table.merge_cells(tb, 6, 1, 10, 1)
+        f_cell(11, 1, "פער", fg)
+        f_cell(12, 1, "בלי TO", dim)
+        array<string> hd = array.from("", "n", "Win%", "ממוצע", "MFE", "MAE", "n", "Win%", "ממוצע", "MFE", "MAE", "ממוצע", "n")
+        for c = 0 to 12
+            f_cell(c, 2, array.get(hd, c), dim)
+        for r = 0 to NROW - 1
+            int kA = r * NGRP
+            int kC = kA + 1
+            int kX = kA + 2
+            float nA = array.get(stN, kA)
+            float nC = array.get(stN, kC)
+            float aA = f_avg(stR, kA)
+            float aC = f_avg(stR, kC)
+            float wA = nA > 0 ? array.get(stW, kA) / nA * 100 : na
+            float wC = nC > 0 ? array.get(stW, kC) / nC * 100 : na
+            float df = na(aA) or na(aC) ? na : aA - aC
+            f_cell(0, r + 3, f_rowName(r), fg)
+            f_cell(1, r + 3, f_num(nA, "#"), fg)
+            f_cell(2, r + 3, na(wA) ? "–" : f_num(wA, "#") + "%", na(wC) or na(wA) ? fg : wA > wC ? colGood : wA < wC ? colBad : fg)
+            f_cell(3, r + 3, f_sgn(aA), na(aA) ? fg : aA > 0 ? colGood : colBad)
+            f_cell(4, r + 3, f_num(f_avg(stUp, kA), "0.00"), fg)
+            f_cell(5, r + 3, f_num(f_avg(stDn, kA), "0.00"), fg)
+            f_cell(6, r + 3, f_num(nC, "#"), fg)
+            f_cell(7, r + 3, na(wC) ? "–" : f_num(wC, "#") + "%", fg)
+            f_cell(8, r + 3, f_sgn(aC), na(aC) ? fg : aC > 0 ? colGood : colBad)
+            f_cell(9, r + 3, f_num(f_avg(stUp, kC), "0.00"), fg)
+            f_cell(10, r + 3, f_num(f_avg(stDn, kC), "0.00"), fg)
+            f_cell(11, r + 3, f_sgn(df), na(df) ? fg : df > 0 ? colGood : colBad)
+            f_cell(12, r + 3, f_num(array.get(stN, kX), "#"), dim)
+        f_cell(0, 9, "יעד " + str.tostring(tgtAtr) + " ATR · סטופ " + str.tostring(stpAtr) + " ATR · חלון " + str.tostring(horizon) + " נרות · \"קרוב\" = " + str.tostring(tolAtr) + " ATR · ממוצע/MFE/MAE ביחידות ATR · עסקאות פתוחות: " + str.tostring(array.size(trs)), dim)
+        table.merge_cells(tb, 0, 9, 12, 9)
