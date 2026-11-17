@@ -44,6 +44,8 @@ fillT  = input.int(85, "שקיפות המילוי", minval = 50, maxval = 98, gr
 txtSz  = input.string("קטן", "גודל כתב", options = ["זעיר", "קטן", "רגיל"], group = G3)
 extR   = input.int(8, "הארכה ימינה (נרות)", minval = 0, maxval = 100, group = G3)
 showDone = input.bool(true, "הצג גאפים שכבר חזרו אליהם (✓)", group = G3)
+showChain = input.bool(false, "בתווית גם את הרבעים הבאים", group = G3, tooltip = "כבוי = בתווית רק הסיכוי לרבע הנוכחי. הרבעים הבאים תמיד מופיעים בנגיעה בתווית.")
+calOn    = input.bool(true, "תקן את האחוז לפי טבלת הדיוק", group = G1, tooltip = "אם בעבר תחזיות של ~85% קרו בפועל ב-~75%, האחוז המוצג מותאם בהתאם. כך המספר על הגאפ קרוב למה שקורה באמת.")
 showCal  = input.bool(true, "טבלת בדיקת דיוק", group = G3, tooltip = "כל תחזית נרשמת ברגע שהיא נעשית — רק מנתונים שהיו ידועים אז — ונבדקת מול מה שקרה. כך רואים אם 60% באמת קורה בערך ב-60% מהמקרים.")
 calPos   = input.string("ימין למטה", "מיקום טבלת הדיוק", options = ["ימין למעלה", "ימין למטה", "שמאל למעלה", "שמאל למטה"], group = G3)
 
@@ -431,6 +433,18 @@ for g in gs
 // ══════════════════════════════════════════════════════════════
 // ציור — רק בנר האחרון
 // ══════════════════════════════════════════════════════════════
+// תיקון לפי טבלת הדיוק: באותו סל, יחס בין מה שקרה בפועל למה שנובא
+f_cal(float p) =>
+    float r = p
+    if calOn and not na(p)
+        int b = math.min(4, int(math.floor(p * 5)))
+        int n = calN.get(b)
+        if n >= 30 and calP.get(b) > 0
+            r := math.max(0.0, math.min(1.0, p * calH.get(b) / calP.get(b)))
+    r
+
+DSTN = array.from("עד 0.5 ATR", "0.5–1 ATR", "1–2 ATR", "2–3 ATR", "מעל 3 ATR")
+
 AGEN = array.from("", "מהמחזור הקודם", "מלפני שני מחזורים", "מלפני שלושה מחזורים")
 RNKN = array.from("ראשון בדרך", "שני בדרך", "שלישי ומעלה")
 tSz = txtSz == "זעיר" ? size.tiny : txtSz == "קטן" ? size.small : size.normal
@@ -494,7 +508,9 @@ if barstate.islast
             int rk = f_rank(g, close)
             int db = f_db(dist)
             // המחזור הנוכחי — לפי כמה ממנו כבר עבר
-            [p, nn, lv] = f_prob(ag, db, rk, qLive)
+            [pr, nn, lv] = f_prob(ag, db, rk, qLive)
+            float p    = f_cal(pr)
+            int   k1   = f_k1(ag, db, rk, qLive)
             float miss = na(p) ? na : 1 - p
             string chain = ""
             string chTp  = ""
@@ -502,14 +518,15 @@ if barstate.islast
             if not cBk and cPs < 3
                 for j = cPs + 1 to 3
                     int aj = math.max(1, math.min(3, j - g.pos))
-                    [pj, nj, lj] = f_prob(aj, db, rk, 0)
+                    [pjr, nj, lj] = f_prob(aj, db, rk, 0)
+                    float pj = f_cal(pjr)
                     if not na(pj)
                         chain += " · " + f_cName(j) + " " + str.tostring(math.round(100 * pj)) + "%"
                         chTp  += "\nאם לא חזר עד אז — ב-" + f_cName(j) + ": " + str.tostring(math.round(100 * pj)) + "%"
                         miss := na(miss) ? na : miss * (1 - pj)
             int pi = na(p) ? na : math.round(100 * p)
-            tx := TFN.get(L) + " · " + f_cName(g.pos) + " → " + f_cName(cPs) + " " + (na(p) ? "–" : (lv >= 3 ? "~" : "") + str.tostring(pi) + "%") + chain + " · " + str.tostring(dist, "#.##") + " ATR"
-            tp := "הגאפ של " + f_cName(g.pos) + " (" + AGEN.get(ag) + ", " + RNKN.get(rk) + ")\nסיכוי לחזור אליו ב-" + f_cName(cPs) + ": " + (na(p) ? "אין נתונים" : str.tostring(pi) + "% (" + str.tostring(nn) + " מקרים" + (lv >= 3 ? ", בעיקר מהקבוצה הרחבה" : "") + ")") + chTp + "\nבסך הכול עד סוף ה" + CONN.get(L) + ": " + (na(miss) ? "–" : str.tostring(math.round(100 * (1 - miss))) + "%") + "\nעבר " + str.tostring(qLive + 1) + "/4 מ-" + f_cName(cPs)
+            tx := TFN.get(L) + " · " + f_cName(g.pos) + " → " + f_cName(cPs) + " " + (na(p) ? "–" : (lv >= 3 ? "~" : "") + str.tostring(pi) + "%") + (showChain ? chain : "") + " · " + str.tostring(dist, "#.##") + " ATR"
+            tp := "סיכוי שהמחיר יגיע לגאפ של " + f_cName(g.pos) + " עוד ב-" + f_cName(cPs) + ": " + (na(p) ? "אין נתונים" : str.tostring(pi) + "%") + "\n\nלפי מה: בהיסטוריה של הגרף היו " + str.tostring(nn) + " מקרים דומים — גאפ " + AGEN.get(ag) + ", " + DSTN.get(db) + " מהמחיר, " + RNKN.get(rk) + ", ברבע " + str.tostring(qLive + 1) + "/4 של המחזור. מתוכם " + str.tostring(h1.get(k1)) + " חזרו." + (lv >= 3 ? "\nמעט מקרים — האחוז נשען בעיקר על כל הגאפים " + AGEN.get(ag) + " במרחק דומה." : "") + (calOn ? "\nהאחוז מתוקן לפי טבלת הדיוק." : "") + "\n\nאם לא יחזור ב-" + f_cName(cPs) + ":" + (chTp == "" ? " זה הרבע האחרון במיכל." : chTp) + "\nבסך הכול עד סוף ה" + CONN.get(L) + ": " + (na(miss) ? "–" : str.tostring(math.round(100 * (1 - miss))) + "%")
             cc := na(p) ? cDone : pi >= pHi ? cHi : pi >= pLo ? cMid : cLo
         bxs.push(box.new(g.org, g.top, bar_index + extR, g.bot, border_color = color.new(cc, 60), bgcolor = color.new(cc, fillT)))
         lbs.push(label.new(bar_index + extR, (g.top + g.bot) / 2, tx, style = label.style_label_left, color = color.new(color.black, 100), textcolor = cc, size = tSz, tooltip = tp))
