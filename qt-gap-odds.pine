@@ -43,7 +43,7 @@ cDone  = input.color(#9598a1, "כבר חזר במחזור הזה", group = G3)
 fillT  = input.int(85, "שקיפות המילוי", minval = 50, maxval = 98, group = G3)
 txtSz  = input.string("קטן", "גודל כתב", options = ["זעיר", "קטן", "רגיל"], group = G3)
 extR   = input.int(8, "הארכה ימינה (נרות)", minval = 0, maxval = 100, group = G3)
-showDone = input.bool(true, "הצג גאפים שכבר חזרו אליהם במחזור הזה", group = G3)
+showDone = input.bool(true, "הצג גאפים שכבר חזרו אליהם (✓)", group = G3)
 showCal  = input.bool(true, "טבלת בדיקת דיוק", group = G3, tooltip = "כל תחזית נרשמת ברגע שהיא נעשית — רק מנתונים שהיו ידועים אז — ונבדקת מול מה שקרה. כך רואים אם 60% באמת קורה בערך ב-60% מהמקרים.")
 calPos   = input.string("ימין למטה", "מיקום טבלת הדיוק", options = ["ימין למעלה", "ימין למטה", "שמאל למעלה", "שמאל למטה"], group = G3)
 
@@ -181,6 +181,7 @@ type G
     int   bar           // נר הלידה
     int   lastT         // הנר האחרון שבו המחיר נגע בו
     bool  dead = false  // IFVG
+    int   retPos        // באיזה מחזור (מיקום במיכל) המחיר חזר אליו לראשונה, אחרי המחזור שלו
 
 var array<G> gs = array.new<G>()
 
@@ -370,10 +371,10 @@ if not na(key) and (na(cS) or key != cS)
 // ══════════════════════════════════════════════════════════════
 for g in gs
     if not g.dead and g.bar < bar_index and (g.dir == 1 ? low <= g.top : high >= g.bot)
-        bool first = na(g.lastT) or g.lastT < cStart
         g.lastT := bar_index
-        if first
-            int ag = math.max(0, math.min(3, cPs - g.pos))
+        if na(g.retPos) and g.cont == cC and g.pos < cPs and not cBk
+            g.retPos := cPs
+            int ag = math.max(1, math.min(3, cPs - g.pos))
             fpend.push(SF.new(g, ag * 4 + math.max(qNow, 0), cS))
 for sn in pend
     if sn.g.lastT == bar_index
@@ -393,7 +394,7 @@ f_dist(G g, float px) =>
     math.max(0.0, g.dir == 1 ? px - g.top : g.bot - px) / nz(atr, 1)
 
 f_open(G g) =>
-    not g.dead and g.bar < bar_index and (na(g.lastT) or g.lastT < cStart)
+    not g.dead and g.bar < bar_index and g.cont == cC and g.pos < cPs and na(g.retPos)
 
 f_rank(G g, float px) =>
     float me = f_dist(g, px)
@@ -406,8 +407,8 @@ f_rank(G g, float px) =>
 if qLive != qNow and not cBk and not na(atr)
     qNow := qLive
     for g in gs
-        if f_open(g) and g.cont == cC
-            int ag = math.max(0, math.min(3, cPs - g.pos))
+        if f_open(g)
+            int ag = math.max(1, math.min(3, cPs - g.pos))
             int dd = f_db(f_dist(g, close))
             int rr = f_rank(g, close)
             [pp, pn, plv] = f_prob(ag, dd, rr, qLive)
@@ -430,9 +431,26 @@ for g in gs
 // ══════════════════════════════════════════════════════════════
 // ציור — רק בנר האחרון
 // ══════════════════════════════════════════════════════════════
-AGEN = array.from("מהמחזור הנוכחי", "מהמחזור הקודם", "מלפני שני מחזורים", "ישן יותר במיכל")
+AGEN = array.from("", "מהמחזור הקודם", "מלפני שני מחזורים", "מלפני שלושה מחזורים")
 RNKN = array.from("ראשון בדרך", "שני בדרך", "שלישי ומעלה")
 tSz = txtSz == "זעיר" ? size.tiny : txtSz == "קטן" ? size.small : size.normal
+
+// שם המחזור לפי מיקומו במיכל
+f_cName(int ps) =>
+    string r = "Q" + str.tostring(ps + 1)
+    if L == 1
+        r := "22.5' " + str.tostring(ps + 1)
+    else if L == 2
+        r := "90' " + str.tostring(ps + 1)
+    else if L == 3
+        r := array.from("Asia", "London", "AM", "PM").get(math.min(ps, 3))
+    else if L == 4
+        r := array.from("Mon", "Tue", "Wed", "Thu", "Fri").get(math.min(ps, 4))
+    else if L == 5
+        r := "W" + str.tostring(ps + 1)
+    else if L == 6
+        r := "QQ" + str.tostring(ps + 1)
+    r
 
 var array<box> bxs = array.new<box>()
 var array<label> lbs = array.new<label>()
@@ -441,14 +459,12 @@ if barstate.islast
         box.delete(bxs.pop())
     while lbs.size() > 0
         label.delete(lbs.pop())
-    // הקרובים למחיר קודם
+    // רק גאפים ממחזורים קודמים במיכל — הקרובים למחיר קודם
     array<float> ds = array.new_float()
     array<G>     og = array.new<G>()
     for g in gs
-        if not g.dead and g.cont == cC and g.bar < bar_index
-            bool done = not na(g.lastT) and g.lastT >= cStart
-            bool inG  = close <= g.top and close >= g.bot
-            if showDone or not done or inG
+        if not g.dead and g.cont == cC and g.pos < cPs and g.bar < bar_index
+            if showDone or na(g.retPos) or (close <= g.top and close >= g.bot)
                 ds.push(f_dist(g, close))
                 og.push(g)
     int cnt = 0
@@ -458,30 +474,42 @@ if barstate.islast
         ds.remove(bi)
         og.remove(bi)
         cnt += 1
-        int   ag   = math.max(0, math.min(3, cPs - g.pos))
+        int   ag   = math.max(1, math.min(3, cPs - g.pos))
         float dist = f_dist(g, close)
         bool  inG  = close <= g.top and close >= g.bot
-        bool  done = not na(g.lastT) and g.lastT >= cStart and not inG
         string tx = ""
         string tp = ""
         color  cc = cDone
         if inG
             int k = ag * 4 + qLive
             float pf = fN.get(k) > 0 ? float(fH.get(k)) / fN.get(k) : na
-            tx := TFN.get(L) + " · IN · fill " + (na(pf) ? "–" : str.tostring(math.round(100 * pf)) + "%")
-            tp := "המחיר בתוך הגאפ\nסיכוי למלא אותו עד הקצה הרחוק עד סוף ה" + SUBN.get(L) + ": " + (na(pf) ? "אין מספיק מקרים" : str.tostring(math.round(100 * pf)) + "% (" + str.tostring(fN.get(k)) + " מקרים)") + "\nהגאפ " + AGEN.get(ag)
+            tx := TFN.get(L) + " · " + f_cName(g.pos) + " · IN · fill " + (na(pf) ? "–" : str.tostring(math.round(100 * pf)) + "%")
+            tp := "המחיר בתוך הגאפ של " + f_cName(g.pos) + "\nסיכוי למלא אותו עד הקצה הרחוק עד סוף " + f_cName(cPs) + ": " + (na(pf) ? "אין מספיק מקרים" : str.tostring(math.round(100 * pf)) + "% (" + str.tostring(fN.get(k)) + " מקרים)")
             cc := cIn
-        else if done
-            tx := TFN.get(L) + " · ✓ חזר"
-            tp := "המחיר כבר הגיע לגאפ הזה במחזור הנוכחי · הגאפ " + AGEN.get(ag)
+        else if not na(g.retPos)
+            tx := TFN.get(L) + " · " + f_cName(g.pos) + " · ✓ חזר ב-" + f_cName(g.retPos)
+            tp := "הגאפ של " + f_cName(g.pos) + " — המחיר חזר אליו ב-" + f_cName(g.retPos)
             cc := cDone
         else
             int rk = f_rank(g, close)
-            [p, nn, lv] = f_prob(ag, f_db(dist), rk, qLive)
-            float pc = f_probC(ag, f_db(dist), rk, qLive)
-            int   pi = na(p) ? na : math.round(100 * p)
-            tx := TFN.get(L) + " · " + (na(p) ? "–" : (lv >= 3 ? "~" : "") + str.tostring(pi) + "%") + " · " + str.tostring(dist, "#.##") + " ATR"
-            tp := "סיכוי להגיע עד סוף ה" + SUBN.get(L) + ": " + (na(p) ? "אין נתונים" : str.tostring(pi) + "% (" + str.tostring(nn) + " מקרים" + (lv >= 3 ? ", טבלה גסה" : "") + ")") + "\nעד סוף ה" + CONN.get(L) + ": " + (na(pc) ? "–" : str.tostring(math.round(100 * pc)) + "%") + "\nהגאפ " + AGEN.get(ag) + " · " + RNKN.get(rk) + "\nעבר " + str.tostring(qLive + 1) + "/4 מהמחזור"
+            int db = f_db(dist)
+            // המחזור הנוכחי — לפי כמה ממנו כבר עבר
+            [p, nn, lv] = f_prob(ag, db, rk, qLive)
+            float miss = na(p) ? na : 1 - p
+            string chain = ""
+            string chTp  = ""
+            // המחזורים הבאים במיכל: אם לא חזר עד אז — מה הסיכוי בכל אחד
+            if not cBk and cPs < 3
+                for j = cPs + 1 to 3
+                    int aj = math.max(1, math.min(3, j - g.pos))
+                    [pj, nj, lj] = f_prob(aj, db, rk, 0)
+                    if not na(pj)
+                        chain += " · " + f_cName(j) + " " + str.tostring(math.round(100 * pj)) + "%"
+                        chTp  += "\nאם לא חזר עד אז — ב-" + f_cName(j) + ": " + str.tostring(math.round(100 * pj)) + "%"
+                        miss := na(miss) ? na : miss * (1 - pj)
+            int pi = na(p) ? na : math.round(100 * p)
+            tx := TFN.get(L) + " · " + f_cName(g.pos) + " → " + f_cName(cPs) + " " + (na(p) ? "–" : (lv >= 3 ? "~" : "") + str.tostring(pi) + "%") + chain + " · " + str.tostring(dist, "#.##") + " ATR"
+            tp := "הגאפ של " + f_cName(g.pos) + " (" + AGEN.get(ag) + ", " + RNKN.get(rk) + ")\nסיכוי לחזור אליו ב-" + f_cName(cPs) + ": " + (na(p) ? "אין נתונים" : str.tostring(pi) + "% (" + str.tostring(nn) + " מקרים" + (lv >= 3 ? ", בעיקר מהקבוצה הרחבה" : "") + ")") + chTp + "\nבסך הכול עד סוף ה" + CONN.get(L) + ": " + (na(miss) ? "–" : str.tostring(math.round(100 * (1 - miss))) + "%") + "\nעבר " + str.tostring(qLive + 1) + "/4 מ-" + f_cName(cPs)
             cc := na(p) ? cDone : pi >= pHi ? cHi : pi >= pLo ? cMid : cLo
         bxs.push(box.new(g.org, g.top, bar_index + extR, g.bot, border_color = color.new(cc, 60), bgcolor = color.new(cc, fillT)))
         lbs.push(label.new(bar_index + extR, (g.top + g.bot) / 2, tx, style = label.style_label_left, color = color.new(color.black, 100), textcolor = cc, size = tSz, tooltip = tp))
