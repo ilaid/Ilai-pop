@@ -94,7 +94,7 @@ cornerLift = input.int(2, "הרם את השורות (שורות ריקות)", mi
 
 grpAl = "התראות"
 // ניסוי: שבירה חדשה במסגרת גבוהה גוברת על הכיוון של המסגרות שמתחתיה
-cascadeOn = input.bool(true, "שבירה במסגרת גבוהה גוברת על הנמוכות (ניסוי)", group = "הכלל", tooltip = "דלוק: כשנוצרת שבירה במסגרת גבוהה (למשל 5m) אחרי השבירה האחרונה במסגרת נמוכה (1m), הכיוון של ה-5m קובע גם ל-1m — שבירות ה-1m בכיוון ההפוך הופכות ל-✗. כשה-1m עושה שבירה חדשה יותר בכיוון שלה — היא חוזרת לקבוע. אם השבירה הגבוהה מתה — היא מפסיקה להשפיע.\nמי חדשה: לפי סגירת הנר של השבירה (PSP — נר הסווינג).\nבצד: ⇡5m ליד שם המסגרת = הכיוון שלה נקבע עכשיו מ-5m.\nכבוי: כל מסגרת לעצמה.")
+cascadeOn = input.bool(true, "שבירה במסגרת גבוהה גוברת על הנמוכות (ניסוי)", group = "הכלל", tooltip = "דלוק: שבירה במסגרת נמוכה (1m) הופכת ל-✗ כשאחריה נוצרה שבירה פעילה הפוכה במסגרת גבוהה יותר (5m). שבירת 1m שנוצרה אחרי ה-5m — לא מושפעת, גם אם היא נגד ה-5m.\nכשהשבירה הגבוהה מתה — היא מפסיקה להשפיע, והנמוכות חוזרות.\nמי לפני מי: לפי סגירת הנר של השבירה (PSP — נר הסווינג).\nבצד: ⇡5m ליד שם המסגרת = אין לה שבירה משלה שקובעת, והכיוון שלה בא מ-5m.\nכבוי: כל מסגרת לעצמה.")
 alertOn = input.bool(true, "התראה על כל שבירה חדשה (5m ומעלה)", group = grpAl, tooltip = "Fill חדש או שעלה דרגה, SSMT/HSSMT חדשה (או S שהפכה ל-H), PSP חדש — בכל מסגרת מ-5m ומעלה שהאינדיקטור מחשב.\nכדי לקבל אותן: Alert על האינדיקטור עם התנאי Any alert() function call. הן רצות בשרתי TradingView גם כשהגרף סגור.")
 
 grpMtf = "מסגרות זמן"
@@ -1799,41 +1799,81 @@ f_drawPsp(Eng e, PBrk b, color col0) =>
         array.push(dLb, label.new(b.born, bear ? b.mkY + gap : b.mkY - gap, gl, xloc = xloc.bar_time, yloc = yloc.price, style = bear ? label.style_label_down : label.style_label_up, color = color.new(color.black, 100), textcolor = col, size = pspSize, tooltip = tip))
     0
 
-// הכיוון האפקטיבי של כל מנוע: האחרונה שלו, או — כשמסגרת גבוהה יותר עשתה שבירה
-// חדשה יותר (לפי סגירת הנר של השבירה) — הכיוון של הגבוהה. מועבר מלמעלה למטה.
+// ניסוי — מסגרת גבוהה גוברת על נמוכה, לכל שבירה בנפרד:
+// שבירה במסגרת נמוכה מושבתת (✗) כשיש שבירה פעילה במסגרת גבוהה יותר, בכיוון
+// ההפוך, שנסגרה אחריה. שבירה נמוכה שנוצרה אחרי הגבוהה — לא מושבתת.
+// "אחרי" = לפי סגירת הנר של השבירה (PSP — נר הסווינג).
+// המושבתות לא קובעות את הכיוון של המסגרת שלהן; אם לא נשארה לה שבירה שקובעת —
+// הכיוון שלה בא מהשבירה הגבוהה האחרונה (⇡ בצד).
+var array<int> supD = array.new_int()   // השבירות הפעילות של המסגרות שכבר עברנו (מלמעלה)
+var array<int> supE = array.new_int()
+var array<int> supC = array.new_int()
 var array<int> effD = array.new_int(9, 0)
 var array<int> effS = array.new_int(9, 0)
+
+f_close(Cand c, int cls) => f_ev(c) + f_clsMs(cls)
+
+// מושבתת ע"י שבירה פעילה הפוכה וחדשה יותר במסגרת גבוהה יותר
+f_suppT(int d, int ct, int cls) =>
+    bool r = false
+    if cascadeOn and array.size(supD) > 0
+        for i = 0 to array.size(supD) - 1
+            if not r and array.get(supC, i) > cls and array.get(supD, i) != d and array.get(supE, i) > ct
+                r := true
+    r
+
+f_supp(Cand c, int cls) => f_suppT(c.dir, f_close(c, cls), cls)
+
+// פעילה: לא מושבתת, ובכיוון האפקטיבי של המסגרת
+f_act(Cand c, int cls, int eD) => c.dir == eD and not f_supp(c, cls)
+
 if barstate.islast and tfClass != 0
-    int curD = 0
-    int curE = 0
-    int curS = 0
+    array.clear(supD)
+    array.clear(supE)
+    array.clear(supC)
     for cls = 8 to 1
         for k = 0 to array.size(allEng) - 1
             Eng e = array.get(allEng, k)
             if f_useE(k) and e.cls == cls
                 array<Cand> cs = f_cands(e)
-                int  li  = f_latest(cs)
-                int  oD  = li >= 0 ? array.get(cs, li).dir : 0
-                int  oE  = li >= 0 ? f_ev(array.get(cs, li)) + f_clsMs(cls) : 0
-                bool own = not cascadeOn or (oD != 0 and (curD == 0 or oE >= curE))
-                if own
-                    array.set(effD, k, oD)
-                    array.set(effS, k, cls)
-                    if oD != 0
-                        curD := oD
-                        curE := oE
-                        curS := cls
-                else
-                    array.set(effD, k, curD)
-                    array.set(effS, k, curS)
+                array<Cand> ok = array.new<Cand>()
+                if array.size(cs) > 0
+                    for i = 0 to array.size(cs) - 1
+                        Cand c = array.get(cs, i)
+                        if not f_supp(c, cls)
+                            array.push(ok, c)
+                int li = f_latest(ok)
+                int d  = 0
+                int sC = cls
+                if li >= 0
+                    d := array.get(ok, li).dir
+                else if cascadeOn and array.size(supD) > 0
+                    // אין לה שבירה שקובעת — הכיוון של השבירה הגבוהה האחרונה
+                    int bI = 0
+                    // ב-Pine לולאה מ-1 עד 0 רצה אחורה — לכן רק כשיש יותר מאחת
+                    if array.size(supD) > 1
+                        for i = 1 to array.size(supD) - 1
+                            if array.get(supE, i) > array.get(supE, bI)
+                                bI := i
+                    d  := array.get(supD, bI)
+                    sC := array.get(supC, bI)
+                array.set(effD, k, d)
+                array.set(effS, k, sC)
+                if array.size(ok) > 0
+                    for i = 0 to array.size(ok) - 1
+                        Cand c = array.get(ok, i)
+                        if c.dir == d
+                            array.push(supD, c.dir)
+                            array.push(supE, f_close(c, cls))
+                            array.push(supC, cls)
 
-// השבירה הכי חדשה בכיוון נתון — הראשונה בשורה
-f_leadIn(array<Cand> cs, int d) =>
+// השבירה הפעילה הכי חדשה — הראשונה בשורה
+f_leadIn(array<Cand> cs, int d, int cls) =>
     int bi = -1
     if array.size(cs) > 0
         for i = 0 to array.size(cs) - 1
             Cand c = array.get(cs, i)
-            if c.dir == d
+            if f_act(c, cls, d)
                 if bi < 0
                     bi := i
                 else if f_newer(c, array.get(cs, bi))
@@ -1853,7 +1893,7 @@ if barstate.islast
         if ld != 0 and array.size(cc) > 0
             for i = 0 to array.size(cc) - 1
                 Cand c = array.get(cc, i)
-                if c.dir == ld
+                if f_act(c, tfClass, ld)
                     if c.typ == 0
                         f_drawFill(eCh, c)
                     else if c.typ == 1
@@ -1868,7 +1908,8 @@ if barstate.islast
                         PBrk b = array.get(st, i)
                         if not f_pspGone(eCh, b)
                             color pc = f_colP(b)
-                            f_drawPsp(eCh, b, b.dir == ld ? pc : color.new(pc, pspOffT))
+                            bool pa = b.dir == ld and not f_suppT(b.dir, b.born + f_clsMs(tfClass), tfClass)
+                            f_drawPsp(eCh, b, pa ? pc : color.new(pc, pspOffT))
 
 // ═══════════════════════════════════════════════════════════════════
 // הצד — שורה לכל מסגרת, מהגבוהה לנמוכה:
@@ -1920,7 +1961,7 @@ if barstate.islast
                     array<Cand> cs = f_cands(e)
                     int  eD  = array.get(effD, k)
                     int  eS  = array.get(effS, k)
-                    int  li  = f_leadIn(cs, eD)
+                    int  li  = f_leadIn(cs, eD, cls)
                     // PCP ממתין בצד — מ-5m ומעלה (לא ב-1m)
                     bool pdT = showPend and cls >= 2 and e.pnd
                     bool pdP = showPend and cls >= 2 and use4 and e.pndP
@@ -1945,7 +1986,7 @@ if barstate.islast
                                         for i = 0 to array.size(cs) - 1
                                             Cand c = array.get(cs, i)
                                             bool wantAct = pass == 0
-                                            if c.typ == ty and (c.dir == eD) == wantAct
+                                            if c.typ == ty and f_act(c, cls, eD) == wantAct
                                                 if bP < 0
                                                     bP := i
                                                 else if f_newer(c, array.get(cs, bP))
