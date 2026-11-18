@@ -1,0 +1,184 @@
+// ═══════════════════════════════════════════════════════════════════
+// דירוג PCP ממתין — מנתוני PSP Lab (NQ · 1m, 5m, 15m, 1H, 4H)
+// בלי בקשות נתונים חדשות: נרות מסגרת הגרף, המנוע שמעל (FVG גבוה) והמנוע
+// שמתחת (איפה נוצר הקצה). מוצג רק על נר שעוד לא נסגר.
+//   נר 3: ⅓ בלי לקיחה ≈ 80% · ⅔ ≈ 90–95%
+//   נזילות (ראשון שלוקח את קצה הרבע הקודם / לקח וחזר פנימה) · קיצון ·
+//   FVG בתול (הגרף) · FVG בתול (מסגרת מעל) — כל אחד ≈ +6 עד +15
+//   ⚠ הקצה נוצר בשליש האחרון של הנר ≈ 40–49%
+// ═══════════════════════════════════════════════════════════════════
+
+rkOn = input.bool(true, "דירוג PCP ממתין (★)", group = grpPsp, tooltip = "ליד נקודת ה-PCP הממתין: כוכבים והערכת סיכוי שזה יהיה PSP.\n★★ ⅓ / ⅔ מהנר השלישי עבר בלי שהקצה נלקח\n★ נזילות — הראשון שלקח את קצה הרבע הקודם, או לקח ונסגר בחזרה פנימה\n★ קיצון — קיצון של N נרות או של המיכל עד עכשיו\n★ FVG — נגע ב-FVG בתול של מסגרת הגרף · ★ FVG↑ — של המסגרת שמעל\n⚠סוף — הקצה נוצר בשליש האחרון של נר ה-PCP: סיכוי נמוך\nהאחוז — מהמדידות של PSP Lab; שילוב של כמה סימנים הוא הערכה.")
+rkN  = input.int(20, "דירוג — קיצון אזורי (נרות)", minval = 5, maxval = 200, group = grpPsp)
+
+// הנכס שעליו נמדד: נכס הגרף, או נכס 1 כשהגרף הוא נכס אחר
+rkIx = cA < 0 ? 0 : cA
+
+// ── רבע ומיכל: הראשון שלוקח / לקח וחזר פנימה / קיצון
+[rkRf, rkLf, rkBk, rkQ1, rkQn] = f_cyc(math.max(tfClass, 1), time)
+
+var int   rkRfId = na
+var int   rkLfId = na
+var float rkPH   = na
+var float rkPL   = na
+var float rkCH   = na
+var float rkCL   = na
+var float rkKH   = na
+var float rkKL   = na
+if na(rkRfId) or rkRf != rkRfId
+    rkPH   := rkCH
+    rkPL   := rkCL
+    rkCH   := na
+    rkCL   := na
+    rkRfId := rkRf
+if na(rkLfId) or rkLf != rkLfId
+    rkKH   := na
+    rkKL   := na
+    rkLfId := rkLf
+
+rkHi  = ta.highest(high, rkN)
+rkLo  = ta.lowest(low, rkN)
+rkSwH = not na(rkPH) and high > rkPH and (na(rkCH) or rkCH <= rkPH)
+rkSwL = not na(rkPL) and low < rkPL and (na(rkCL) or rkCL >= rkPL)
+rkLqH = rkSwH or (not na(rkPH) and high > rkPH and close < rkPH)
+rkLqL = rkSwL or (not na(rkPL) and low < rkPL and close > rkPL)
+rkExH = high >= rkHi or na(rkKH) or high > rkKH
+rkExL = low <= rkLo or na(rkKL) or low < rkKL
+rkCH := na(rkCH) ? high : math.max(rkCH, high)
+rkCL := na(rkCL) ? low : math.min(rkCL, low)
+rkKH := na(rkKH) ? high : math.max(rkKH, high)
+rkKL := na(rkKL) ? low : math.min(rkKL, low)
+
+// ── FVG בתול של מסגרת הגרף — נגיעה ראשונה מוחקת אותו. 20 לכל כיוון.
+var array<float> rkFB = array.new_float()
+var array<float> rkFU = array.new_float()
+rkFvH = false
+rkFvL = false
+rkI   = 0
+while rkI < array.size(rkFB)
+    if high >= array.get(rkFB, rkI)
+        rkFvH := true
+        array.remove(rkFB, rkI)
+    else
+        rkI += 1
+rkI := 0
+while rkI < array.size(rkFU)
+    if low <= array.get(rkFU, rkI)
+        rkFvL := true
+        array.remove(rkFU, rkI)
+    else
+        rkI += 1
+if low[2] > high
+    array.push(rkFB, high)
+if high[2] < low
+    array.push(rkFU, low)
+if array.size(rkFB) > 20
+    array.shift(rkFB)
+if array.size(rkFU) > 20
+    array.shift(rkFU)
+
+// ── FVG בתול של המסגרת שמעל — מהנרות שהמנוע שמעל כבר מקבל (u1), בלי בקשה
+rkUH = rkIx == 1 ? u1h2 : rkIx == 2 ? u1h3 : rkIx == 3 ? u1h4 : u1h1
+rkUL = rkIx == 1 ? u1l2 : rkIx == 2 ? u1l3 : rkIx == 3 ? u1l4 : u1l1
+rkXH = rkIx == 1 ? c2H : rkIx == 2 ? c3H : rkIx == 3 ? c4H : c1H
+rkXL = rkIx == 1 ? c2L : rkIx == 2 ? c3L : rkIx == 3 ? c4L : c1L
+var array<float> rkGB = array.new_float()
+var array<float> rkGU = array.new_float()
+var int   rkUT  = na
+var float rkU1H = na
+var float rkU1L = na
+var float rkU2H = na
+var float rkU2L = na
+rkHvH = false
+rkHvL = false
+rkI := 0
+while rkI < array.size(rkGB)
+    if rkXH >= array.get(rkGB, rkI)
+        rkHvH := true
+        array.remove(rkGB, rkI)
+    else
+        rkI += 1
+rkI := 0
+while rkI < array.size(rkGU)
+    if rkXL <= array.get(rkGU, rkI)
+        rkHvL := true
+        array.remove(rkGU, rkI)
+    else
+        rkI += 1
+if useU1 and not na(u1t) and not na(rkUH) and (na(rkUT) or u1t != rkUT)
+    if not na(rkU2L) and rkU2L > rkUH
+        array.push(rkGB, rkUH)
+    if not na(rkU2H) and rkU2H < rkUL
+        array.push(rkGU, rkUL)
+    rkU2H := rkU1H
+    rkU2L := rkU1L
+    rkU1H := rkUH
+    rkU1L := rkUL
+    rkUT  := u1t
+    if array.size(rkGB) > 20
+        array.shift(rkGB)
+    if array.size(rkGU) > 20
+        array.shift(rkGU)
+
+// ── איפה בתוך הנר נוצר הקצה — מתת-הנרות שהמנוע שמתחת כבר מקבל (w1), בלי בקשה
+// 1 = שליש ראשון · 2 = אמצעי · 3 = אחרון · 0 = אין נתון
+f_rkThird(array<float> a, bool hi) =>
+    int r = 0
+    int n = 0
+    if not na(a)
+        n := array.size(a)
+    if n >= 3
+        float ex = hi ? array.max(a) : array.min(a)
+        int j = -1
+        for i = 0 to n - 1
+            if j < 0 and array.get(a, i) == ex
+                j := i
+        r := j * 3 < n ? 1 : j * 3 < 2 * n ? 2 : 3
+    r
+
+array<float> rkWH = rkIx == 1 ? w1h2 : rkIx == 2 ? w1h3 : rkIx == 3 ? w1h4 : w1h1
+array<float> rkWL = rkIx == 1 ? w1l2 : rkIx == 2 ? w1l3 : rkIx == 3 ? w1l4 : w1l1
+rkLtH = f_rkThird(rkWH, true)
+rkLtL = f_rkThird(rkWL, false)
+rkLateH = useL1 and rkLtH == 3
+rkLateL = useL1 and rkLtL == 3
+
+// ── הנר הקודם עוד יכול להיות סווינג — בכל צד, על נכס שמשתתף
+f_rkH(float h) => h[1] > h[2] and h < h[1]
+f_rkL(float l) => l[1] < l[2] and l > l[1]
+rkHN = f_rkH(c1H)
+rkHE = f_rkH(c2H)
+rkHY = f_rkH(c3H)
+rkHR = f_rkH(c4H)
+rkLN = f_rkL(c1L)
+rkLE = f_rkL(c2L)
+rkLY = f_rkL(c3L)
+rkLR = f_rkL(c4L)
+rkY1 = pDivY[1] or pDivW[1]
+rkAH = (isPcp[1] and (rkHN or rkHE or (rkY1 and rkHY))) or (isPcpP[1] and (rkHY or rkHR))
+rkAL = (isPcp[1] and (rkLN or rkLE or (rkY1 and rkLY))) or (isPcpP[1] and (rkLY or rkLR))
+
+// כמה מהנר השלישי כבר עבר
+rkFr = na(time_close) ? 0.0 : (math.min(timenow, time_close) - time) / math.max(time_close - time, 1)
+
+f_rkTx(bool liq, bool ext, bool fv, bool hfv, bool late) =>
+    bool   t1 = rkFr >= 1.0 / 3.0
+    bool   t2 = rkFr >= 2.0 / 3.0
+    int    g  = (liq ? 1 : 0) + (ext ? 1 : 0) + (fv ? 1 : 0) + (hfv ? 1 : 0)
+    int    n  = (t1 ? 1 : 0) + (t2 ? 1 : 0) + g
+    string pc = t2 ? "~90%" : t1 ? "~80%" : late ? "~45%" : g >= 2 ? "~70%" : g == 1 ? "~65%" : "~55%"
+    str.repeat("★", n) + str.repeat("☆", 6 - n) + " " + pc + (late ? " ⚠סוף" : "") + (liq ? " נזילות" : "") + (ext ? " קיצון" : "") + (fv ? " FVG" : "") + (hfv ? " FVG↑" : "")
+
+var label rkLbH = na
+var label rkLbL = na
+if barstate.islast
+    label.delete(rkLbH)
+    label.delete(rkLbL)
+    rkLbH := na
+    rkLbL := na
+    if rkOn and showPend and tfClass != 0 and not barstate.isconfirmed
+        float rkGap = nz(atrCh) * 0.6
+        if rkAH
+            rkLbH := label.new(bar_index - 1, high[1] + rkGap, f_rkTx(rkLqH[1], rkExH[1], rkFvH[1], rkHvH[1], rkLateH[1]), yloc = yloc.price, style = label.style_none, textcolor = colPend, size = lblSize)
+        if rkAL
+            rkLbL := label.new(bar_index - 1, low[1] - rkGap, f_rkTx(rkLqL[1], rkExL[1], rkFvL[1], rkHvL[1], rkLateL[1]), yloc = yloc.price, style = label.style_none, textcolor = colPend, size = lblSize)
