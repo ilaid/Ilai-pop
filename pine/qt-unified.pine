@@ -82,6 +82,10 @@ pspTxBull  = input.string("▼", "טקסט משלי — שורי (מתחת לנ�
 pspOffT    = input.int(20, "PSP ממתין על הגרף — שקיפות", minval = 0, maxval = 80, group = grpVis, tooltip = "PSP חי בכיוון ההפוך לשבירה האחרונה. 0 = בדיוק כמו פעיל. נפרד מהשקיפות של ה-✗ בצד.")
 pspGap     = input.int(15, "PSP — מרחק הסימון מהנר (% מ-ATR)", minval = 0, maxval = 300, group = grpVis, tooltip = "0 = הסימון יושב על הפתיל עצמו. נמדד באחוז מ-ATR, כדי שאותו מספר ייתן אותו מרווח בכל נכס ובכל מסגרת.")
 
+linkOn   = input.bool(true, "חבר שבירות באותו כיוון בקו", group = grpVis, tooltip = "כשיש במסגרת הגרף שתי שבירות פעילות או יותר באותו כיוון — קו שמחבר ביניהן לפי הסדר (מתחת לנרות בעליות, מעליהם בירידות). אישור כפול במבט אחד.")
+peekOn   = input.bool(true, "הצצה: גם השבירות הממתינות על הגרף", group = grpVis, tooltip = "בכל טעינה של הסקריפט (פתיחת גרף / החלפת מסגרת) — גם השבירות החיות שכרגע ✗ מצוירות על הגרף, דהויות, למשך מספר השניות שבחרת, ואז נעלמות.")
+peekSec  = input.int(10, "הצצה — כמה שניות", minval = 1, maxval = 600, group = grpVis)
+
 grpCor = "הצד"
 cornerOn   = input.bool(true, "הצג את השבירות בצד", group = grpCor)
 cornerPosI = input.string("שמאל למטה", "מיקום", options = ["שמאל למטה", "שמאל למעלה", "ימין למטה", "ימין למעלה"], group = grpCor)
@@ -1704,6 +1708,40 @@ f_colC(Cand c) => c.typ == 2 and c.inQ1 and q1Col ? colQ1 : c.pair ? colPair : c
 
 atrCh = ta.atr(14)
 
+// הגבוה/נמוך של נרות הגרף לפי זמן — לקו שמחבר שבירות (3000 הנרות האחרונים)
+var array<int>   bkT = array.new_int()
+var array<float> bkH = array.new_float()
+var array<float> bkL = array.new_float()
+if array.size(bkT) == 0 or array.get(bkT, array.size(bkT) - 1) != time
+    array.push(bkT, time)
+    array.push(bkH, high)
+    array.push(bkL, low)
+    if array.size(bkT) > 3000
+        array.shift(bkT)
+        array.shift(bkH)
+        array.shift(bkL)
+else
+    array.set(bkH, array.size(bkH) - 1, high)
+    array.set(bkL, array.size(bkL) - 1, low)
+
+f_hlAt(int t, bool hi) =>
+    float v = na
+    int n = array.size(bkT)
+    if n > 0
+        int i = n - 1
+        while i >= 0 and na(v)
+            int ti = array.get(bkT, i)
+            if ti == t
+                v := hi ? array.get(bkH, i) : array.get(bkL, i)
+            if ti < t
+                i := -1
+            else
+                i -= 1
+    v
+
+// הרגע שבו הסקריפט התחיל לרוץ — החלפת מסגרת מריצה אותו מאפס
+var int bootT = timenow
+
 var array<box>   dBx = array.new_box()
 var array<label> dLb = array.new_label()
 var array<line>  dLn = array.new_line()
@@ -1731,9 +1769,9 @@ f_fillBounds(Gap g) =>
             ft := g.bTop
     [fb, ft]
 
-f_drawFill(Eng e, Cand c) =>
+f_drawFill(Eng e, Cand c, bool dim) =>
     Gap    g   = array.get(e.gaps, c.ix)
-    color  col = f_colC(c)
+    color  col = dim ? color.new(f_colC(c), 55) : f_colC(c)
     bool   up  = g.dir == 1
     string txt = "F" + str.tostring(f_fillLive(e, g)) + " " + g.fLead
     [gb, gt] = f_fillBounds(g)
@@ -1747,7 +1785,7 @@ f_drawFill(Eng e, Cand c) =>
         array.push(dLb, label.new(g.fTime, close, "", xloc = xloc.bar_time, yloc = up ? yloc.belowbar : yloc.abovebar, style = up ? label.style_arrowup : label.style_arrowdown, color = col, textcolor = col, size = size.small))
     0
 
-f_drawSS(Eng e, Cand c) =>
+f_drawSS(Eng e, Cand c, bool dim) =>
     int    k      = c.ix
     bool   isBull = k % 2 == 1
     bool   isH    = array.get(e.sTy, k) == 2
@@ -1756,7 +1794,7 @@ f_drawSS(Eng e, Cand c) =>
     bool   onCh   = cA >= aLo and cA <= aHi
     string lb     = array.get(e.sLb, k)
     int    ri     = array.get(e.sRi, k)
-    color  col    = f_colC(c)
+    color  col    = dim ? color.new(f_colC(c), 55) : f_colC(c)
     Acc    acc    = f_engAcc(e, onCh ? cA : f_taker(lb, aLo, aHi))
     [b1, p1, b2, p2, ok] = f_pts(acc, isBull, isH, ri)
     if ok
@@ -1899,14 +1937,37 @@ if barstate.islast
     if tfClass != 0
         array<Cand> cc = f_cands(eCh)
         int ld = array.get(effD, 0)
-        if ld != 0 and array.size(cc) > 0
+        bool peekNow = peekOn and timenow - bootT <= peekSec * 1000
+        if array.size(cc) > 0
+            for i = 0 to array.size(cc) - 1
+                Cand c = array.get(cc, i)
+                bool act = ld != 0 and f_act(c, tfClass, ld)
+                if act or peekNow
+                    if c.typ == 0
+                        f_drawFill(eCh, c, not act)
+                    else if c.typ == 1
+                        f_drawSS(eCh, c, not act)
+        // קו שמחבר את השבירות הפעילות באותו כיוון, לפי הסדר
+        if linkOn and ld != 0 and array.size(cc) > 1
+            array<int> lt = array.new_int()
             for i = 0 to array.size(cc) - 1
                 Cand c = array.get(cc, i)
                 if f_act(c, tfClass, ld)
-                    if c.typ == 0
-                        f_drawFill(eCh, c)
-                    else if c.typ == 1
-                        f_drawSS(eCh, c)
+                    array.push(lt, f_ev(c))
+            if array.size(lt) > 1
+                array.sort(lt, order.ascending)
+                float pad = nz(atrCh) * 0.25
+                int   pT  = na
+                float pY  = na
+                for i = 0 to array.size(lt) - 1
+                    int   tt = array.get(lt, i)
+                    float v  = f_hlAt(tt, ld == -1)
+                    if not na(v)
+                        float y = ld == 1 ? v - pad : v + pad
+                        if not na(pT) and tt != pT
+                            array.push(dLn, line.new(pT, pY, tt, y, xloc = xloc.bar_time, color = ld == 1 ? colBull : colBear, width = 2))
+                        pT := tt
+                        pY := y
         // PSP — כל אחד שעוד חי (לא נלקח, המיכל שלו לא נגמר) מוצג על הגרף תמיד.
         // ממתין (בכיוון ההפוך לאחרונה) — דהוי.
         if f_live(eCh)
