@@ -90,6 +90,7 @@ cornerSz   = input.string("tiny", "גודל טקסט", options = ["tiny", "small
 cornerWhen = input.bool(true, "Q ושעה ליד האחרונה", group = grpCor)
 cornerAllT = input.bool(true, "שעה ליד כל שבירה בצד", group = grpCor, tooltip = "גם ליד הפעילות וה-✗ — כדי לראות מה נוצר לפני מה. PSP — שעת נר הסווינג; Fill ו-SSMT — שעת הנר שעשה את השבירה.")
 offFade    = input.int(60, "שקיפות ממתינה (✗)", minval = 0, maxval = 90, group = grpCor, tooltip = "ממתינה נכתבת בצבע שלה (זוג 3·4 — בצבע הזוג), רק דהוי.")
+cornerTbl  = input.string("טבלה", "סידור הצד", options = ["טבלה", "שורה"], group = grpCor, tooltip = "טבלה: מסגרת · כיוון · שלישייה · זוג 3·4 · נגדיות · PCP — בתאים עם רקע, שורה לכל מסגרת.\nשורה: הסידור הקודם.")
 cornerLift = input.int(2, "הרם את השורות (שורות ריקות)", minval = 0, maxval = 8, group = grpCor, tooltip = "שורות ריקות בין השורות לקצה המסך — כדי שלא ייפלו על אינדיקטור אחר באותה פינה.")
 
 grpAl = "התראות"
@@ -1988,6 +1989,8 @@ var table cTbl = table.new(cornerPos, 14, 10 + cornerLift, border_width = 0)
 cornerTop = cornerPosI == "שמאל למעלה" or cornerPosI == "ימין למעלה"
 rowOff    = cornerTop ? cornerLift : 0
 bgClr = color.new(color.black, 100)
+// טבלה: קווי ההפרדה בצבע הרקע של הגרף — רק התאים עם הרקע העדין נראים
+var table cTb2 = table.new(cornerPos, 6, 11 + cornerLift, border_width = 1)
 
 // זוג 3·4 — מובחן בצבע בלבד
 f_itemTx(Cand c) => (c.dir == 1 ? "▲" : "▼") + c.tx
@@ -2014,10 +2017,90 @@ f_whenTx(Cand c, int cls) =>
     (wn > 0 ? " Q" + str.tostring(wn) : "") + " " + f_tmTx(c, cls)
 
 if barstate.islast
+    table.clear(cTb2, 0, 0, 5, 10 + cornerLift)
+    if cornerOn and tfClass != 0 and cornerTbl == "טבלה"
+        table.set_border_color(cTb2, chart.bg_color)
+        color hBg = color.new(chart.fg_color, 84)
+        color cBg = color.new(chart.fg_color, 93)
+        int   row = 0
+        array<string> hd = array.from("", "כיוון", "שלישייה", "זוג 3·4", "נגדיות", "PCP")
+        for i = 0 to 5
+            table.cell(cTb2, i, rowOff, array.get(hd, i), text_color = chart.fg_color, text_size = cornerSz, bgcolor = hBg)
+        row := 1
+        for cls = 8 to 1
+            for k = 0 to array.size(allEng) - 1
+                Eng e = array.get(allEng, k)
+                if f_useE(k) and e.cls == cls and row <= 9
+                    array<Cand> cs = f_cands(e)
+                    int  eD  = array.get(effD, k)
+                    int  eS  = array.get(effS, k)
+                    int  li  = f_leadIn(cs, eD, cls)
+                    bool pdT = showPend and cls >= 2 and e.pnd
+                    bool pdP = showPend and cls >= 2 and use4 and e.pndP
+                    if array.size(cs) > 0 or pdT or pdP
+                        int rr = row + rowOff
+                        // השבירה שקבעה ראשונה (עם Q ושעה), ואחריה הפעילות האחרות — לכל סוג, לכל קבוצה
+                        string tA = ""
+                        string pA = ""
+                        if li >= 0
+                            Cand lc = array.get(cs, li)
+                            string lt = lc.tx + (cornerWhen ? f_whenTx(lc, cls) : "")
+                            if lc.pair
+                                pA := lt
+                            else
+                                tA := lt
+                        for g = 0 to 1
+                            for ty = 0 to 2
+                                int bA = -1
+                                if array.size(cs) > 0
+                                    for i = 0 to array.size(cs) - 1
+                                        Cand c = array.get(cs, i)
+                                        if i != li and c.typ == ty and c.pair == (g == 1) and f_act(c, cls, eD)
+                                            if bA < 0
+                                                bA := i
+                                            else if f_newer(c, array.get(cs, bA))
+                                                bA := i
+                                if bA >= 0
+                                    Cand c = array.get(cs, bA)
+                                    if not (li >= 0 and array.get(cs, li).typ == ty and array.get(cs, li).pair == (g == 1))
+                                        string it = c.tx + (cornerAllT ? " " + f_tmTx(c, cls) : "")
+                                        if g == 0
+                                            tA := tA + (tA == "" ? "" : " · ") + it
+                                        else
+                                            pA := pA + (pA == "" ? "" : " · ") + it
+                        // הנגדיות: לכל סוג — האחרונה שלא פעילה (עם החץ שלה)
+                        string oX = ""
+                        for ty = 0 to 2
+                            int bI = -1
+                            if array.size(cs) > 0
+                                for i = 0 to array.size(cs) - 1
+                                    Cand c = array.get(cs, i)
+                                    if c.typ == ty and not f_act(c, cls, eD)
+                                        if bI < 0
+                                            bI := i
+                                        else if f_newer(c, array.get(cs, bI))
+                                            bI := i
+                            if bI >= 0
+                                Cand c = array.get(cs, bI)
+                                oX := oX + (oX == "" ? "" : " · ") + f_itemTx(c) + (cornerAllT ? " " + f_tmTx(c, cls) : "")
+                        color dC = eD == 1 ? colBull : eD == -1 ? colBear : color.gray
+                        string dTx = eD == 0 ? "—" : (eD == 1 ? "▲" : "▼") + (eS != cls ? " ⇡" + f_clsName(eS) : "")
+                        table.cell(cTb2, 0, rr, f_clsName(cls), text_color = cls == tfClass ? chart.fg_color : color.gray, text_size = cornerSz, bgcolor = cBg)
+                        table.cell(cTb2, 1, rr, dTx, text_color = dC, text_size = cornerSz, bgcolor = cBg)
+                        table.cell(cTb2, 2, rr, tA, text_color = dC, text_size = cornerSz, bgcolor = cBg)
+                        table.cell(cTb2, 3, rr, pA, text_color = colPair, text_size = cornerSz, bgcolor = cBg)
+                        table.cell(cTb2, 4, rr, oX, text_color = color.new(chart.fg_color, offFade), text_size = cornerSz, bgcolor = cBg)
+                        table.cell(cTb2, 5, rr, pdT or pdP ? f_tmStr(e.pndT, cls) : "", text_color = pdT ? colPend : colPair, text_size = cornerSz, bgcolor = cBg)
+                        row += 1
+        if cornerLift > 0
+            for r = 0 to cornerLift - 1
+                table.cell(cTb2, 0, cornerTop ? r : row + r, " ", text_size = cornerSz, bgcolor = bgClr)
+
+if barstate.islast
     table.clear(cTbl, 0, 0, 13, 9 + cornerLift)
     if cornerOn and tfClass == 0
         table.cell(cTbl, 0, rowOff, "QT CC — מסגרת לא נתמכת (1m · 5m · 15m · 1H · 4H · D · W · M)", text_color = color.gray, text_size = cornerSz, bgcolor = bgClr)
-    if cornerOn and tfClass != 0
+    if cornerOn and tfClass != 0 and cornerTbl == "שורה"
         int row = 0
         for cls = 8 to 1
             for k = 0 to array.size(allEng) - 1
