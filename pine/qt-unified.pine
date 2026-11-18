@@ -1993,7 +1993,7 @@ cornerTop = cornerPosI == "שמאל למעלה" or cornerPosI == "ימין למ�
 rowOff    = cornerTop ? cornerLift : 0
 bgClr = color.new(color.black, 100)
 // טבלה: קווי ההפרדה בצבע הרקע של הגרף — רק התאים עם הרקע העדין נראים
-var table cTb2 = table.new(cornerPos, 9, 11 + cornerLift, border_width = 1)
+var table cTb2 = table.new(cornerPos, 5, 11 + cornerLift, border_width = 1)
 
 // זוג 3·4 — מובחן בצבע בלבד
 f_itemTx(Cand c) => (c.dir == 1 ? "▲" : "▼") + c.tx
@@ -2020,24 +2020,19 @@ f_whenTx(Cand c, int cls) =>
     (wn > 0 ? " Q" + str.tostring(wn) : "") + " " + f_tmTx(c, cls)
 
 if barstate.islast
-    table.clear(cTb2, 0, 0, 8, 10 + cornerLift)
+    table.clear(cTb2, 0, 0, 4, 10 + cornerLift)
     if cornerOn and tfClass != 0 and cornerTbl == "טבלה"
-        // כמו טבלה מודפסת: רקע אטום בצבע הגרף, מסגרת וקווים דקים.
-        // תא לכל שבירה — כדי שכל אחת תהיה בצבע שלה מההגדרות (תא ב-Pine = צבע אחד).
-        // עמודות: מסגרת · כיוון · פעילות (F · SSMT · PSP) · נגדיות (F · SSMT · PSP) · PCP
+        // כמו טבלה מודפסת: רקע אטום בצבע הגרף, מסגרת וקווים דקים
         table.set_border_color(cTb2, chart.fg_color)
         table.set_frame_color(cTb2, chart.fg_color)
         table.set_frame_width(cTb2, 1)
+        color hBg = chart.bg_color
         color cBg = chart.bg_color
         int   row = 0
         if tblHdr
-            table.cell(cTb2, 0, 0, "", text_size = tblSz, bgcolor = cBg)
-            table.cell(cTb2, 1, 0, "כיוון", text_color = chart.fg_color, text_size = tblSz, bgcolor = cBg)
-            table.cell(cTb2, 2, 0, "פעילות", text_color = chart.fg_color, text_size = tblSz, bgcolor = cBg)
-            table.merge_cells(cTb2, 2, 0, 4, 0)
-            table.cell(cTb2, 5, 0, "נגדיות", text_color = chart.fg_color, text_size = tblSz, bgcolor = cBg)
-            table.merge_cells(cTb2, 5, 0, 7, 0)
-            table.cell(cTb2, 8, 0, "PCP", text_color = chart.fg_color, text_size = tblSz, bgcolor = cBg)
+            array<string> hd = array.from("", "כיוון", "פעילות", "נגדיות", "PCP")
+            for i = 0 to 4
+                table.cell(cTb2, i, 0, array.get(hd, i), text_color = chart.fg_color, text_size = tblSz, bgcolor = hBg)
             row := 1
         for cls = 8 to 1
             for k = 0 to array.size(allEng) - 1
@@ -2051,47 +2046,66 @@ if barstate.islast
                     bool pdP = showPend and cls >= 2 and use4 and e.pndP
                     if array.size(cs) > 0 or pdT or pdP
                         int rr = row
-                        color dC = eD == 1 ? colBull : eD == -1 ? colBear : color.gray
-                        string dTx = eD == 0 ? "—" : (eD == 1 ? "▲" : "▼") + (eS != cls ? " (" + f_clsName(eS) + ")" : "")
-                        table.cell(cTb2, 0, rr, f_clsName(cls), text_color = cls == tfClass ? chart.fg_color : color.gray, text_size = tblSz, bgcolor = cBg)
-                        table.cell(cTb2, 1, rr, dTx, text_color = dC, text_size = tblSz, bgcolor = cBg)
-                        for ty = 0 to 2
-                            // פעילה: השבירה שקבעה (עם Q ושעה) אם היא מהסוג הזה, אחרת הפעילה האחרונה מהסוג
-                            int bA = -1
-                            int bI = -1
-                            if array.size(cs) > 0
-                                for i = 0 to array.size(cs) - 1
-                                    Cand c = array.get(cs, i)
-                                    if c.typ == ty
-                                        if f_act(c, cls, eD)
+                        // השבירה שקבעה ראשונה (עם Q ושעה), ואחריה הפעילות האחרות — לכל סוג, לכל קבוצה
+                        string tA = ""
+                        string pA = ""
+                        if li >= 0
+                            Cand lc = array.get(cs, li)
+                            string lt = lc.tx + (cornerWhen ? f_whenTx(lc, cls) : "")
+                            if lc.pair
+                                pA := lt
+                            else
+                                tA := lt
+                        for g = 0 to 1
+                            for ty = 0 to 2
+                                int bA = -1
+                                if array.size(cs) > 0
+                                    for i = 0 to array.size(cs) - 1
+                                        Cand c = array.get(cs, i)
+                                        if i != li and c.typ == ty and c.pair == (g == 1) and f_act(c, cls, eD)
                                             if bA < 0
                                                 bA := i
                                             else if f_newer(c, array.get(cs, bA))
                                                 bA := i
+                                if bA >= 0
+                                    Cand c = array.get(cs, bA)
+                                    if not (li >= 0 and array.get(cs, li).typ == ty and array.get(cs, li).pair == (g == 1))
+                                        string it = c.tx + (cornerAllT ? " " + f_tmTx(c, cls) : "")
+                                        if g == 0
+                                            tA := tA + (tA == "" ? "" : " · ") + it
                                         else
-                                            if bI < 0
-                                                bI := i
-                                            else if f_newer(c, array.get(cs, bI))
-                                                bI := i
-                            if li >= 0
-                                if array.get(cs, li).typ == ty
-                                    bA := li
-                            string aTx = ""
-                            color  aCo = color.gray
-                            if bA >= 0
-                                Cand c = array.get(cs, bA)
-                                aTx := c.tx + (bA == li and cornerWhen ? f_whenTx(c, cls) : cornerAllT ? " " + f_tmTx(c, cls) : "")
-                                aCo := f_colC(c)
-                            table.cell(cTb2, 2 + ty, rr, aTx, text_color = aCo, text_size = tblSz, bgcolor = cBg)
-                            string iTx = ""
-                            color  iCo = color.gray
+                                            pA := pA + (pA == "" ? "" : " · ") + it
+                        // הנגדיות: לכל סוג — האחרונה שלא פעילה (עם החץ שלה)
+                        string oX = ""
+                        for ty = 0 to 2
+                            int bI = -1
+                            if array.size(cs) > 0
+                                for i = 0 to array.size(cs) - 1
+                                    Cand c = array.get(cs, i)
+                                    if c.typ == ty and not f_act(c, cls, eD)
+                                        if bI < 0
+                                            bI := i
+                                        else if f_newer(c, array.get(cs, bI))
+                                            bI := i
                             if bI >= 0
                                 Cand c = array.get(cs, bI)
-                                iTx := f_itemTx(c) + (cornerAllT and tblOppT ? " " + f_tmTx(c, cls) : "")
-                                iCo := color.new(f_colC(c), offFade)
-                            table.cell(cTb2, 5 + ty, rr, iTx, text_color = iCo, text_size = tblSz, bgcolor = cBg)
-                        // נר שעוד לא הוכרע (PCP) — בעמודה משלו, בצבע מההגדרות
-                        table.cell(cTb2, 8, rr, pdT or pdP ? f_tmStr(e.pndT, cls) : "", text_color = pdT ? colPend : colPair, text_size = tblSz, bgcolor = cBg)
+                                oX := oX + (oX == "" ? "" : " · ") + f_itemTx(c) + (cornerAllT and tblOppT ? " " + f_tmTx(c, cls) : "")
+                        color dC = eD == 1 ? colBull : eD == -1 ? colBear : color.gray
+                        // כיוון, ו(המסגרת שממנה בא — כשלא מהמסגרת עצמה)
+                        string dTx = eD == 0 ? "—" : (eD == 1 ? "▲" : "▼") + (eS != cls ? " (" + f_clsName(eS) + ")" : "")
+                        // PCP ממתין — בסוף העמודה של הקבוצה שלו (שלישייה / זוג)
+                        string pdx = "◦PCP " + f_tmStr(e.pndT, cls)
+
+                        table.cell(cTb2, 0, rr, f_clsName(cls), text_color = cls == tfClass ? chart.fg_color : color.gray, text_size = tblSz, bgcolor = cBg)
+                        table.cell(cTb2, 1, rr, dTx, text_color = dC, text_size = tblSz, bgcolor = cBg)
+                        // פעילות: השלישייה והזוג יחד — כמו בשורה, האחרונה ראשונה
+                        string aX = tA + (tA != "" and pA != "" ? " · " : "") + pA
+                        if li >= 0 and array.get(cs, li).pair and tA != "" and pA != ""
+                            aX := pA + " · " + tA
+                        table.cell(cTb2, 2, rr, aX, text_color = dC, text_size = tblSz, bgcolor = cBg)
+                        // נר שעוד לא הוכרע (PCP) — בעמודה משלו, לא עם השבירות
+                        table.cell(cTb2, 4, rr, pdT or pdP ? f_tmStr(e.pndT, cls) : "", text_color = pdT ? colPend : colPair, text_size = tblSz, bgcolor = cBg)
+                        table.cell(cTb2, 3, rr, oX, text_color = color.new(chart.fg_color, offFade), text_size = tblSz, bgcolor = cBg)
                         row += 1
 
 if barstate.islast
