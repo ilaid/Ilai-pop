@@ -91,7 +91,9 @@ cornerWhen = input.bool(true, "Q ושעה ליד האחרונה", group = grpCor
 cornerAllT = input.bool(true, "שעה ליד כל שבירה בצד", group = grpCor, tooltip = "גם ליד הפעילות וה-✗ — כדי לראות מה נוצר לפני מה. PSP — שעת נר הסווינג; Fill ו-SSMT — שעת הנר שעשה את השבירה.")
 offFade    = input.int(60, "שקיפות ממתינה (✗)", minval = 0, maxval = 90, group = grpCor, tooltip = "ממתינה נכתבת בצבע שלה (זוג 3·4 — בצבע הזוג), רק דהוי.")
 cornerTbl  = input.string("טבלה", "סידור הצד", options = ["טבלה", "שורה"], group = grpCor, tooltip = "טבלה: מסגרת · כיוון · שלישייה · זוג 3·4 · נגדיות · PCP — בתאים עם רקע, שורה לכל מסגרת.\nשורה: הסידור הקודם.")
-tblSz      = input.string("small", "גודל הטבלה (טקסט)", options = ["tiny", "small", "normal", "large"], group = grpCor)
+tblSz      = input.string("small", "גודל הטבלה (טקסט)", options = ["tiny", "small", "normal", "large"], group = grpCor, tooltip = "tiny = הכי קטן ש-TradingView מאפשר.")
+tblHdr     = input.bool(true, "טבלה — שורת כותרות", group = grpCor)
+tblOppT    = input.bool(true, "טבלה — שעות בעמודת הנגדיות", group = grpCor, tooltip = "כבוי = בנגדיות רק הסוג והחץ (▼F2 · ▼P) — הטבלה צרה יותר.")
 cornerLift = input.int(2, "הרם את השורות (שורות ריקות)", minval = 0, maxval = 8, group = grpCor, tooltip = "שורות ריקות בין השורות לקצה המסך — כדי שלא ייפלו על אינדיקטור אחר באותה פינה.")
 
 grpAl = "התראות"
@@ -2027,10 +2029,11 @@ if barstate.islast
         color hBg = chart.bg_color
         color cBg = chart.bg_color
         int   row = 0
-        array<string> hd = array.from("", "כיוון", "שלישייה", "זוג 3·4", "נגדיות")
-        for i = 0 to 4
-            table.cell(cTb2, i, 0, array.get(hd, i), text_color = chart.fg_color, text_size = tblSz, bgcolor = hBg)
-        row := 1
+        if tblHdr
+            array<string> hd = array.from("", "כיוון", "שלישייה", "זוג 3·4", "נגדיות")
+            for i = 0 to 4
+                table.cell(cTb2, i, 0, array.get(hd, i), text_color = chart.fg_color, text_size = tblSz, bgcolor = hBg)
+            row := 1
         for cls = 8 to 1
             for k = 0 to array.size(allEng) - 1
                 Eng e = array.get(allEng, k)
@@ -2086,7 +2089,7 @@ if barstate.islast
                                             bI := i
                             if bI >= 0
                                 Cand c = array.get(cs, bI)
-                                oX := oX + (oX == "" ? "" : " · ") + f_itemTx(c) + (cornerAllT ? " " + f_tmTx(c, cls) : "")
+                                oX := oX + (oX == "" ? "" : " · ") + f_itemTx(c) + (cornerAllT and tblOppT ? " " + f_tmTx(c, cls) : "")
                         color dC = eD == 1 ? colBull : eD == -1 ? colBear : color.gray
                         // כיוון, ו(המסגרת שממנה בא — כשלא מהמסגרת עצמה)
                         string dTx = eD == 0 ? "—" : (eD == 1 ? "▲" : "▼") + (eS != cls ? " (" + f_clsName(eS) + ")" : "")
