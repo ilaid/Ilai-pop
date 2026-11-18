@@ -2095,16 +2095,15 @@ if barstate.islast
                         string dTx = eD == 0 ? "—" : (eD == 1 ? "▲" : "▼") + (eS != cls ? " (" + f_clsName(eS) + ")" : "")
                         // PCP ממתין — בסוף העמודה של הקבוצה שלו (שלישייה / זוג)
                         string pdx = "◦PCP " + f_tmStr(e.pndT, cls)
-                        if pdT
-                            tA := tA + (tA == "" ? "" : " · ") + pdx
-                        if pdP
-                            pA := pA + (pA == "" ? "" : " · ") + pdx
+
                         table.cell(cTb2, 0, rr, f_clsName(cls), text_color = cls == tfClass ? chart.fg_color : color.gray, text_size = tblSz, bgcolor = cBg)
                         table.cell(cTb2, 1, rr, dTx, text_color = dC, text_size = tblSz, bgcolor = cBg)
                         // פעילות: השלישייה והזוג יחד — כמו בשורה, האחרונה ראשונה
                         string aX = tA + (tA != "" and pA != "" ? " · " : "") + pA
                         if li >= 0 and array.get(cs, li).pair and tA != "" and pA != ""
                             aX := pA + " · " + tA
+                        if pdT or pdP
+                            aX := aX + (aX == "" ? "" : " · ") + pdx
                         table.cell(cTb2, 2, rr, aX, text_color = dC, text_size = tblSz, bgcolor = cBg)
                         table.cell(cTb2, 3, rr, oX, text_color = color.new(chart.fg_color, offFade), text_size = tblSz, bgcolor = cBg)
                         row += 1
