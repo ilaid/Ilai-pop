@@ -1598,6 +1598,14 @@ f_pspGone(Eng e, PBrk b) =>
 f_live(Eng e) => e.started and (e.cls < tfClass or e.lifeId == f_lifeOf(e.cls, time))
 
 // לכל סוג: האחרונה של השלישייה ושל הזוג, בכל כיוון. מיכל שנגמר — כלום.
+// סימון קטן לשבירה של הזוג 3·4, צמוד אליה כמו כוכב ה-QS: האות הראשונה של כל
+// נכס, באותיות עיליות — YM/RTY → ʸʳ
+f_sup(string ch) =>
+    string c = str.lower(ch)
+    c == "a" ? "ᵃ" : c == "b" ? "ᵇ" : c == "c" ? "ᶜ" : c == "d" ? "ᵈ" : c == "e" ? "ᵉ" : c == "f" ? "ᶠ" : c == "g" ? "ᵍ" : c == "h" ? "ʰ" : c == "i" ? "ⁱ" : c == "j" ? "ʲ" : c == "k" ? "ᵏ" : c == "l" ? "ˡ" : c == "m" ? "ᵐ" : c == "n" ? "ⁿ" : c == "o" ? "ᵒ" : c == "p" ? "ᵖ" : c == "r" ? "ʳ" : c == "s" ? "ˢ" : c == "t" ? "ᵗ" : c == "u" ? "ᵘ" : c == "v" ? "ᵛ" : c == "w" ? "ʷ" : c == "x" ? "ˣ" : c == "y" ? "ʸ" : c == "z" ? "ᶻ" : c
+
+pairTag = f_sup(str.substring(nm3, 0, 1)) + f_sup(str.substring(nm4, 0, 1))
+
 f_cands(Eng e) =>
     array<Cand> out = array.new<Cand>()
     if f_live(e)
@@ -1614,14 +1622,14 @@ f_cands(Eng e) =>
                         best := i
             if best >= 0
                 Gap gb = array.get(e.gaps, best)
-                array.push(out, Cand.new(typ = 0, dir = fdir, pair = fk == 1, seq = gb.fSeq, t = gb.fTime, tx = "F" + str.tostring(f_fillLive(e, gb)), ix = best, t0 = gb.fFirst))
+                array.push(out, Cand.new(typ = 0, dir = fdir, pair = fk == 1, seq = gb.fSeq, t = gb.fTime, tx = "F" + str.tostring(f_fillLive(e, gb)) + (fk == 1 ? pairTag : ""), ix = best, t0 = gb.fFirst))
         for k = 0 to 3
             int ty = array.get(e.sTy, k)
             // SSMT שכולם (או שני החזקים) כבר סגרו מעבר — (all/core closed) — לא מוצגת
             if ty != 0 and not f_closed(array.get(e.sLb, k))
                 [qTop, qStar, qIn] = f_ssQS(e, k)
                 if not (qsFilt and qsUseCls(e.cls) and not qIn)
-                    array.push(out, Cand.new(typ = 1, dir = k % 2 == 1 ? 1 : -1, pair = k >= 2, seq = array.get(e.sSq, k), t = array.get(e.sTm, k), tx = (ty == 2 ? "H" : "S") + qStar, ix = k, qTop = qTop, hs = ty))
+                    array.push(out, Cand.new(typ = 1, dir = k % 2 == 1 ? 1 : -1, pair = k >= 2, seq = array.get(e.sSq, k), t = array.get(e.sTm, k), tx = (ty == 2 ? "H" : "S") + qStar + (k >= 2 ? pairTag : ""), ix = k, qTop = qTop, hs = ty))
         for s = 0 to 1
             array<PBrk> st = s == 0 ? e.pT : e.pP
             for dd = 0 to 1
@@ -1632,7 +1640,7 @@ f_cands(Eng e) =>
                         PBrk b = array.get(st, i)
                         if not found and b.dir == pdir and not f_pspGone(e, b)
                             found := true
-                            array.push(out, Cand.new(typ = 2, dir = pdir, pair = s == 1, seq = b.seq, t = b.regT, tx = "P", ix = i, inQ1 = b.inQ1, shT = b.born))
+                            array.push(out, Cand.new(typ = 2, dir = pdir, pair = s == 1, seq = b.seq, t = b.regT, tx = "P" + (s == 1 ? pairTag : ""), ix = i, inQ1 = b.inQ1, shT = b.born))
     out
 
 // HSSMT חזקה מ-SSMT: SSMT לא קובעת כיוון כשיש HSSMT חיה בכיוון ההפוך באותה
