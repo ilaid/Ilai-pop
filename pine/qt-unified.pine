@@ -375,7 +375,10 @@ f_leg(int d, bool ok, float o0, float h0, float l0, float c0, float o1, float c1
         else
             t := na(t) ? c1 : math.max(t, c1)
             b := na(b) ? o0 : math.min(b, o0)
-    [b, t, f, m, v]
+    // הרביעי: יש רווח פתיחה/סגירה בכיוון הגאפ בין נר 2 לנר 3 (בלי קשר להגדרות
+    // ההרחבה) — כך גאפ שהנר השלישי שלו פותח מחזור חדש בפער (NDOG/NWOG, פתיחת
+    // סשן/מיקרו) משויך למחזור שהוא פותח, גם כשההרחבה כבויה.
+    [b, t, f, r and ti >= 1, v]
 
 f_group(int kind, array<float> LB, array<float> LT, array<bool> LF, array<bool> LM) =>
     int  sa   = kind == 0 ? 0 : 2
@@ -967,6 +970,8 @@ f_step(Eng e, int t, array<float> q1, array<float> q2, array<float> q3, array<fl
         for k = 0 to 1
             [d, ab, at, bb, bt, xb, xt, anyF, anyV] = f_group(k, LB, LT, LF, LM)
             if d != 0
+                // גאפ מעבר (הנר השלישי פותח מחזור חדש בפער) או גאפ שכולו VI — שייך
+                // למחזור שהוא פותח. FVG רגיל — למחזור של הנר האמצעי.
                 bool tagNow = (cycEdge and anyV) or not anyF
                 if not (newLife and not keepL and not tagNow)
                     e.gapCounter := e.gapCounter + 1
