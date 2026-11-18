@@ -1993,7 +1993,7 @@ cornerTop = cornerPosI == "שמאל למעלה" or cornerPosI == "ימין למ�
 rowOff    = cornerTop ? cornerLift : 0
 bgClr = color.new(color.black, 100)
 // טבלה: קווי ההפרדה בצבע הרקע של הגרף — רק התאים עם הרקע העדין נראים
-var table cTb2 = table.new(cornerPos, 4, 11 + cornerLift, border_width = 1)
+var table cTb2 = table.new(cornerPos, 5, 11 + cornerLift, border_width = 1)
 
 // זוג 3·4 — מובחן בצבע בלבד
 f_itemTx(Cand c) => (c.dir == 1 ? "▲" : "▼") + c.tx
@@ -2020,7 +2020,7 @@ f_whenTx(Cand c, int cls) =>
     (wn > 0 ? " Q" + str.tostring(wn) : "") + " " + f_tmTx(c, cls)
 
 if barstate.islast
-    table.clear(cTb2, 0, 0, 3, 10 + cornerLift)
+    table.clear(cTb2, 0, 0, 4, 10 + cornerLift)
     if cornerOn and tfClass != 0 and cornerTbl == "טבלה"
         // כמו טבלה מודפסת: רקע אטום בצבע הגרף, מסגרת וקווים דקים
         table.set_border_color(cTb2, chart.fg_color)
@@ -2030,8 +2030,8 @@ if barstate.islast
         color cBg = chart.bg_color
         int   row = 0
         if tblHdr
-            array<string> hd = array.from("", "כיוון", "פעילות", "נגדיות")
-            for i = 0 to 3
+            array<string> hd = array.from("", "כיוון", "פעילות", "נגדיות", "PCP")
+            for i = 0 to 4
                 table.cell(cTb2, i, 0, array.get(hd, i), text_color = chart.fg_color, text_size = tblSz, bgcolor = hBg)
             row := 1
         for cls = 8 to 1
@@ -2102,9 +2102,9 @@ if barstate.islast
                         string aX = tA + (tA != "" and pA != "" ? " · " : "") + pA
                         if li >= 0 and array.get(cs, li).pair and tA != "" and pA != ""
                             aX := pA + " · " + tA
-                        if pdT or pdP
-                            aX := aX + (aX == "" ? "" : " · ") + pdx
                         table.cell(cTb2, 2, rr, aX, text_color = dC, text_size = tblSz, bgcolor = cBg)
+                        // נר שעוד לא הוכרע (PCP) — בעמודה משלו, לא עם השבירות
+                        table.cell(cTb2, 4, rr, pdT or pdP ? f_tmStr(e.pndT, cls) : "", text_color = pdT ? colPend : colPair, text_size = tblSz, bgcolor = cBg)
                         table.cell(cTb2, 3, rr, oX, text_color = color.new(chart.fg_color, offFade), text_size = tblSz, bgcolor = cBg)
                         row += 1
 
