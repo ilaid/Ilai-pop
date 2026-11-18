@@ -82,7 +82,7 @@ pspTxBull  = input.string("▼", "טקסט משלי — שורי (מתחת לנ�
 pspOffT    = input.int(20, "PSP ממתין על הגרף — שקיפות", minval = 0, maxval = 80, group = grpVis, tooltip = "PSP חי בכיוון ההפוך לשבירה האחרונה. 0 = בדיוק כמו פעיל. נפרד מהשקיפות של ה-✗ בצד.")
 pspGap     = input.int(15, "PSP — מרחק הסימון מהנר (% מ-ATR)", minval = 0, maxval = 300, group = grpVis, tooltip = "0 = הסימון יושב על הפתיל עצמו. נמדד באחוז מ-ATR, כדי שאותו מספר ייתן אותו מרווח בכל נכס ובכל מסגרת.")
 
-linkOn   = input.bool(true, "חבר שבירות באותו כיוון בקו", group = grpVis, tooltip = "כשיש במסגרת הגרף שתי שבירות פעילות או יותר באותו כיוון — קו שמחבר ביניהן לפי הסדר (מתחת לנרות בעליות, מעליהם בירידות). אישור כפול במבט אחד.")
+ssChain  = input.bool(true, "SSMT — שרשרת שבירות באותו מחזור", group = grpVis, tooltip = "במסגרת הגרף: כשאותה SSMT נמשכת לאורך כמה תת-מחזורים (למשל Q3 לקח את Q2, ואז Q4 לקח את Q3 — ו-ES לא), כל שבירה מצוירת בקו משלה, צמודות זו לזו, עם הרצף שלה (221-222, 222-223).\nבמסגרות אחרות — רק בצד, כמו קודם.")
 peekOn   = input.bool(true, "הצצה: גם השבירות הממתינות על הגרף", group = grpVis, tooltip = "בכל טעינה של הסקריפט (פתיחת גרף / החלפת מסגרת) — גם השבירות החיות שכרגע ✗ מצוירות על הגרף, דהויות, למשך מספר השניות שבחרת, ואז נעלמות.")
 peekSec  = input.int(10, "הצצה — כמה שניות", minval = 1, maxval = 600, group = grpVis)
 
@@ -1708,41 +1708,6 @@ f_colC(Cand c) => c.typ == 2 and c.inQ1 and q1Col ? colQ1 : c.pair ? colPair : c
 
 atrCh = ta.atr(14)
 
-// הגבוה/נמוך של נרות הגרף לפי זמן — לקו שמחבר שבירות (3000 הנרות האחרונים)
-var array<int>   bkT = array.new_int()
-var array<float> bkH = array.new_float()
-var array<float> bkL = array.new_float()
-// בלי or על array.get — ב-Pine ה-or לא עוצר באמצע (RE10045 בנר הראשון)
-bool bkNew = true
-if array.size(bkT) > 0
-    bkNew := array.get(bkT, array.size(bkT) - 1) != time
-if bkNew
-    array.push(bkT, time)
-    array.push(bkH, high)
-    array.push(bkL, low)
-    if array.size(bkT) > 3000
-        array.shift(bkT)
-        array.shift(bkH)
-        array.shift(bkL)
-else
-    array.set(bkH, array.size(bkH) - 1, high)
-    array.set(bkL, array.size(bkL) - 1, low)
-
-f_hlAt(int t, bool hi) =>
-    float v = na
-    int n = array.size(bkT)
-    if n > 0
-        int i = n - 1
-        while i >= 0 and na(v)
-            int ti = array.get(bkT, i)
-            if ti == t
-                v := hi ? array.get(bkH, i) : array.get(bkL, i)
-            if ti < t
-                i := -1
-            else
-                i -= 1
-    v
-
 // הרגע שבו הסקריפט התחיל לרוץ — החלפת מסגרת מריצה אותו מאפס
 var int bootT = timenow
 
@@ -1789,6 +1754,37 @@ f_drawFill(Eng e, Cand c, bool dim) =>
         array.push(dLb, label.new(g.fTime, close, "", xloc = xloc.bar_time, yloc = up ? yloc.belowbar : yloc.abovebar, style = up ? label.style_arrowup : label.style_arrowdown, color = col, textcolor = col, size = size.small))
     0
 
+// הקיצון / מיקומו של תת-מחזור idx; idx = גודל המערך = תת-המחזור הנוכחי
+f_accAt(Acc a, bool isBull, bool isH, int idx) =>
+    array<float> v = f_accA(a, isBull, isH)
+    idx < array.size(v) ? array.get(v, idx) : f_accV(a, isBull, isH)
+
+f_posAt(Acc a, bool isBull, bool isH, int idx) =>
+    array<int> v = f_accPA(a, isBull, isH)
+    idx < array.size(v) ? array.get(v, idx) : f_accP(a, isBull, isH)
+
+// שבירה בין שני תת-מחזורים צמודים בלבד: הקיצונים של j מול של i. אותם חוקים כמו
+// f_findTri / f_findPair. 0 = אין · 1 = SSMT · 2 = HSSMT
+f_ssPair(Eng e, bool isBull, bool pair, int i, int j) =>
+    int r = 0
+    if pair
+        bool yw = f_beyond(isBull, f_accAt(e.a3, isBull, false, j), f_accAt(e.a3, isBull, false, i))
+        bool rw = f_beyond(isBull, f_accAt(e.a4, isBull, false, j), f_accAt(e.a4, isBull, false, i))
+        bool yc = f_beyond(isBull, f_accAt(e.a3, isBull, true, j), f_accAt(e.a3, isBull, true, i))
+        bool rc = f_beyond(isBull, f_accAt(e.a4, isBull, true, j), f_accAt(e.a4, isBull, true, i))
+        r := yc != rc ? 2 : yw != rw ? 1 : 0
+    else
+        bool nw = f_beyond(isBull, f_accAt(e.a1, isBull, false, j), f_accAt(e.a1, isBull, false, i))
+        bool ew = f_beyond(isBull, f_accAt(e.a2, isBull, false, j), f_accAt(e.a2, isBull, false, i))
+        bool yw = f_beyond(isBull, f_accAt(e.a3, isBull, false, j), f_accAt(e.a3, isBull, false, i))
+        bool nc = f_beyond(isBull, f_accAt(e.a1, isBull, true, j), f_accAt(e.a1, isBull, true, i))
+        bool ec = f_beyond(isBull, f_accAt(e.a2, isBull, true, j), f_accAt(e.a2, isBull, true, i))
+        bool yc = f_beyond(isBull, f_accAt(e.a3, isBull, true, j), f_accAt(e.a3, isBull, true, i))
+        bool hV = isBull ? (nc or ec) and not (nc and ec and yc) : (nc or ec or yc) and not (nc and ec)
+        bool wV = isBull ? (nw or ew) and not (nw and ew and yw) : (nw or ew or yw) and not (nw and ew)
+        r := hV ? 2 : wV ? 1 : 0
+    r
+
 f_drawSS(Eng e, Cand c, bool dim) =>
     int    k      = c.ix
     bool   isBull = k % 2 == 1
@@ -1810,6 +1806,31 @@ f_drawSS(Eng e, Cand c, bool dim) =>
             array.push(dLn, line.new(b1, y1, b2, y2, xloc = xloc.bar_time, color = col, width = 1))
         string txt = (c.qTop != "" ? c.qTop + "\n" : "") + f_cycName(e.cls) + " " + (isH ? "HSSMT" : "SSMT") + " · " + f_assets(lb)
         array.push(dLb, label.new(b2, close, isBull ? "\n" + txt : txt + "\n", xloc = xloc.bar_time, yloc = isBull ? yloc.belowbar : yloc.abovebar, style = label.style_none, textcolor = col, size = lblSize, textalign = text.align_center))
+        // שרשרת: אחורה, כל עוד תת-המחזור הקודם נשבר ע"י זה שאחריו באותו כיוון —
+        // קו לכל זוג (i → i+1) על נכס הגרף, עם הרצף שלו מתחת/מעל
+        if ssChain and onCh and showLine
+            int  sc = e.cls + 1
+            int  jj = ri
+            int  ii = ri - 1
+            int  nS = 0
+            while ii >= 0 and nS < 6
+                int pt = f_ssPair(e, isBull, k >= 2, ii, jj)
+                if pt == 0
+                    ii := -1
+                else
+                    bool  hh = pt == 2
+                    float q1 = f_accAt(acc, isBull, hh, ii)
+                    float q2 = f_accAt(acc, isBull, hh, jj)
+                    int   t1 = f_posAt(acc, isBull, hh, ii)
+                    int   t2 = f_posAt(acc, isBull, hh, jj)
+                    if t2 > t1 and not na(q1) and not na(q2)
+                        float pd = atrCh * linePad
+                        array.push(dLn, line.new(t1, isBull ? q1 - pd : q1 + pd, t2, isBull ? q2 - pd : q2 + pd, xloc = xloc.bar_time, color = col, width = 1))
+                        string cT = qsUseCls(e.cls) ? f_qsChain(sc, t1) + "-" + f_qsChain(sc, t2) : (hh ? "H" : "S")
+                        array.push(dLb, label.new(t2, close, isBull ? "\n" + cT : cT + "\n", xloc = xloc.bar_time, yloc = isBull ? yloc.belowbar : yloc.abovebar, style = label.style_none, textcolor = col, size = size.tiny, textalign = text.align_center))
+                    jj := ii
+                    ii -= 1
+                    nS += 1
     0
 
 f_glyph(bool bear) =>
@@ -1951,27 +1972,6 @@ if barstate.islast
                         f_drawFill(eCh, c, not act)
                     else if c.typ == 1
                         f_drawSS(eCh, c, not act)
-        // קו שמחבר את השבירות הפעילות באותו כיוון, לפי הסדר
-        if linkOn and ld != 0 and array.size(cc) > 1
-            array<int> lt = array.new_int()
-            for i = 0 to array.size(cc) - 1
-                Cand c = array.get(cc, i)
-                if f_act(c, tfClass, ld)
-                    array.push(lt, f_ev(c))
-            if array.size(lt) > 1
-                array.sort(lt, order.ascending)
-                float pad = nz(atrCh) * 0.25
-                int   pT  = na
-                float pY  = na
-                for i = 0 to array.size(lt) - 1
-                    int   tt = array.get(lt, i)
-                    float v  = f_hlAt(tt, ld == -1)
-                    if not na(v)
-                        float y = ld == 1 ? v - pad : v + pad
-                        if not na(pT) and tt != pT
-                            array.push(dLn, line.new(pT, pY, tt, y, xloc = xloc.bar_time, color = ld == 1 ? colBull : colBear, width = 2))
-                        pT := tt
-                        pY := y
         // PSP — כל אחד שעוד חי (לא נלקח, המיכל שלו לא נגמר) מוצג על הגרף תמיד.
         // ממתין (בכיוון ההפוך לאחרונה) — דהוי.
         if f_live(eCh)
