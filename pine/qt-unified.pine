@@ -85,7 +85,7 @@ peekSec  = input.int(10, "הצצה — כמה שניות", minval = 1, maxval = 
 
 grpCor = "הצד"
 cornerOn   = input.bool(true, "הצג את השבירות בצד", group = grpCor)
-cornerPosI = input.string("שמאל למטה", "מיקום", options = ["שמאל למטה", "שמאל למעלה", "ימין למטה", "ימין למעלה"], group = grpCor)
+cornerPosI = input.string("שמאל למטה", "מיקום", options = ["שמאל למטה", "שמאל באמצע", "שמאל למעלה", "ימין למטה", "ימין באמצע", "ימין למעלה"], group = grpCor)
 cornerSz   = input.string("tiny", "גודל טקסט", options = ["tiny", "small", "normal"], group = grpCor)
 cornerWhen = input.bool(true, "Q ושעה ליד האחרונה", group = grpCor)
 cornerAllT = input.bool(true, "שעה ליד כל שבירה בצד", group = grpCor, tooltip = "גם ליד הפעילות וה-✗ — כדי לראות מה נוצר לפני מה. PSP — שעת נר הסווינג; Fill ו-SSMT — שעת הנר שעשה את השבירה.")
@@ -1984,7 +1984,7 @@ if barstate.islast
 //   F1–F3 = Fill · H = HSSMT · S = SSMT · P = PSP · סגול = זוג 3·4
 // ═══════════════════════════════════════════════════════════════════
 
-cornerPos = cornerPosI == "שמאל למעלה" ? position.top_left : cornerPosI == "ימין למטה" ? position.bottom_right : cornerPosI == "ימין למעלה" ? position.top_right : position.bottom_left
+cornerPos = cornerPosI == "שמאל באמצע" ? position.middle_left : cornerPosI == "ימין באמצע" ? position.middle_right : cornerPosI == "שמאל למעלה" ? position.top_left : cornerPosI == "ימין למטה" ? position.bottom_right : cornerPosI == "ימין למעלה" ? position.top_right : position.bottom_left
 var table cTbl = table.new(cornerPos, 14, 10 + cornerLift, border_width = 0)
 cornerTop = cornerPosI == "שמאל למעלה" or cornerPosI == "ימין למעלה"
 rowOff    = cornerTop ? cornerLift : 0
@@ -2005,7 +2005,7 @@ f_tmStr(int t, int cls) => str.format_time(cls >= 6 ? t + 21600000 : t, f_tmFmt(
 // השעה של פריט בצד. Fill שעלה דרגה: מתי נוצר → מתי עלה (20:00→22:00)
 f_tmTx(Cand c, int cls) =>
     int tb = c.shT > 0 ? c.shT : c.t
-    c.t0 > 0 and c.t0 != tb ? f_tmStr(c.t0, cls) + "→" + f_tmStr(tb, cls) : f_tmStr(tb, cls)
+    f_tmStr(tb, cls)
 
 // PSP שנרשם בצעד האחרון של 5m/15m — חדש, עד הסגירה הבאה של אותה מסגרת
 f_pre(Cand c, Eng e) => ""
@@ -2019,13 +2019,16 @@ f_whenTx(Cand c, int cls) =>
 if barstate.islast
     table.clear(cTb2, 0, 0, 5, 10 + cornerLift)
     if cornerOn and tfClass != 0 and cornerTbl == "טבלה"
-        table.set_border_color(cTb2, chart.bg_color)
-        color hBg = color.new(chart.fg_color, 84)
-        color cBg = color.new(chart.fg_color, 93)
+        // כמו טבלה מודפסת: רקע אטום בצבע הגרף, מסגרת וקווים דקים
+        table.set_border_color(cTb2, color.new(chart.fg_color, 40))
+        table.set_frame_color(cTb2, color.new(chart.fg_color, 20))
+        table.set_frame_width(cTb2, 1)
+        color hBg = color.from_gradient(8, 0, 100, chart.bg_color, chart.fg_color)
+        color cBg = chart.bg_color
         int   row = 0
         array<string> hd = array.from("", "כיוון", "שלישייה", "זוג 3·4", "נגדיות", "PCP")
         for i = 0 to 5
-            table.cell(cTb2, i, rowOff, array.get(hd, i), text_color = chart.fg_color, text_size = cornerSz, bgcolor = hBg)
+            table.cell(cTb2, i, 0, array.get(hd, i), text_color = chart.fg_color, text_size = cornerSz, bgcolor = hBg)
         row := 1
         for cls = 8 to 1
             for k = 0 to array.size(allEng) - 1
@@ -2038,7 +2041,7 @@ if barstate.islast
                     bool pdT = showPend and cls >= 2 and e.pnd
                     bool pdP = showPend and cls >= 2 and use4 and e.pndP
                     if array.size(cs) > 0 or pdT or pdP
-                        int rr = row + rowOff
+                        int rr = row
                         // השבירה שקבעה ראשונה (עם Q ושעה), ואחריה הפעילות האחרות — לכל סוג, לכל קבוצה
                         string tA = ""
                         string pA = ""
@@ -2084,7 +2087,7 @@ if barstate.islast
                                 Cand c = array.get(cs, bI)
                                 oX := oX + (oX == "" ? "" : " · ") + f_itemTx(c) + (cornerAllT ? " " + f_tmTx(c, cls) : "")
                         color dC = eD == 1 ? colBull : eD == -1 ? colBear : color.gray
-                        string dTx = eD == 0 ? "—" : (eD == 1 ? "▲" : "▼") + (eS != cls ? " ⇡" + f_clsName(eS) : "")
+                        string dTx = eD == 0 ? "—" : (eD == 1 ? "▲" : "▼") + (eS != cls ? " לפי " + f_clsName(eS) : "")
                         table.cell(cTb2, 0, rr, f_clsName(cls), text_color = cls == tfClass ? chart.fg_color : color.gray, text_size = cornerSz, bgcolor = cBg)
                         table.cell(cTb2, 1, rr, dTx, text_color = dC, text_size = cornerSz, bgcolor = cBg)
                         table.cell(cTb2, 2, rr, tA, text_color = dC, text_size = cornerSz, bgcolor = cBg)
@@ -2092,9 +2095,6 @@ if barstate.islast
                         table.cell(cTb2, 4, rr, oX, text_color = color.new(chart.fg_color, offFade), text_size = cornerSz, bgcolor = cBg)
                         table.cell(cTb2, 5, rr, pdT or pdP ? f_tmStr(e.pndT, cls) : "", text_color = pdT ? colPend : colPair, text_size = cornerSz, bgcolor = cBg)
                         row += 1
-        if cornerLift > 0
-            for r = 0 to cornerLift - 1
-                table.cell(cTb2, 0, cornerTop ? r : row + r, " ", text_size = cornerSz, bgcolor = bgClr)
 
 if barstate.islast
     table.clear(cTbl, 0, 0, 13, 9 + cornerLift)
@@ -2114,7 +2114,7 @@ if barstate.islast
                     bool pdT = showPend and cls >= 2 and e.pnd
                     bool pdP = showPend and cls >= 2 and use4 and e.pndP
                     if array.size(cs) > 0 or pdT or pdP
-                        table.cell(cTbl, 0, row + rowOff, f_clsName(cls) + (eS != 0 and eS != cls ? " ⇡" + f_clsName(eS) : "") + " ", text_color = cls == tfClass ? chart.fg_color : color.gray, text_size = cornerSz, bgcolor = bgClr)
+                        table.cell(cTbl, 0, row + rowOff, f_clsName(cls) + (eS != 0 and eS != cls ? " (" + (eD == 1 ? "▲" : "▼") + " לפי " + f_clsName(eS) + ")" : "") + " ", text_color = cls == tfClass ? chart.fg_color : color.gray, text_size = cornerSz, bgcolor = bgClr)
                         int col = 1
                         int lTy = -1
                         if li >= 0
