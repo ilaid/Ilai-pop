@@ -1712,7 +1712,11 @@ atrCh = ta.atr(14)
 var array<int>   bkT = array.new_int()
 var array<float> bkH = array.new_float()
 var array<float> bkL = array.new_float()
-if array.size(bkT) == 0 or array.get(bkT, array.size(bkT) - 1) != time
+// בלי or על array.get — ב-Pine ה-or לא עוצר באמצע (RE10045 בנר הראשון)
+bool bkNew = true
+if array.size(bkT) > 0
+    bkNew := array.get(bkT, array.size(bkT) - 1) != time
+if bkNew
     array.push(bkT, time)
     array.push(bkH, high)
     array.push(bkL, low)
