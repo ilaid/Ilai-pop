@@ -2088,8 +2088,14 @@ if barstate.islast
                                 Cand c = array.get(cs, bI)
                                 oX := oX + (oX == "" ? "" : " · ") + f_itemTx(c) + (cornerAllT ? " " + f_tmTx(c, cls) : "")
                         color dC = eD == 1 ? colBull : eD == -1 ? colBear : color.gray
-                        // כיוון, (המסגרת שממנה בא — כשלא מהמסגרת עצמה), ◦ ושעה כשיש PCP ממתין
-                        string dTx = (eD == 0 ? "—" : (eD == 1 ? "▲" : "▼") + (eS != cls ? " (" + f_clsName(eS) + ")" : "")) + (pdT or pdP ? "  ◦" + f_tmStr(e.pndT, cls) : "")
+                        // כיוון, ו(המסגרת שממנה בא — כשלא מהמסגרת עצמה)
+                        string dTx = eD == 0 ? "—" : (eD == 1 ? "▲" : "▼") + (eS != cls ? " (" + f_clsName(eS) + ")" : "")
+                        // PCP ממתין — בסוף העמודה של הקבוצה שלו (שלישייה / זוג)
+                        string pdx = "◦PCP " + f_tmStr(e.pndT, cls)
+                        if pdT
+                            tA := tA + (tA == "" ? "" : " · ") + pdx
+                        if pdP
+                            pA := pA + (pA == "" ? "" : " · ") + pdx
                         table.cell(cTb2, 0, rr, f_clsName(cls), text_color = cls == tfClass ? chart.fg_color : color.gray, text_size = tblSz, bgcolor = cBg)
                         table.cell(cTb2, 1, rr, dTx, text_color = dC, text_size = tblSz, bgcolor = cBg)
                         table.cell(cTb2, 2, rr, tA, text_color = dC, text_size = tblSz, bgcolor = cBg)
