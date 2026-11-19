@@ -1907,6 +1907,15 @@ var array<int> effS = array.new_int(9, 0)
 f_close(Cand c, int cls) => f_ev(c)
 
 // מושבתת ע"י שבירה פעילה הפוכה וחדשה יותר במסגרת גבוהה יותר
+// המסגרת הגבוהה שהשביתה שבירה (0 = לא מושבתת)
+f_suppBy(int d, int ct, int cls) =>
+    int r = 0
+    if cascadeOn and array.size(supD) > 0
+        for i = 0 to array.size(supD) - 1
+            if r == 0 and array.get(supC, i) > cls and array.get(supD, i) != d and array.get(supE, i) > ct
+                r := array.get(supC, i)
+    r
+
 f_suppT(int d, int ct, int cls) =>
     bool r = false
     if cascadeOn and array.size(supD) > 0
@@ -2102,21 +2111,29 @@ if barstate.islast
                                     array.push(seen, ky)
                                     string it = f_dispTx(c, cs) + (ix == li and cornerWhen ? f_whenTx(c, cls) : cornerAllT ? " " + f_tmTx(c, cls) : "")
                                     tA := tA + (tA == "" ? "" : " · ") + it
-                        // הנגדיות: לכל סוג — האחרונה שלא פעילה (עם החץ שלה)
+                        // הלא-פעילות: לכל סוג, לכל קבוצה (שלישייה וזוג) — האחרונה, עם החץ שלה.
+                        // שבירה בכיוון של המסגרת שהושבתה ע"י מסגרת גבוהה — עם המסגרת בסוגריים.
+                        // שלישייה וזוג תאומות — פעם אחת.
                         string oX = ""
+                        array<string> seenO = array.new_string()
                         for ty = 0 to 2
-                            int bI = -1
-                            if array.size(cs) > 0
-                                for i = 0 to array.size(cs) - 1
-                                    Cand c = array.get(cs, i)
-                                    if c.typ == ty and not f_act(c, cls, eD)
-                                        if bI < 0
-                                            bI := i
-                                        else if f_newer(c, array.get(cs, bI))
-                                            bI := i
-                            if bI >= 0
-                                Cand c = array.get(cs, bI)
-                                oX := oX + (oX == "" ? "" : " · ") + (c.dir == 1 ? "▲" : "▼") + f_dispTx(c, cs) + (cornerAllT and tblOppT ? " " + f_tmTx(c, cls) : "")
+                            for g = 0 to 1
+                                int bI = -1
+                                if array.size(cs) > 0
+                                    for i = 0 to array.size(cs) - 1
+                                        Cand c = array.get(cs, i)
+                                        if c.typ == ty and c.pair == (g == 1) and not f_act(c, cls, eD)
+                                            if bI < 0
+                                                bI := i
+                                            else if f_newer(c, array.get(cs, bI))
+                                                bI := i
+                                if bI >= 0
+                                    Cand c = array.get(cs, bI)
+                                    string ky = f_twinKey(c)
+                                    if not array.includes(seenO, ky)
+                                        array.push(seenO, ky)
+                                        int sb = c.dir == eD ? f_suppBy(c.dir, f_close(c, cls), cls) : 0
+                                        oX := oX + (oX == "" ? "" : " · ") + (c.dir == 1 ? "▲" : "▼") + f_dispTx(c, cs) + (cornerAllT and tblOppT ? " " + f_tmTx(c, cls) : "") + (sb > 0 ? " (" + f_clsName(sb) + ")" : "")
                         color dC = eD == 1 ? colBull : eD == -1 ? colBear : color.gray
                         // כיוון, ו(המסגרת שממנה בא — כשלא מהמסגרת עצמה)
                         string dTx = eD == 0 ? "—" : (eD == 1 ? "▲" : "▼") + (eS != cls ? " (" + f_clsName(eS) + ")" : "")
