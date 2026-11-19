@@ -1066,7 +1066,8 @@ f_step(Eng e, int t, array<float> q1, array<float> q2, array<float> q3, array<fl
             else
                 pk += 1
         // 2. PSP חדש על נר הסווינג (הקודם), שהנר הזה אישר
-        if tMid != 0 and lfMid == lf
+        // PSP שנר הסווינג שלו ברבע הראשון של המיכל (או בזמן חסום) — לא קיים
+        if tMid != 0 and lfMid == lf and not q1Mid
             int  dN  = f_d1(q1)
             int  dE  = f_d1(q2)
             int  dY  = f_d1(q3)
