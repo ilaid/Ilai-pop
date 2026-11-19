@@ -1662,6 +1662,22 @@ f_ev(Cand c) => c.shT > 0 ? c.shT : c.t
 // a חדשה מ-b: לפי רגע השבירה, ובאותו רגע — לפי סדר הרישום
 f_newer(Cand a, Cand b) => f_ev(a) > f_ev(b) or (f_ev(a) == f_ev(b) and a.seq > b.seq)
 
+// אותה שבירה בשלישייה ובזוג: אותו סוג, כיוון ושעה
+f_twinKey(Cand c) => str.tostring(c.typ) + "/" + str.tostring(c.dir) + "/" + str.tostring(f_ev(c))
+
+// הטקסט בצד: שבירת זוג שיש לה תאומה חיה בשלישייה — בלי ʸʳ (שבירה אחת)
+f_dispTx(Cand c, array<Cand> cs) =>
+    string r = c.tx
+    if c.pair and array.size(cs) > 0
+        bool tw = false
+        for i = 0 to array.size(cs) - 1
+            Cand o = array.get(cs, i)
+            if not o.pair and o.typ == c.typ and o.dir == c.dir and f_ev(o) == f_ev(c)
+                tw := true
+        if tw
+            r := str.replace_all(c.tx, pairTag, "")
+    r
+
 // האחרונה שקובעת את הכיוון (מבין אלה שיכולות לקבוע — ראה f_elig).
 // שתי שבירות מנוגדות באותו נר — אף אחת לא קובעת: הולכים עם הכיוון שהיה לפני
 // הנר הזה (השבירה החיה האחרונה שלפניו). אם אין שום שבירה חיה לפניו — האחרונה
@@ -2055,16 +2071,12 @@ if barstate.islast
                     bool pdP = showPend and cls >= 2 and use4 and e.pndP
                     if array.size(cs) > 0 or pdT or pdP
                         int rr = row
-                        // השבירה שקבעה ראשונה (עם Q ושעה), ואחריה הפעילות האחרות — לכל סוג, לכל קבוצה
-                        string tA = ""
-                        string pA = ""
+                        // הסדר: השבירה שקבעה (עם Q ושעה), ואחריה הפעילה האחרונה מכל סוג בכל קבוצה.
+                        // שלישייה וזוג עם אותה שבירה באותו נר (אותו סוג, כיוון ושעה) — פעם אחת,
+                        // בלי ʸʳ. אם רק של הזוג נשארה — עם ʸʳ.
+                        array<int> ord = array.new_int()
                         if li >= 0
-                            Cand lc = array.get(cs, li)
-                            string lt = lc.tx + (cornerWhen ? f_whenTx(lc, cls) : "")
-                            if lc.pair
-                                pA := lt
-                            else
-                                tA := lt
+                            array.push(ord, li)
                         for g = 0 to 1
                             for ty = 0 to 2
                                 int bA = -1
@@ -2077,13 +2089,19 @@ if barstate.islast
                                             else if f_newer(c, array.get(cs, bA))
                                                 bA := i
                                 if bA >= 0
-                                    Cand c = array.get(cs, bA)
                                     if not (li >= 0 and array.get(cs, li).typ == ty and array.get(cs, li).pair == (g == 1))
-                                        string it = c.tx + (cornerAllT ? " " + f_tmTx(c, cls) : "")
-                                        if g == 0
-                                            tA := tA + (tA == "" ? "" : " · ") + it
-                                        else
-                                            pA := pA + (pA == "" ? "" : " · ") + it
+                                        array.push(ord, bA)
+                        string tA = ""
+                        array<string> seen = array.new_string()
+                        if array.size(ord) > 0
+                            for n = 0 to array.size(ord) - 1
+                                int  ix = array.get(ord, n)
+                                Cand c  = array.get(cs, ix)
+                                string ky = f_twinKey(c)
+                                if not array.includes(seen, ky)
+                                    array.push(seen, ky)
+                                    string it = f_dispTx(c, cs) + (ix == li and cornerWhen ? f_whenTx(c, cls) : cornerAllT ? " " + f_tmTx(c, cls) : "")
+                                    tA := tA + (tA == "" ? "" : " · ") + it
                         // הנגדיות: לכל סוג — האחרונה שלא פעילה (עם החץ שלה)
                         string oX = ""
                         for ty = 0 to 2
@@ -2098,7 +2116,7 @@ if barstate.islast
                                             bI := i
                             if bI >= 0
                                 Cand c = array.get(cs, bI)
-                                oX := oX + (oX == "" ? "" : " · ") + f_itemTx(c) + (cornerAllT and tblOppT ? " " + f_tmTx(c, cls) : "")
+                                oX := oX + (oX == "" ? "" : " · ") + (c.dir == 1 ? "▲" : "▼") + f_dispTx(c, cs) + (cornerAllT and tblOppT ? " " + f_tmTx(c, cls) : "")
                         color dC = eD == 1 ? colBull : eD == -1 ? colBear : color.gray
                         // כיוון, ו(המסגרת שממנה בא — כשלא מהמסגרת עצמה)
                         string dTx = eD == 0 ? "—" : (eD == 1 ? "▲" : "▼") + (eS != cls ? " (" + f_clsName(eS) + ")" : "")
@@ -2108,9 +2126,7 @@ if barstate.islast
                         table.cell(cTb2, 0, rr, f_clsName(cls), text_color = cls == tfClass ? chart.fg_color : color.gray, text_size = tblSz, bgcolor = cBg)
                         table.cell(cTb2, 1, rr, dTx, text_color = dC, text_size = tblSz, bgcolor = cBg)
                         // פעילות: השלישייה והזוג יחד — כמו בשורה, האחרונה ראשונה
-                        string aX = tA + (tA != "" and pA != "" ? " · " : "") + pA
-                        if li >= 0 and array.get(cs, li).pair and tA != "" and pA != ""
-                            aX := pA + " · " + tA
+                        string aX = tA
                         table.cell(cTb2, 2, rr, aX, text_color = dC, text_size = tblSz, bgcolor = cBg)
                         // נר שעוד לא הוכרע (PCP) — בעמודה משלו, לא עם השבירות
                         table.cell(cTb2, 4, rr, pdT or pdP ? f_tmStr(e.pndT, cls) : "", text_color = pdT ? colPend : colPair, text_size = tblSz, bgcolor = cBg)
