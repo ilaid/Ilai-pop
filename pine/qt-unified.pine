@@ -1030,8 +1030,9 @@ f_step(Eng e, int t, array<float> q1, array<float> q2, array<float> q3, array<fl
                 array.set(e.sRi, k, nI)
                 array.set(e.sTy, k, nT)
                 array.set(e.sLb, k, nS)
-                // חדשה, או קיימת שנלקחה שוב בנר הזה — רגע הרישום מתעדכן
-                if isNew or f_renew(e, k, nS, t)
+                // חדשה, או SSMT שהפכה ל-HSSMT (עלייה בדרגה, כמו Fill) — רגע הרישום מתעדכן.
+                // נכס שממשיך לרדת/לעלות אחרי השבירה — לא מחדש אותה.
+                if isNew or (oldTy == 1 and nT == 2)
                     e.seq := e.seq + 1
                     array.set(e.sSq, k, e.seq)
                     array.set(e.sTm, k, t)
