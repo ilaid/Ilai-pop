@@ -67,18 +67,21 @@ comes in, so no chart stacks more than four rows.
 - The ladder's **year is the year as the chart has it**: 1 January is never a
   trading day, so it opens on the first weekday after it and runs until the
   next year opens — 2.1.2026 to 4.1.2027. Its weekdays (261) divided by four
-  are the quarters (65 each), so 2026 turns on 2.1, 3.4, 3.7 and 2.10. The
+  and **rounded down** are the quarters (65 each, the leftover staying in the
+  last one), so 2026 turns on 2.1, 3.4, 3.7 and 2.10. The
   calendar months play no part, and a turn day belongs to the quarter it opens.
   The TYO stays on 1 April all the same: it is the QT year, not this ladder.
 - The four year cycle is 2023, 2024, 2025, 2026, written `(year + 1) % 4 + 1`.
 - A week belongs to the month holding its **Tuesday**; a week whose Tuesday and
   Thursday fall in different months is dead and carries no number.
-- The quarter split counts the quarter's **weekdays**, the handover day counted
-  in, and divides by four, the last cell taking the rest: 66 in Q1 2026, so 17
-  a cell and it turns on 2.1, 27.1, 19.2, 16.3. Q4 2026 turns on 2.10, 27.10,
-  19.11, 14.12. A turn that lands on a shut day (3.4 is Good Friday, 3.7 is the
-  Fourth) is not moved — the cell simply opens on its first real candle, which
-  is why Q2 2026 looks like it runs 6.4 to 6.7.
+- The quarter split counts the quarter's own **weekdays** and divides by four
+  the same way, **rounded down**, the last cell taking the rest: 65 in Q1 2026,
+  so 16 a cell and it turns on 2.1, 26.1, 17.2, 11.3; Q2 on 3.4, 27.4, 19.5,
+  10.6. Rounding to the nearest instead made a cell 17 weekdays and every cut
+  after it ran a trading day late, then two, then three. A turn that lands on a
+  shut day (3.4 is Good Friday, 3.7 is the Fourth) is not moved — the cell
+  simply opens on its first real candle, which is why Q2 2026 looks like it
+  runs 6.4 to 6.7.
 - Friday, a dead week and the weekend carry no number: colourless cell, and a
   mark holds the link's place in the chain so every row reads the same levels
   in the same order whatever the day.
