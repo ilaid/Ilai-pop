@@ -66,22 +66,21 @@ comes in, so no chart stacks more than four rows.
   ladder on purpose, not for putting daylight saving right.
 - The ladder's **year is the year as the chart has it**: 1 January is never a
   trading day, so it opens on the first weekday after it and runs until the
-  next year opens — 2.1.2026 to 4.1.2027. Its weekdays (261) divided by four
-  and **rounded down** are the quarters (65 each, the leftover staying in the
-  last one), so 2026 turns on 2.1, 3.4, 3.7 and 2.10. The
-  calendar months play no part, and a turn day belongs to the quarter it opens.
-  The TYO stays on 1 April all the same: it is the QT year, not this ladder.
+  next year opens — 2.1.2026 to 4.1.2027. The **quarters fall on that same day
+  of the month three months on each time** — 2.1, 2.4, 2.7, 2.10 — and the
+  fourth runs until the year closes; one that would open on a weekend waits for
+  the Monday. A turn day belongs to the quarter it opens. The TYO stays on 1
+  April all the same: it is the QT year, not this ladder.
 - The four year cycle is 2023, 2024, 2025, 2026, written `(year + 1) % 4 + 1`.
 - A week belongs to the month holding its **Tuesday**; a week whose Tuesday and
   Thursday fall in different months is dead and carries no number.
-- The quarter split counts the quarter's own **weekdays** and divides by four
-  the same way, **rounded down**, the last cell taking the rest: 65 in Q1 2026,
-  so 16 a cell and it turns on 2.1, 26.1, 17.2, 11.3; Q2 on 3.4, 27.4, 19.5,
-  10.6. Rounding to the nearest instead made a cell 17 weekdays and every cut
-  after it ran a trading day late, then two, then three. A turn that lands on a
-  shut day (3.4 is Good Friday, 3.7 is the Fourth) is not moved — the cell
-  simply opens on its first real candle, which is why Q2 2026 looks like it
-  runs 6.4 to 6.7.
+- The quarter split counts the quarter's **weekdays, the day it hands over
+  counted in**, and divides by four **rounding up**: Q1 2026 holds 65, so the
+  cuts fall on the 17th, the 33rd and the 49th and it reads 2.1, 27.1, 18.2,
+  12.3, handing over on 2.4. Q2 reads 2.4, 27.4, 19.5, 11.6. These dates are
+  the model's own, given by its owner — check any change against them before
+  committing it. A cut that lands on a shut day is not moved; the cell simply
+  opens on its first real candle.
 - Friday, a dead week and the weekend carry no number: colourless cell, and a
   mark holds the link's place in the chain so every row reads the same levels
   in the same order whatever the day.
