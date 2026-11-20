@@ -34,10 +34,16 @@ indicator("Sav FX - Cycles, True Opens & Devil Marks", shorttitle="Sav FX", over
 //  runs until the year closes. A quarter that would open on a weekend waits
 //  for the Monday.
 //
-//  The split divides the quarter's weekdays, the day it hands over counted in,
-//  by four and rounds UP. Q1 2026 holds 65 of them, so its cuts fall on the
-//  17th, the 33rd and the 49th: 2 January, 27 January, 18 February, 12 March,
-//  handing over on 2 April. Q2 reads 2 April, 27 April, 19 May, 11 June.
+//  The split divides the quarter's CANDLES, the day it hands over counted in,
+//  by four, and the leftover days go to the cells at the front so a quarter
+//  never runs 16 and then 17. Candles, not weekdays: four days a year print no
+//  candle at all - New Year's Day, Good Friday, Independence Day and Christmas
+//  - and counting them in would leave every cut after them a day early. Q1
+//  2026 holds 65 candles and reads 2 January, 27 January, 18 February, 12
+//  March; Q2 also 65, since Good Friday falls inside it, and reads 2 April, 28
+//  April, 20 May, 11 June; Q3 holds 66 and reads 2 July, 28 July, 20 August,
+//  11 September; Q4 holds 65 and reads 2 October, 27 October, 18 November, 10
+//  December.
 //
 //  A turn day belongs to the quarter it opens, never to the one it closes, and
 //  a cell always opens on its first real candle. Two of 2026's turns are shut -
@@ -126,7 +132,7 @@ shiftMs = int(shiftH * 3600000)
 g_cyc = "Time Cycles"
 showCyc4   = input.bool(true, "Quadrennial Cycles", group = g_cyc, tooltip = "One cell per year: which year of the four year cycle it is. 2023 opens the cycle and 2026 closes it, so 2023 is year 1 and 2026 is year 4.")
 showQtYear = input.bool(true, "Yearly Cycles",      group = g_cyc, tooltip = "One cell per quarter: which quarter of the year it is. The year opens on the first weekday after 1 January, which is never a trading day, and the quarters fall on that same day of the month three months on each time: 2 January 2026 gives 2 January, 2 April, 2 July and 2 October, and the fourth runs on until the next year opens. One that would open on a weekend waits for the Monday.")
-showSplit  = input.bool(true, "Quarter Split",      group = g_cyc, tooltip = "One cell per quarter of a quarter, on the daily chart only. The quarter's weekdays are counted, the day it hands over counted in, and divided by four, rounded up: Q1 2026 holds 65 of them, so the cuts fall on the 17th, the 33rd and the 49th and it reads 2 January, 27 January, 18 February and 12 March. Q2 reads 2 April, 27 April, 19 May and 11 June.")
+showSplit  = input.bool(true, "Quarter Split",      group = g_cyc, tooltip = "One cell per quarter of a quarter, on the daily chart only. The quarter's candles are counted, the day it hands over counted in, and divided by four, the leftover days going to the cells at the front. The four days that print no candle - New Year's Day, Good Friday, Independence Day and Christmas - are left out of the count. Q1 2026 holds 65 candles and reads 2 January, 27 January, 18 February, 12 March; Q2 reads 2 April, 28 April, 20 May, 11 June; Q3 2 July, 28 July, 20 August, 11 September; Q4 2 October, 27 October, 18 November, 10 December.")
 showWeekly = input.bool(true, "Weekly Cycles",      group = g_cyc, tooltip = "One cell per week: which week of the month it is. A week belongs to the month holding its Tuesday.")
 showDaily  = input.bool(true, "Daily Cycles",       group = g_cyc, tooltip = "One cell per trading day: which day of the week it is, Mon 1 .. Thu 4. Friday carries no number.")
 show6H     = input.bool(true, "6 Hour Cycles",      group = g_cyc, tooltip = "One cell per session: Asia 1, London 2, AM 3, PM 4.")
@@ -349,27 +355,79 @@ iQtr    = dIn < qS2 ? 1 : dIn < qS3 ? 2 : dIn < qS4 ? 3 : 4
 qStart  = iQtr == 1 ? qS1 : iQtr == 2 ? qS2 : iQtr == 3 ? qS3 : qS4
 qEndDay = iQtr == 1 ? qS2 : iQtr == 2 ? qS3 : iQtr == 3 ? qS4 : yB
 
-// THE SPLIT: the quarter's weekdays, the day it hands over counted in, divided
-// by four and rounded UP. Q1 2026 holds 65 of them, so the cuts land on the
-// 17th, the 33rd and the 49th and the quarter reads 2 January, 27 January, 18
-// February, 12 March, handing over on 2 April.
-w0q  = dowMon(janS + qStart * MS_DAY)
-wQtr = wdCount(w0q, qEndDay - qStart) + 1
-c1 = int(math.ceil(wQtr / 4.0))
-c2 = int(math.ceil(wQtr / 2.0))
-c3 = int(math.ceil(wQtr * 3 / 4.0))
+// THE DAYS WITH NO CANDLE AT ALL: New Year's Day, Good Friday, Independence
+// Day and Christmas. Every other holiday on the calendar is a shortened
+// session on these futures and still leaves a candle, and Pine is handed no
+// holiday calendar, so these four are worked out here. They matter because the
+// split counts CANDLES: Q2 2026 opens on 2 April and Good Friday is the 3rd,
+// so a cell counted in weekdays would be a candle short and every cut after it
+// would sit a day early. The same thing happens in Q3, where the Fourth falls
+// on the Saturday and the market shuts on Friday the 3rd.
+easterDay(int y) =>
+    int a = y % 19
+    int b = int(y / 100)
+    int c = y % 100
+    int d = int(b / 4)
+    int e = b % 4
+    int g = int((b - int((b + 8) / 25) + 1) / 3)
+    int h = (19 * a + b - d - g + 15) % 30
+    int i = int(c / 4)
+    int k = c % 4
+    int l = (32 + 2 * e + 2 * i - h - k) % 7
+    int m = int((a + 11 * h + 22 * l) / 451)
+    int mo = int((h + l - 7 * m + 114) / 31)
+    int da = (h + l - 7 * m + 114) % 31 + 1
+    timestamp(gridTZ, y, mo, da, 12, 0, 0)
 
-kIn = wdCount(w0q, math.max(0, dIn - qStart))
-iSp = kIn < c1 ? 1 : kIn < c2 ? 2 : kIn < c3 ? 3 : 4
+shutOf(int y, int n) =>
+    int jy = timestamp(gridTZ, y, 7, 4, 12, 0, 0)
+    int jw = dowMon(jy)
+    n == 1 ? timestamp(gridTZ, y, 1, 1, 12, 0, 0) : n == 2 ? easterDay(y) - 2 * MS_DAY : n == 3 ? jy + (jw == 5 ? -1 : jw == 6 ? 1 : 0) * MS_DAY : timestamp(gridTZ, y, 12, 25, 12, 0, 0)
+
+// how many of them fall in [fromD, uptoD), counted in days from 1 January
+shutsIn(int fromD, int uptoD) =>
+    int n = 0
+    for yk = 0 to 1
+        for k = 1 to 4
+            int d = int(math.round((shutOf(spanYr + yk, k) - janS) / MS_DAY))
+            if d >= fromD and d < uptoD and dowMon(janS + d * MS_DAY) < 5
+                n := n + 1
+    n
+
+// THE SPLIT: the quarter's CANDLES, the day it hands over counted in, divided
+// by four. The leftover days go to the cells at the front, so a quarter never
+// runs 16 and then 17. Q1 2026 holds 65 candles, which is 17, 16, 16, 16, so
+// it reads 2 January, 27 January, 18 February, 12 March and hands over on 2
+// April. Q2 holds 65 as well - 66 weekdays less Good Friday - and reads 2
+// April, 28 April, 20 May, 11 June.
+w0q  = dowMon(janS + qStart * MS_DAY)
+wQtr = wdCount(w0q, qEndDay - qStart + 1) - shutsIn(qStart, qEndDay + 1)
+cBas = int(math.floor(wQtr / 4))
+cRem = wQtr % 4
+cut1 = cBas + (cRem > 0 ? 1 : 0)        // c1 .. c5 are the row colours
+cut2 = cBas * 2 + math.min(cRem, 2)
+cut3 = cBas * 3 + math.min(cRem, 3)
+
+kIn = wdCount(w0q, math.max(0, dIn - qStart)) - shutsIn(qStart, dIn)
+iSp = kIn < cut1 ? 1 : kIn < cut2 ? 2 : kIn < cut3 ? 3 : 4
 iSplit = en3 ? iSp : na
+
+// and back: the day candle number k opens on, in days from the quarter's own
+// start. The weekday count is the first guess and every shut day inside it
+// pushes the answer one weekday further on, which settles in a round or two.
+dayOfCandle(int k) =>
+    int off = wdOffset(w0q, k)
+    for i = 0 to 3
+        off := wdOffset(w0q, k + shutsIn(qStart, qStart + off))
+    off
 
 // the four year cycle runs 2023 2024 2025 2026: 2023 opens it, 2026 closes it.
 // 2023 is 3 mod 4, so (yr + 1) mod 4 numbers it without ever going negative
 iCyc4  = int((spanYr + 1) % 4) + 1
 cycBeg = timestamp(gridTZ, spanYr, 1, 1, 0, 0)
 
-// where this cell hands over, back out of the weekday count into days of January
-sEndDay = iSp == 4 ? qEndDay : qStart + wdOffset(w0q, iSp == 1 ? c1 : iSp == 2 ? c2 : c3)
+// where this cell hands over, back out of the candle count into days of January
+sEndDay = iSp == 4 ? qEndDay : qStart + dayOfCandle(iSp == 1 ? cut1 : iSp == 2 ? cut2 : cut3)
 
 // A bar's time is drawn at the middle of its candle, so half a bar back puts an
 // edge in the gap between two candles rather than through the middle of one.

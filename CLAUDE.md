@@ -74,13 +74,18 @@ comes in, so no chart stacks more than four rows.
 - The four year cycle is 2023, 2024, 2025, 2026, written `(year + 1) % 4 + 1`.
 - A week belongs to the month holding its **Tuesday**; a week whose Tuesday and
   Thursday fall in different months is dead and carries no number.
-- The quarter split counts the quarter's **weekdays, the day it hands over
-  counted in**, and divides by four **rounding up**: Q1 2026 holds 65, so the
-  cuts fall on the 17th, the 33rd and the 49th and it reads 2.1, 27.1, 18.2,
-  12.3, handing over on 2.4. Q2 reads 2.4, 27.4, 19.5, 11.6. These dates are
-  the model's own, given by its owner — check any change against them before
-  committing it. A cut that lands on a shut day is not moved; the cell simply
-  opens on its first real candle.
+- The quarter split counts the quarter's **candles**, the day it hands over
+  counted in, and divides by four, the leftover days going to the cells at the
+  **front** (so a quarter never runs 16 then 17). **Candles, not weekdays**:
+  four days a year print none at all — New Year's Day, Good Friday,
+  Independence Day and Christmas — and counting those in leaves every cut
+  after them a day early, which is what went wrong in Q2 and Q3 2026, the two
+  quarters holding a shut day. Every other holiday is a shortened session and
+  still leaves a candle. 2026 reads:
+  **Q1** 2.1 · 27.1 · 18.2 · 12.3 — **Q2** 2.4 · 28.4 · 20.5 · 11.6 —
+  **Q3** 2.7 · 28.7 · 20.8 · 11.9 — **Q4** 2.10 · 27.10 · 18.11 · 10.12.
+  These dates are the model's own, given by its owner — check any change
+  against them before committing it.
 - Friday, a dead week and the weekend carry no number: colourless cell, and a
   mark holds the link's place in the chain so every row reads the same levels
   in the same order whatever the day.
