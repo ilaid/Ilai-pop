@@ -9,7 +9,7 @@ indicator("Sav FX - Cycles, True Opens & Devil Marks", shorttitle="Sav FX", over
 //
 //    row              cell          numbers
 //    1 Quadrennial     1 year        which year of the four year cycle, 2023 .. 2026
-//    2 Yearly          1 quarter     which quarter of the year, Q1 Jan-Mar .. Q4 Oct-Dec
+//    2 Yearly          1 quarter     which quarter of the year, by its weekdays
 //    3 Quarter Split   ~16 bars      which quarter of the quarter, daily chart only
 //    4 Weekly          1 week        which week of the month
 //    5 Daily           1 day         which day of the week, Mon 1 .. Thu 4
@@ -26,15 +26,21 @@ indicator("Sav FX - Cycles, True Opens & Devil Marks", shorttitle="Sav FX", over
 //  holds its place with a mark, so a row reads the same levels in the same order
 //  whatever the day.
 //
-//  The quarter split is the quarter's own days divided in four: 92 days makes it
-//  23 to a cell, and a cut that falls on a weekend steps to the nearest trading
-//  day, a Saturday back to the Friday and a Sunday on to the Monday, since a
-//  cell has to open on a candle. Nothing is fixed about the length: Q3 2026 runs
-//  1/7, 24/7, 17/8, 8/9 and Q4 2026 runs 1/10, 23/10, 16/11, 9/12, which is 21
-//  to 24 days a cell and 15 to 17 candles. The calendar month is three per
-//  quarter, not four, so it carries no number of its own and is only what the
-//  week is numbered inside. The split row is numbered Q1 to Q4 like the quarter
-//  above it.
+//  THE YEAR, ITS QUARTERS AND THE SPLIT are the year as the chart has it, cut
+//  in four and in four again. 1 January is never a trading day, so the year
+//  opens on the first weekday after it and runs until the next year opens: 2
+//  January 2026 to 4 January 2027. Those weekdays are counted - 261 of them -
+//  and divided by four, 65 to a quarter, so the quarters turn on 2 January, 3
+//  April, 3 July and 2 October, and the months have nothing to do with it. Each
+//  quarter is then counted the same way, its handover day counted in, and
+//  divided by four: 66 weekdays, 17 to a cell and the rest to the last, so Q1
+//  reads 2 January, 27 January, 19 February, 16 March.
+//
+//  A turn day belongs to the quarter it opens, never to the one it closes, and
+//  a cell always opens on its first real candle. Two of 2026's turns are shut -
+//  3 April is Good Friday and 3 July is the Fourth - so on the chart the second
+//  quarter runs from the candle of 6 April to the candle of 6 July, which is
+//  what it looks like without the holiday calendar Pine is never given.
 //
 //  Cell edges sit on real bars, never on a computed calendar time. A cell opens
 //  half a bar before its own first candle, and it is closed where the next cell
@@ -116,8 +122,8 @@ shiftMs = int(shiftH * 3600000)
 
 g_cyc = "Time Cycles"
 showCyc4   = input.bool(true, "Quadrennial Cycles", group = g_cyc, tooltip = "One cell per year: which year of the four year cycle it is. 2023 opens the cycle and 2026 closes it, so 2023 is year 1 and 2026 is year 4.")
-showQtYear = input.bool(true, "Yearly Cycles",      group = g_cyc, tooltip = "One cell per quarter: which quarter of the year it is. Q1 Jan-Mar, Q2 Apr-Jun, Q3 Jul-Sep, Q4 Oct-Dec. April opens Q2, which is the true open of the year.")
-showSplit  = input.bool(true, "Quarter Split",      group = g_cyc, tooltip = "One cell per quarter of a quarter, on the daily chart only. The quarter's own days are divided in four - 92 days is 23 to a cell - and a cut that lands on a weekend steps to the nearest trading day, a Saturday back to the Friday and a Sunday on to the Monday. Q4 2026 comes out 1/10, 23/10, 16/11, 9/12. The cells are not all the same length: 21 to 24 days, 15 to 17 candles.")
+showQtYear = input.bool(true, "Yearly Cycles",      group = g_cyc, tooltip = "One cell per quarter: which quarter of the year it is. The year as the chart has it - 2 January 2026 to 4 January 2027 - holds 261 weekdays, and a quarter is 65 of them, so in 2026 the quarters turn on 2 January, 3 April, 3 July and 2 October. The calendar months have nothing to do with it.")
+showSplit  = input.bool(true, "Quarter Split",      group = g_cyc, tooltip = "One cell per quarter of a quarter, on the daily chart only. The quarter's weekdays are counted, its handover day counted in, and divided by four: 66 of them in 2026, so 17 to a cell and the rest to the last. Q1 2026 turns on 2 January, 27 January, 19 February and 16 March, Q4 on 2 October, 27 October, 19 November and 14 December.")
 showWeekly = input.bool(true, "Weekly Cycles",      group = g_cyc, tooltip = "One cell per week: which week of the month it is. A week belongs to the month holding its Tuesday.")
 showDaily  = input.bool(true, "Daily Cycles",       group = g_cyc, tooltip = "One cell per trading day: which day of the week it is, Mon 1 .. Thu 4. Friday carries no number.")
 show6H     = input.bool(true, "6 Hour Cycles",      group = g_cyc, tooltip = "One cell per session: Asia 1, London 2, AM 3, PM 4.")
@@ -254,59 +260,90 @@ dead  = year(tueTs, gridTZ) * 100 + month(tueTs, gridTZ) != year(thuTs, gridTZ) 
 iWeek = dead ? na : int(math.floor((dayofmonth(tueTs, gridTZ) - 1) / 7)) + 1
 
 
-// ───────────────────── year, quarter and the four year cycle ──────────────────
+// ───────── the year on the chart, its quarters, and the quarter split ────────
+//
+// The ladder's year is the year AS THE CHART HAS IT. 1 January is never a
+// trading day, so the year opens on the first weekday after it and runs until
+// the next year opens: 2 January 2026 to 4 January 2027. That span is divided
+// in four to give the quarters, and each quarter in four again to give the
+// split, counted in WEEKDAYS rather than calendar days.
+//
+// 2026 holds 261 weekdays, 65 to a quarter, so the quarters turn on 2 January,
+// 3 April, 3 July and 2 October. Each quarter holds 66 weekdays counting the
+// day it hands over on, 17 to a cell, and the last cell takes what is left, so
+// Q1 reads 2 January, 27 January, 19 February, 16 March. Two of those turns
+// are shut - 3 April is Good Friday and 3 July is the Fourth - and a cell
+// always opens on its first real candle, which is why the second quarter looks
+// like it runs 3 April to 6 July.
+//
+// The turn day belongs to the quarter it opens, never to the one it closes.
 mth = month(tday, gridTZ)
 yr  = year(tday, gridTZ)
-
-// plain calendar quarters: Q1 Jan-Mar, Q2 Apr-Jun, Q3 Jul-Sep, Q4 Oct-Dec.
-// April is not a year boundary, it opens Q2 and with it the true open of the year
-iQtr = int(math.floor((mth - 1) / 3)) + 1
-
-// the four year cycle runs 2023 2024 2025 2026: 2023 opens it, 2026 closes it.
-// 2023 is 3 mod 4, so (yr + 1) mod 4 numbers it without ever going negative
-iCyc4  = int((yr + 1) % 4) + 1
-cycBeg = timestamp(gridTZ, yr, 1, 1, 0, 0)
-
-yNoon  = timestamp(gridTZ, yr, 1, 1, 12, 0, 0)
-yDays  = int(math.round((timestamp(gridTZ, yr + 1, 1, 1, 12, 0, 0) - yNoon) / MS_DAY))
-dayInY = math.max(0, math.min(yDays - 1, int(math.round((tdayMid - yNoon) / MS_DAY))))
 
 // Monday 0 .. Sunday 6
 dowMon(int t) =>
     int d = dayofweek(t, gridTZ)
     d == 1 ? 6 : d - 2
 
-// The quarter runs from the first of its first month to the last of its third.
-qFirstM = (iQtr - 1) * 3 + 1
-qNoon   = timestamp(gridTZ, yr, qFirstM, 1, 12, 0, 0)
-qNoonEnd = iQtr == 4 ? timestamp(gridTZ, yr + 1, 1, 1, 12, 0, 0) : timestamp(gridTZ, yr, qFirstM + 3, 1, 12, 0, 0)
+// how many Mon-Fri days sit in the n days that open on weekday w0. Closed form,
+// so it costs the same whether the span is a day or a year
+wdCount(int w0, int n) =>
+    int c = int(math.floor(n / 7)) * 5
+    int r = n % 7
+    for i = 0 to 5
+        if i < r and (w0 + i) % 7 < 5
+            c := c + 1
+    c
 
-// both ends are midday, so the day count is exact across a daylight saving edge
-qDays  = int(math.round((qNoonEnd - qNoon) / MS_DAY))
-dayInQ = math.max(0, math.min(qDays - 1, int(math.round((tdayMid - qNoon) / MS_DAY))))
+// and back: how many days on from a weekday to weekday number k, w being that
+// first day's own weekday, 0 .. 4
+wdOffset(int w, int k) =>
+    int(math.floor((w + k) / 5)) * 7 + (w + k) % 5 - w
 
-qW0 = dowMon(qNoon)                      // weekday the quarter opens on
+// days from 1 January to the year's first trading day, 1 January being shut
+yOpenOf(int t) =>
+    int w = dowMon(t)
+    w == 4 ? 3 : w == 5 ? 2 : 1
 
-// THE SPLIT: the quarter's own days, divided in four. 92 days is 23 to a cell,
-// and a cut that lands on a weekend steps to the nearest trading day, a
-// Saturday back to the Friday and a Sunday on to the Monday, because a cell has
-// to open on a candle. That is the whole rule, and it is not a fixed number of
-// days: Q3 2026 comes out 1/7, 24/7, 17/8, 8/9 and Q4 2026 comes out 1/10,
-// 23/10, 16/11, 9/12 - 21 to 24 days a cell, 15 to 17 candles.
-//
-// Counting market days instead, 66 of them to a quarter, divided either flat or
-// in proportion, pulled the middle cuts a day or two off these: it is the days
-// of the quarter that are divided, not its candles.
-snapWd(int d) =>
-    int w = (qW0 + d) % 7                // 0 Monday .. 6 Sunday
-    w == 5 ? d - 1 : w == 6 ? d + 1 : d
+yNoon  = timestamp(gridTZ, yr, 1, 1, 12, 0, 0)
+dayInY = int(math.round((tdayMid - yNoon) / MS_DAY))
 
-s1 = snapWd(int(math.round(qDays / 4.0)))
-s2 = snapWd(int(math.round(qDays / 2.0)))
-s3 = snapWd(int(math.round(qDays * 3 / 4.0)))
+// before the year has opened - 1 January, and the weekend that can follow it -
+// the bar still belongs to the span the year before opened
+spanYr = dayInY < yOpenOf(yNoon) ? yr - 1 : yr
+janS   = timestamp(gridTZ, spanYr, 1, 1, 12, 0, 0)
+janE   = timestamp(gridTZ, spanYr + 1, 1, 1, 12, 0, 0)
+calDays = int(math.round((janE - janS) / MS_DAY))
 
-iSplit = en3 ? (dayInQ < s1 ? 1 : dayInQ < s2 ? 2 : dayInQ < s3 ? 3 : 4) : na
-sDay1  = dayInQ < s1 ? s1 : dayInQ < s2 ? s2 : dayInQ < s3 ? s3 : qDays
+yA  = yOpenOf(janS)                      // the year opens this many days into January
+yB  = calDays + yOpenOf(janE)            // and closes where the next one opens
+dIn = int(math.round((tdayMid - janS) / MS_DAY))
+w0A = dowMon(janS + yA * MS_DAY)         // the weekday it opens on, 0 .. 4
+
+wYear = wdCount(w0A, yB - yA)            // weekdays in the whole year
+qPer  = int(math.round(wYear / 4.0))     // and a quarter of them
+wNow  = wdCount(w0A, math.max(0, dIn - yA))
+
+iQtr = wNow < qPer ? 1 : wNow < qPer * 2 ? 2 : wNow < qPer * 3 ? 3 : 4
+qS   = (iQtr - 1) * qPer                 // where this quarter starts, in weekdays
+qE   = iQtr < 4 ? iQtr * qPer : wYear    // and where it hands over
+
+// the split: the quarter's own weekdays, the handover day counted in, in four
+wQtr = qE - qS + 1
+sPer = int(math.round(wQtr / 4.0))
+kIn  = wNow - qS
+iSp  = kIn < sPer ? 1 : kIn < sPer * 2 ? 2 : kIn < sPer * 3 ? 3 : 4
+iSplit = en3 ? iSp : na
+sE   = iSp < 4 ? qS + iSp * sPer : qE
+
+// the four year cycle runs 2023 2024 2025 2026: 2023 opens it, 2026 closes it.
+// 2023 is 3 mod 4, so (yr + 1) mod 4 numbers it without ever going negative
+iCyc4  = int((spanYr + 1) % 4) + 1
+cycBeg = timestamp(gridTZ, spanYr, 1, 1, 0, 0)
+
+// the handover days, back out of the weekday count and into days of January
+qEndDay = iQtr == 4 ? yB : yA + wdOffset(w0A, qE)
+sEndDay = iSp  == 4 ? qEndDay : yA + wdOffset(w0A, sE)
 
 // A bar's time is drawn at the middle of its candle, so half a bar back puts an
 // edge in the gap between two candles rather than through the middle of one.
@@ -328,20 +365,20 @@ slowLeft = time - halfBar
 // replaced by the next cell's left edge, in `cell` below, so a finished cell
 // ends exactly where its successor begins, on a real bar, with no hole in
 // between and nothing of the next month inside it.
-cycRight  = dayStart + (yDays - dayInY) * MS_DAY - halfBar
-qtrRight  = dayStart + (qDays - dayInQ) * MS_DAY - halfBar
-splitRight = dayStart + (sDay1 - dayInQ) * MS_DAY - halfBar
+cycRight  = dayStart + (yB - dIn) * MS_DAY - halfBar
+qtrRight  = dayStart + (qEndDay - dIn) * MS_DAY - halfBar
+splitRight = dayStart + (sEndDay - dIn) * MS_DAY - halfBar
 
 // a cell is new when its own number changes, not when its left edge moves, so
 // the edges above are read once, on the bar that opens it
-cycId   = yr
-qtrId   = yr * 10 + iQtr
-splitId = yr * 100 + iQtr * 10 + nz(iSplit, 0)
+cycId   = spanYr
+qtrId   = spanYr * 10 + iQtr
+splitId = spanYr * 100 + iQtr * 10 + iSp
 
 // how far back the slow rows keep their cells: inside the current four year
 // cycle from the weekly chart up, where the whole cycle is the point, and inside
 // the current year below it, where older years are only clutter
-cycFirst = timestamp(gridTZ, yr - (iCyc4 - 1), 1, 1, 0, 0)
+cycFirst = timestamp(gridTZ, spanYr - (iCyc4 - 1), 1, 1, 0, 0)
 // two days of slack, because a cell opens on the evening before its first date
 slowTrim = (tfs >= 604800 ? cycFirst : cycBeg) - 2 * MS_DAY
 
@@ -416,7 +453,7 @@ nameOf(int lvl, int yrV, int qV, int spV, int wkV, int rawV, int sessV) =>
         => ""
 
 nameFor(int lvl) =>
-    nameOf(lvl, yr, iQtr, iSplit, iWeek, rawDay, iSess)
+    nameOf(lvl, spanYr, iQtr, iSplit, iWeek, rawDay, iSess)
 
 // names reach down to this level, numbers take over below it
 namedDepth = nameRows == "Off" ? 0 : nameRows == "Down to the day" ? 5 : 6
@@ -538,7 +575,7 @@ var box[] fx = array.new_box()
 aheadOne(int lvl, int beg, int len, int probe) =>
     [c, q, w, d, raw, sn, n90, n225, n562] = idxAt(beg + probe)
     array.set(idx, 0, c)
-    array.set(idx, 1, q)
+    array.set(idx, 1, iQtr)      // the quarter is the year's own, not the month's
     array.set(idx, 2, na)
     array.set(idx, 3, w)
     array.set(idx, 4, d)
@@ -547,7 +584,7 @@ aheadOne(int lvl, int beg, int len, int probe) =>
     array.set(idx, 7, n225)
     array.set(idx, 8, n562)
     int top = lvl == 4 ? y4 : lvl == 5 ? y5 : lvl == 6 ? y6 : lvl == 7 ? y7 : lvl == 8 ? y8 : y9
-    array.push(fx, box.new(left = beg, top = top, right = beg + len, bottom = top - 1, xloc = xloc.bar_time, bgcolor = fillFor(lvl, array.get(idx, lvl - 1)), border_color = borderCol, border_width = borderW, border_style = line.style_dashed, text = cellTextOf(lvl, nameOf(lvl, 0, q, na, w, raw, sn)), text_color = textCol, text_size = textSizeIn))
+    array.push(fx, box.new(left = beg, top = top, right = beg + len, bottom = top - 1, xloc = xloc.bar_time, bgcolor = fillFor(lvl, array.get(idx, lvl - 1)), border_color = borderCol, border_width = borderW, border_style = line.style_dashed, text = cellTextOf(lvl, nameOf(lvl, 0, iQtr, na, w, raw, sn)), text_color = textCol, text_size = textSizeIn))
 
 if barstate.islast
     while array.size(fx) > 0
