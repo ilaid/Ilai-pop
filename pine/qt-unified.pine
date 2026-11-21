@@ -46,8 +46,8 @@ viMergeTicks = 1
 maxGaps      = input.int(60, "מקסימום גאפים במיכל", minval = 5, maxval = 200, group = grpFill)
 
 // QS — חלונות זמן חמים, על שבירות SSMT/HSSMT (כמו ב-SSMT + HSSMT)
-grpQS   = "רצפי QS (SSMT)"
-qsMode  = input.string("סמן ★ בשבירה ב-QS", "QS — חלונות זמן חמים", options = ["סמן ★ בשבירה ב-QS", "רק שבירות ב-QS", "כבוי"], group = grpQS, tooltip = "פעיל ב-1m עד 1D, על שבירות SSMT/HSSMT.\n★ = הנר שעשה את השבירה נמצא בחלון QS על נכס הגרף. ☆ = על נכס אחר.\nעל הגרף — שורה עליונה בתווית: מאיזה רצף לאיזה (למשל 321-333 ★).\nרק שבירות ב-QS = SSMT שלא ב-QS מוסתרת, גם על הגרף וגם בצד.")
+grpQS   = "רצפי QS"
+qsMode  = input.string("סמן ★ בשבירה ב-QS", "QS — חלונות זמן חמים", options = ["סמן ★ בשבירה ב-QS", "רק שבירות ב-QS", "כבוי"], group = grpQS, tooltip = "פעיל ב-1m עד 1D.\nעל הגרף — מספר ה-QS ליד כל שבירה שנוצרה בחלון QS: SSMT/HSSMT (321-333 · 333), Fill (F2 NQ · 333), PSP (המספר מעל/מתחת לסימון). Fill — נר העלייה האחרונה, PSP — נר הסווינג.\nבטבלה — ★ ב-SSMT/HSSMT בלבד (★ = על נכס הגרף, ☆ = על נכס אחר).\nרק שבירות ב-QS = SSMT שלא ב-QS מוסתרת, גם על הגרף וגם בצד.")
 hotList = input.string("111,114,141,144,411,414,441,444,222,333", "רצפים חמים", group = grpQS, tooltip = "מופרדים בפסיקים. שלוש רמות רצופות שיוצרות אחד מהרצפים = חלון QS.")
 
 grpPsp = "PSP"
@@ -1531,7 +1531,15 @@ f_qsAsset(Acc acc, int sc, bool isBull, int typ, int refI, int dur) =>
     [cR, cT, hot, pat]
 
 f_clsMs(int c) => c == 1 ? 60000 : c == 2 ? 300000 : c == 3 ? 900000 : c == 4 ? 3600000 : c == 5 ? 14400000 : 86400000
-f_starTxt(string sym, string pat, string chT) => pat == "" or pat == chT ? sym : sym + pat
+// מספר ה-QS של נר במסגרת cls — "" כשהנר לא בחלון QS (או ש-QS כבוי במסגרת).
+// לגרף בלבד: Fill — נר העלייה האחרונה, PSP — נר הסווינג.
+f_qsNum(int cls, int t) =>
+    string r = ""
+    if qsUseCls(cls) and t > 0
+        [h, q] = f_qsAt(cls + 1, t, f_clsMs(cls))
+        if h
+            r := q
+    r
 
 // QS של משבצת SSMT k במנוע: [השורה העליונה לתווית, ★/☆, ב-QS?]
 f_ssQS(Eng e, int k) =>
@@ -1571,10 +1579,11 @@ f_ssQS(Eng e, int k) =>
                     xT  := tt
                     xP  := pt
         star := oH ? "★" : xOn ? "☆" : ""
-        string sTxt = oH ? f_starTxt("★", oP, oT) : xOn ? f_starTxt("☆", xP, oT != "" ? oT : xT) : ""
         string chR  = oR != "" ? oR : xR
         string chT  = oT != "" ? oT : xT
-        top := chR != "" ? chR + "-" + chT + (sTxt != "" ? " " + sTxt : "") : ""
+        // על הגרף — מספר ה-QS במקום ★/☆ (כמו ב-Fill וב-PSP)
+        string qN = oH ? oP : xOn ? xP : ""
+        top := chR != "" ? chR + "-" + chT + (qN != "" ? " · " + qN : "") : ""
         inQ := oH or xOn
     [top, star, inQ]
 
@@ -1766,7 +1775,8 @@ f_drawFill(Eng e, Cand c, bool dim) =>
     Gap    g   = array.get(e.gaps, c.ix)
     color  col = dim ? color.new(f_colC(c), 55) : f_colC(c)
     bool   up  = g.dir == 1
-    string txt = "F" + str.tostring(f_fillLive(e, g)) + " " + g.fLead
+    string qN  = f_qsNum(e.cls, g.fTime)
+    string txt = "F" + str.tostring(f_fillLive(e, g)) + " " + g.fLead + (qN != "" ? " · " + qN : "")
     [gb, gt] = f_fillBounds(g)
     if showBox and not na(gt)
         array.push(dBx, box.new(left = g.originT, top = gt, right = time, bottom = gb, xloc = xloc.bar_time, border_color = color.new(col, 45), border_width = 1, bgcolor = color.new(col, boxTransp), text = txt, text_color = col, text_size = lblSize, text_halign = text.align_right, text_valign = text.align_center))
@@ -1886,7 +1896,10 @@ f_drawPsp(Eng e, PBrk b, color col0) =>
     color col   = col0
     string tip = "PSP " + (bear ? "▼ " : "▲ ") + f_holds(b) + " · " + str.format_time(e.cls >= 6 ? b.born + 21600000 : b.born, e.cls >= 6 ? "dd.MM" : "HH:mm", TZ)
     float gap  = nz(atrCh) * pspGap / 100.0
-    string gl  = useH ? hl : gl0
+    string qN  = f_qsNum(e.cls, b.born)
+    string gl1 = useH ? hl : gl0
+    // מספר ה-QS — בצד הרחוק מהנר (מעל ב-▼, מתחת ב-▲)
+    string gl  = qN == "" ? gl1 : bear ? qN + "\n" + gl1 : gl1 + "\n" + qN
     if na(b.mkY)
         array.push(dLb, label.new(b.born, close, gl, xloc = xloc.bar_time, yloc = bear ? yloc.abovebar : yloc.belowbar, style = label.style_none, textcolor = col, size = pspSize, tooltip = tip))
     else
