@@ -93,6 +93,8 @@ offFade    = input.int(60, "שקיפות ממתינה (✗)", minval = 0, maxval
 cornerTbl  = input.string("טבלה", "סידור הצד", options = ["טבלה", "שורה"], group = grpCor, tooltip = "טבלה: מסגרת · כיוון · שלישייה · זוג 3·4 · נגדיות · PCP — בתאים עם רקע, שורה לכל מסגרת.\nשורה: הסידור הקודם.")
 tblSz      = input.string("small", "גודל הטבלה (טקסט)", options = ["tiny", "small", "normal", "large"], group = grpCor, tooltip = "tiny = הכי קטן ש-TradingView מאפשר.")
 tblHdr     = input.bool(true, "טבלה — שורת כותרות", group = grpCor)
+tblOppAll  = input.bool(true, "טבלה — כל הנגדיות", group = grpCor, tooltip = "דלוק = כל הנגדיות החיות, מקובצות לפי כיוון (▼F1 F2 P · ▲S).\nכבוי = רק האחרונה מכל סוג.")
+tblOppSz   = input.string("tiny", "טבלה — גודל הכתב בנגדיות", options = ["tiny", "small", "normal", "large"], group = grpCor, tooltip = "רק עמודת הנגדיות. tiny = הכי קטן ש-TradingView מאפשר — חוסך רוחב.")
 tblOppT    = input.bool(true, "טבלה — שעות בעמודת הנגדיות", group = grpCor, tooltip = "כבוי = בנגדיות רק הסוג והחץ (▼F2 · ▼P) — הטבלה צרה יותר.")
 cornerLift = input.int(2, "הרם את השורות (שורות ריקות)", minval = 0, maxval = 8, group = grpCor, tooltip = "שורות ריקות בין השורות לקצה המסך — כדי שלא ייפלו על אינדיקטור אחר באותה פינה.")
 
@@ -2103,21 +2105,49 @@ if barstate.islast
                                     array.push(seen, ky)
                                     string it = f_dispTx(c, cs) + (ix == li and cornerWhen ? f_whenTx(c, cls) : cornerAllT ? " " + f_tmTx(c, cls) : "")
                                     tA := tA + (tA == "" ? "" : " · ") + it
-                        // הנגדיות: לכל סוג — האחרונה שלא פעילה (עם החץ שלה)
-                        string oX = ""
-                        for ty = 0 to 2
-                            int bI = -1
-                            if array.size(cs) > 0
-                                for i = 0 to array.size(cs) - 1
-                                    Cand c = array.get(cs, i)
-                                    if c.typ == ty and not f_act(c, cls, eD)
-                                        if bI < 0
-                                            bI := i
-                                        else if f_newer(c, array.get(cs, bI))
-                                            bI := i
-                            if bI >= 0
-                                Cand c = array.get(cs, bI)
-                                oX := oX + (oX == "" ? "" : " · ") + (c.dir == 1 ? "▲" : "▼") + f_dispTx(c, cs) + (cornerAllT and tblOppT ? " " + f_tmTx(c, cls) : "")
+                        // הנגדיות: כל החיות שלא פעילות (או רק האחרונה מכל סוג), מהחדשה לישנה,
+                        // מקובצות לפי כיוון — החץ נכתב פעם אחת לכל קבוצה.
+                        array<int> oI = array.new_int()
+                        if array.size(cs) > 0
+                            for i = 0 to array.size(cs) - 1
+                                Cand c = array.get(cs, i)
+                                if not f_act(c, cls, eD)
+                                    array.push(oI, i)
+                        // מיון: החדשה ראשונה
+                        int oN = array.size(oI)
+                        if oN > 1
+                            for x = 0 to oN - 2
+                                int bx = x
+                                for y = x + 1 to oN - 1
+                                    if f_newer(array.get(cs, array.get(oI, y)), array.get(cs, array.get(oI, bx)))
+                                        bx := y
+                                if bx != x
+                                    int tmp = array.get(oI, x)
+                                    array.set(oI, x, array.get(oI, bx))
+                                    array.set(oI, bx, tmp)
+                        array<string> oSeen = array.new_string()
+                        array<int>    oTy   = array.new_int()
+                        string oDn = ""
+                        string oUp = ""
+                        int    oFd = 0
+                        if oN > 0
+                            for n = 0 to oN - 1
+                                Cand c = array.get(cs, array.get(oI, n))
+                                string ky = f_twinKey(c)
+                                bool  dup = array.includes(oSeen, ky) or (not tblOppAll and array.includes(oTy, c.typ))
+                                if not dup
+                                    array.push(oSeen, ky)
+                                    array.push(oTy, c.typ)
+                                    if oFd == 0
+                                        oFd := c.dir
+                                    string it = f_dispTx(c, cs) + (cornerAllT and tblOppT ? " " + f_tmTx(c, cls) : "")
+                                    if c.dir == 1
+                                        oUp := oUp + (oUp == "" ? "" : " ") + it
+                                    else
+                                        oDn := oDn + (oDn == "" ? "" : " ") + it
+                        string gUp = oUp == "" ? "" : "▲" + oUp
+                        string gDn = oDn == "" ? "" : "▼" + oDn
+                        string oX  = oFd == 1 ? gUp + (gUp != "" and gDn != "" ? " · " : "") + gDn : gDn + (gUp != "" and gDn != "" ? " · " : "") + gUp
                         color dC = eD == 1 ? colBull : eD == -1 ? colBear : color.gray
                         // כיוון, ו(המסגרת שממנה בא — כשלא מהמסגרת עצמה)
                         string dTx = eD == 0 ? "—" : (eD == 1 ? "▲" : "▼") + (eS != cls ? " (" + f_clsName(eS) + ")" : "")
@@ -2131,7 +2161,7 @@ if barstate.islast
                         table.cell(cTb2, 2, rr, aX, text_color = dC, text_size = tblSz, bgcolor = cBg)
                         // נר שעוד לא הוכרע (PCP) — בעמודה משלו, לא עם השבירות
                         table.cell(cTb2, 4, rr, pdT or pdP ? f_tmStr(e.pndT, cls) : "", text_color = pdT ? colPend : colPair, text_size = tblSz, bgcolor = cBg)
-                        table.cell(cTb2, 3, rr, oX, text_color = color.new(chart.fg_color, offFade), text_size = tblSz, bgcolor = cBg)
+                        table.cell(cTb2, 3, rr, oX, text_color = color.new(chart.fg_color, offFade), text_size = tblOppSz, bgcolor = cBg)
                         row += 1
 
 if barstate.islast
