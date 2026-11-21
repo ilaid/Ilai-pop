@@ -79,15 +79,17 @@ comes in, so no chart stacks more than four rows.
 - The four year cycle is 2023, 2024, 2025, 2026, written `(year + 1) % 4 + 1`.
 - A week belongs to the month holding its **Tuesday**; a week whose Tuesday and
   Thursday fall in different months is dead and carries no number.
-- The quarter split counts the quarter's **candles**, the day it hands over
-  counted in, and divides by four, the leftover days going to the cells at the
-  **front** (so a quarter never runs 16 then 17). **Candles, not weekdays**:
-  four days a year print none at all — New Year's Day, Good Friday,
-  Independence Day and Christmas — and counting those in leaves every cut
-  after them a day late. Every other holiday is a shortened session and still
-  leaves a candle. 2026 reads:
-  **Q1** 65 candles, 5.1 · 28.1 · 19.2 · 13.3 — **Q2** 65, 6.4 · 29.4 · 21.5 ·
-  12.6 — **Q3** 66, 6.7 · 29.7 · 21.8 · 14.9 — **Q4** 64, 5.10 · 27.10 · 18.11
+- The quarter split counts the quarter's **own candles** — the day it hands
+  over is the next quarter's **first** candle, not this one's last, so it is
+  **not** counted in — and divides by four, the leftover days going to the
+  cells at the **front** (so a quarter never runs 16 then 17). Counting the
+  handover day in pushed every cut a day on; do not put it back. **Candles, not
+  weekdays**: four days a year print none at all — New Year's Day, Good Friday,
+  Independence Day and Christmas — and counting those in leaves every cut after
+  them a day late. Every other holiday is a shortened session and still leaves
+  a candle. 2026 reads:
+  **Q1** 64 candles, 5.1 · 27.1 · 18.2 · 12.3 — **Q2** 64, 6.4 · 28.4 · 20.5 ·
+  11.6 — **Q3** 65, 6.7 · 29.7 · 20.8 · 11.9 — **Q4** 63, 5.10 · 27.10 · 18.11
   · 10.12. The quarter dates are the model's own, given by its owner — check
   any change against them before committing it.
 - Friday, a dead week and the weekend carry no number: colourless cell, and a
