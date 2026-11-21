@@ -26,41 +26,38 @@ indicator("Sav FX - Cycles, True Opens & Devil Marks", shorttitle="Sav FX", over
 //  holds its place with a mark, so a row reads the same levels in the same order
 //  whatever the day.
 //
-//  THE YEAR, ITS QUARTERS AND THE SPLIT are the year as the chart has it. 1
-//  January is never a trading day, so the year opens on the first weekday
-//  after it and runs until the next year opens: 2 January 2026 to 4 January
-//  2027. The quarters then fall on that same day of the month three months on
-//  each time - 2 January, 2 April, 2 July, 2 October - and the last of them
-//  runs until the year closes. A quarter that would open on a weekend waits
-//  for the Monday.
+//  THE YEAR AND ITS QUARTERS are read off the WEEK. A quarter opens with the
+//  first week that begins inside it, so its first day is the FIRST MONDAY of
+//  January, April, July or October, and the fourth runs on until the next year
+//  opens. 2026 gives 5 January, 6 April, 6 July, 5 October, and closes on 4
+//  January 2027 - which is how the weekly chart draws it, each quarter a whole
+//  number of weekly candles with nothing of the quarter before inside it.
 //
-//  The split divides the quarter's CANDLES, the day it hands over counted in,
-//  by four, and the leftover days go to the cells at the front so a quarter
-//  never runs 16 and then 17. Candles, not weekdays: four days a year print no
-//  candle at all - New Year's Day, Good Friday, Independence Day and Christmas
-//  - and counting them in would leave every cut after them a day early. Q1
-//  2026 holds 65 candles and reads 2 January, 27 January, 18 February, 12
-//  March; Q2 also 65, since Good Friday falls inside it, and reads 2 April, 28
-//  April, 20 May, 11 June; Q3 holds 66 and reads 2 July, 28 July, 20 August,
-//  11 September; Q4 holds 65 and reads 2 October, 27 October, 18 November, 10
-//  December.
+//  THE SPLIT then divides that quarter's CANDLES, the day it hands over
+//  counted in, by four, and the leftover days go to the cells at the front so
+//  a quarter never runs 16 and then 17. Candles, not weekdays: four days a
+//  year print no candle at all - New Year's Day, Good Friday, Independence Day
+//  and Christmas - and counting them in would leave every cut after them a day
+//  early. 2026 reads:
+//    Q1  65 candles   5 January, 28 January, 19 February, 13 March
+//    Q2  65 candles   6 April, 29 April, 21 May, 12 June
+//    Q3  66 candles   6 July, 29 July, 21 August, 14 September
+//    Q4  64 candles   5 October, 27 October, 18 November, 10 December
 //
-//  A turn day belongs to the quarter it opens, never to the one it closes, and
-//  a cell always opens on its first real candle. Two of 2026's turns are shut -
-//  3 April is Good Friday and 3 July is the Fourth - so on the chart the second
-//  quarter runs from the candle of 6 April to the candle of 6 July, which is
-//  what it looks like without the holiday calendar Pine is never given.
+//  A turn day belongs to the quarter it opens, never to the one it closes: 6
+//  April is the first day of Q2, not the last of Q1. Every turn is a Monday, so
+//  none of them can fall on a weekend, and a cell always opens on its own first
+//  real candle anyway.
 //
 //  Cell edges sit on real bars, never on a computed calendar time. A cell opens
 //  half a bar before its own first candle, and it is closed where the next cell
 //  opens, so the two share one coordinate and the rows meet exactly. This is
-//  what keeps the quarter split honest: Q4 is 1 October to 31 December and its
-//  four cells divide those three months by market days, and because the last of
-//  them is closed on the quarter's own last candle it holds nothing of January,
-//  even though 1 January 2027 is a Friday and a holiday and the next candle is
-//  Monday the 4th. A computed edge would have floated three days inside that
-//  gap, where TradingView places it by the average bar spacing and it drifts on
-//  to the wrong candles.
+//  what keeps the quarter split honest: Q4 2026 runs to the candle before 4
+//  January 2027 and its four cells divide those candles, so the last of them
+//  holds nothing of the new year even though 1 January 2027 is a Friday and a
+//  holiday and the next candle is Monday the 4th. A computed edge would have
+//  floated three days inside that gap, where TradingView places it by the
+//  average bar spacing and it drifts on to the wrong candles.
 //
 //  The slow rows read as names and the fast ones as numbers, so the day row says
 //  Wed where the 22.5 min row says 1-3-4: on a high timeframe those cells are far
@@ -131,8 +128,8 @@ shiftMs = int(shiftH * 3600000)
 
 g_cyc = "Time Cycles"
 showCyc4   = input.bool(true, "Quadrennial Cycles", group = g_cyc, tooltip = "One cell per year: which year of the four year cycle it is. 2023 opens the cycle and 2026 closes it, so 2023 is year 1 and 2026 is year 4.")
-showQtYear = input.bool(true, "Yearly Cycles",      group = g_cyc, tooltip = "One cell per quarter: which quarter of the year it is. The year opens on the first weekday after 1 January, which is never a trading day, and the quarters fall on that same day of the month three months on each time: 2 January 2026 gives 2 January, 2 April, 2 July and 2 October, and the fourth runs on until the next year opens. One that would open on a weekend waits for the Monday.")
-showSplit  = input.bool(true, "Quarter Split",      group = g_cyc, tooltip = "One cell per quarter of a quarter, on the daily chart only. The quarter's candles are counted, the day it hands over counted in, and divided by four, the leftover days going to the cells at the front. The four days that print no candle - New Year's Day, Good Friday, Independence Day and Christmas - are left out of the count. Q1 2026 holds 65 candles and reads 2 January, 27 January, 18 February, 12 March; Q2 reads 2 April, 28 April, 20 May, 11 June; Q3 2 July, 28 July, 20 August, 11 September; Q4 2 October, 27 October, 18 November, 10 December.")
+showQtYear = input.bool(true, "Yearly Cycles",      group = g_cyc, tooltip = "One cell per quarter: which quarter of the year it is. A quarter opens with the first week that begins inside it, the way the weekly chart draws it, so its first day is the first Monday of January, April, July or October: 2026 gives 5 January, 6 April, 6 July and 5 October, and the fourth runs on until the next year opens, on 4 January 2027.")
+showSplit  = input.bool(true, "Quarter Split",      group = g_cyc, tooltip = "One cell per quarter of a quarter, on the daily chart only. The quarter's candles are counted, the day it hands over counted in, and divided by four, the leftover days going to the cells at the front. The four days that print no candle - New Year's Day, Good Friday, Independence Day and Christmas - are left out of the count. 2026 reads: Q1 65 candles, 5 January, 28 January, 19 February, 13 March; Q2 65, 6 April, 29 April, 21 May, 12 June; Q3 66, 6 July, 29 July, 21 August, 14 September; Q4 64, 5 October, 27 October, 18 November, 10 December.")
 showWeekly = input.bool(true, "Weekly Cycles",      group = g_cyc, tooltip = "One cell per week: which week of the month it is. A week belongs to the month holding its Tuesday.")
 showDaily  = input.bool(true, "Daily Cycles",       group = g_cyc, tooltip = "One cell per trading day: which day of the week it is, Mon 1 .. Thu 4. Friday carries no number.")
 show6H     = input.bool(true, "6 Hour Cycles",      group = g_cyc, tooltip = "One cell per session: Asia 1, London 2, AM 3, PM 4.")
@@ -271,21 +268,21 @@ iWeek = dead ? na : int(math.floor((dayofmonth(tueTs, gridTZ) - 1) / 7)) + 1
 
 // ───────── the year on the chart, its quarters, and the quarter split ────────
 //
-// The ladder's year is the year AS THE CHART HAS IT. 1 January is never a
-// trading day, so the year opens on the first weekday after it and runs until
-// the next year opens: 2 January 2026 to 4 January 2027. That span is divided
-// in four to give the quarters, and each quarter in four again to give the
-// split, counted in WEEKDAYS rather than calendar days.
+// The quarters are read off the WEEK, the way the weekly chart draws them: a
+// quarter opens with the first week that BEGINS inside it, so its first day is
+// the first Monday of January, April, July or October, and the fourth runs on
+// until the next year opens. 2026 gives 5 January, 6 April, 6 July and 5
+// October, and closes on 4 January 2027. Each quarter is then a whole number
+// of weekly candles, with no part of the quarter before inside it.
 //
-// The quarters fall on the day of the month the year opened on, three months
-// on each time - 2 January 2026 gives 2 January, 2 April, 2 July, 2 October -
-// and the fourth runs on until the next year opens. A quarter that would open
-// on a weekend waits for the Monday.
+// The year follows from the same rule: it opens on the first Monday of January
+// and runs until the next year's first Monday, so the first days of January
+// still belong to the span that opened the year before.
 //
-// The split then divides the quarter's weekdays, the day it hands over counted
-// in, by four, rounding UP: Q1 2026 holds 65 of them, so the cuts fall on the
-// 17th, the 33rd and the 49th, and the quarter reads 2 January, 27 January,
-// 18 February, 12 March, handing over on 2 April.
+// The split then divides the quarter's CANDLES, the day it hands over counted
+// in, by four. Q1 2026 holds 65 of them, so the cuts fall on the 17th, the
+// 33rd and the 49th and the quarter reads 5 January, 28 January, 19 February,
+// 13 March, handing over on 6 April.
 //
 // The turn day belongs to the quarter it opens, never to the one it closes.
 mth = month(tday, gridTZ)
@@ -311,37 +308,31 @@ wdCount(int w0, int n) =>
 wdOffset(int w, int k) =>
     int(math.floor((w + k) / 5)) * 7 + (w + k) % 5 - w
 
-// days from 1 January to the year's first trading day, 1 January being shut
-yOpenOf(int t) =>
-    int w = dowMon(t)
-    w == 4 ? 3 : w == 5 ? 2 : 1
+// days from the 1st of a month to the first Monday on or after it, which is
+// where the week that opens the quarter begins
+monOff(int t) =>
+    (7 - dowMon(t)) % 7
 
 yNoon  = timestamp(gridTZ, yr, 1, 1, 12, 0, 0)
 dayInY = int(math.round((tdayMid - yNoon) / MS_DAY))
 
 // before the year has opened - 1 January, and the weekend that can follow it -
 // the bar still belongs to the span the year before opened
-spanYr = dayInY < yOpenOf(yNoon) ? yr - 1 : yr
+spanYr = dayInY < monOff(yNoon) ? yr - 1 : yr
 janS   = timestamp(gridTZ, spanYr, 1, 1, 12, 0, 0)
 janE   = timestamp(gridTZ, spanYr + 1, 1, 1, 12, 0, 0)
 calDays = int(math.round((janE - janS) / MS_DAY))
 
-yA  = yOpenOf(janS)                      // the year opens this many days into January
-yB  = calDays + yOpenOf(janE)            // and closes where the next one opens
+yB  = calDays + monOff(janE)             // the year closes where the next one opens
 dIn = int(math.round((tdayMid - janS) / MS_DAY))
 
-// days to wait for a weekday: a Saturday waits two, a Sunday one
-nextWd(int t) =>
-    int w = dowMon(t)
-    w == 5 ? 2 : w == 6 ? 1 : 0
-
-// THE QUARTERS: the day of the month the year opened on, three months on each
-// time, and off a weekend the same way. 2026 opens on 2 January, so they fall
-// on 2 January, 2 April, 2 July and 2 October, and the fourth runs on until
-// the next year opens.
+// THE QUARTERS: the FIRST MONDAY of January, April, July and October - the
+// week that opens the quarter, which is how the weekly chart reads it - and
+// the fourth runs on until the next year opens. 2026 gives 5 January, 6 April,
+// 6 July, 5 October, and closes on 4 January 2027.
 qTsOf(int i) =>
-    int ts = timestamp(gridTZ, spanYr, 3 * (i - 1) + 1, 1 + yA, 12, 0, 0)
-    ts + nextWd(ts) * MS_DAY
+    int ts = timestamp(gridTZ, spanYr, 3 * (i - 1) + 1, 1, 12, 0, 0)
+    ts + monOff(ts) * MS_DAY
 
 qDayOf(int i) =>
     int(math.round((qTsOf(i) - janS) / MS_DAY))
@@ -359,10 +350,10 @@ qEndDay = iQtr == 1 ? qS2 : iQtr == 2 ? qS3 : iQtr == 3 ? qS4 : yB
 // Day and Christmas. Every other holiday on the calendar is a shortened
 // session on these futures and still leaves a candle, and Pine is handed no
 // holiday calendar, so these four are worked out here. They matter because the
-// split counts CANDLES: Q2 2026 opens on 2 April and Good Friday is the 3rd,
-// so a cell counted in weekdays would be a candle short and every cut after it
-// would sit a day early. The same thing happens in Q3, where the Fourth falls
-// on the Saturday and the market shuts on Friday the 3rd.
+// split counts CANDLES: Good Friday falls inside Q2 2026 and the Fourth,
+// shifted to Friday the 3rd because it lands on the Saturday, inside Q2 as
+// well, so a cell counted in weekdays would be a candle long and every cut
+// after it would sit a day late.
 easterDay(int y) =>
     int a = y % 19
     int b = int(y / 100)
@@ -397,9 +388,10 @@ shutsIn(int fromD, int uptoD) =>
 // THE SPLIT: the quarter's CANDLES, the day it hands over counted in, divided
 // by four. The leftover days go to the cells at the front, so a quarter never
 // runs 16 and then 17. Q1 2026 holds 65 candles, which is 17, 16, 16, 16, so
-// it reads 2 January, 27 January, 18 February, 12 March and hands over on 2
-// April. Q2 holds 65 as well - 66 weekdays less Good Friday - and reads 2
-// April, 28 April, 20 May, 11 June.
+// it reads 5 January, 28 January, 19 February, 13 March and hands over on 6
+// April. Q4 holds 64 - 66 weekdays less Christmas and New Year's Day - which
+// is 16 all four times, and reads 5 October, 27 October, 18 November, 10
+// December.
 w0q  = dowMon(janS + qStart * MS_DAY)
 wQtr = wdCount(w0q, qEndDay - qStart + 1) - shutsIn(qStart, qEndDay + 1)
 cBas = int(math.floor(wQtr / 4))
