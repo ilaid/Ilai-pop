@@ -257,6 +257,16 @@ iDay   = rawDay <= 4 ? rawDay : na       // only Mon..Thu are quarters of the we
 
 weekStart = dayStart - (rawDay - 1) * MS_DAY
 
+// EVERY QUARTER BOUNDARY IS A MONDAY, and the bar that opens a week can come
+// out dated to the Sunday: a symbol whose week opens before 18:00 New York -
+// the FX week opens at 17:00 - gives that bar a time of day earlier than the
+// 18:00 open, so the trading day it lands on is the Sunday rather than the
+// Monday. Compared against a Monday boundary that threw the whole week into
+// the quarter before and started the next quarter a WEEK LATE. So a date that
+// lands on the weekend is pushed on to its Monday before it is compared with a
+// boundary. On a daily chart every date is already a weekday and this is 0.
+wkSnap = rawDay == 6 ? 2 : rawDay == 7 ? 1 : 0
+
 // midday of the trading date, so adding whole days cannot slip across a DST edge
 tdayMid = timestamp(gridTZ, year(tday, gridTZ), month(tday, gridTZ), dayofmonth(tday, gridTZ), 12, 0, 0)
 
@@ -321,13 +331,14 @@ dayInY = int(math.round((tdayMid - yNoon) / MS_DAY))
 
 // before the year has opened - 1 January, and the weekend that can follow it -
 // the bar still belongs to the span the year before opened
-spanYr = dayInY < monOff(yNoon) ? yr - 1 : yr
+spanYr = dayInY + wkSnap < monOff(yNoon) ? yr - 1 : yr
 janS   = timestamp(gridTZ, spanYr, 1, 1, 12, 0, 0)
 janE   = timestamp(gridTZ, spanYr + 1, 1, 1, 12, 0, 0)
 calDays = int(math.round((janE - janS) / MS_DAY))
 
 yB  = calDays + monOff(janE)             // the year closes where the next one opens
 dIn = int(math.round((tdayMid - janS) / MS_DAY))
+qIn = dIn + wkSnap                       // and the same day snapped to its Monday
 
 // THE QUARTERS: the FIRST MONDAY of January, April, July and October - the
 // week that opens the quarter, which is how the weekly chart reads it - and
@@ -345,7 +356,7 @@ qS2 = qDayOf(2)
 qS3 = qDayOf(3)
 qS4 = qDayOf(4)
 
-iQtr    = dIn < qS2 ? 1 : dIn < qS3 ? 2 : dIn < qS4 ? 3 : 4
+iQtr    = qIn < qS2 ? 1 : qIn < qS3 ? 2 : qIn < qS4 ? 3 : 4
 qStart  = iQtr == 1 ? qS1 : iQtr == 2 ? qS2 : iQtr == 3 ? qS3 : qS4
 qEndDay = iQtr == 1 ? qS2 : iQtr == 2 ? qS3 : iQtr == 3 ? qS4 : yB
 
@@ -405,7 +416,7 @@ cut1 = cBas + (cRem > 0 ? 1 : 0)        // c1 .. c5 are the row colours
 cut2 = cBas * 2 + math.min(cRem, 2)
 cut3 = cBas * 3 + math.min(cRem, 3)
 
-kIn = wdCount(w0q, math.max(0, dIn - qStart)) - shutsIn(qStart, dIn)
+kIn = wdCount(w0q, math.max(0, qIn - qStart)) - shutsIn(qStart, qIn)
 iSp = kIn < cut1 ? 1 : kIn < cut2 ? 2 : kIn < cut3 ? 3 : 4
 iSplit = en3 ? iSp : na
 

@@ -72,7 +72,13 @@ comes in, so no chart stacks more than four rows.
   quarter before inside. The year follows the same rule, so the first days of
   January still belong to the span that opened the year before. A turn day
   belongs to the quarter it opens, and every turn is a Monday so none can land
-  on a weekend. The TYO stays on 1 April all the same: it is the QT year, not
+  on a weekend.
+  Because every boundary is a Monday, a bar's date is **snapped forward to its
+  Monday** (`wkSnap`) before it is compared with one. The bar that opens a week
+  comes out dated to the Sunday on any symbol whose week opens before 18:00 New
+  York — the FX week opens at 17:00 — and without the snap that whole week fell
+  into the quarter before and the next quarter started a **week late**. On a
+  daily chart the snap is 0. The TYO stays on 1 April all the same: it is the QT year, not
   this ladder. An earlier attempt put the quarters on the day of the month the
   year opened on (2.1, 2.4, 2.7, 2.10) — that was the daily chart's reading and
   it is wrong; do not go back to it.
