@@ -1,0 +1,257 @@
+//@version=5
+indicator("Sav FX - True Opens + Index Table", shorttitle = "True Opens Table", overlay = true, max_lines_count = 100, max_labels_count = 100)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  TRUE OPENS + INDEX TABLE
+//
+//  The same true opens as "Sav FX - True Opens", drawn on the chart, plus a
+//  table that shows, for each level drawn on this timeframe, whether YM, ES, NQ
+//  and RTY are trading above (▲) or below (▼) THEIR OWN open of that level.
+//
+//  Each index's levels are worked out on its own candles with exactly the same
+//  New York wall clock grid, so "ES above TDO" means ES above ES's TDO.
+//
+//  The "כיוון" column: ▲ all four above, ▼ all four below, — mixed.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+
+// ───────────────────────────────── inputs ─────────────────────────────────────
+g_tz = "Time Base"
+shiftH = input.float(0, "Shift From New York (hours)", minval = -12, maxval = 12, step = 0.25, group = g_tz, tooltip = "Leave this on 0. The trading day opens at 18:00 New York on every day of the year.")
+
+gridTZ  = "America/New_York"
+shiftMs = int(shiftH * 3600000)
+
+g_to = "True Opens"
+toOn      = input.bool(true, "Draw lines", group = g_to)
+toCol     = input.color(color.rgb(75, 86, 186, 65), "Colour", group = g_to)
+toStyleIn = input.string("Dashed", "Line style", options = ["Solid", "Dotted", "Dashed"], inline = "ts", group = g_to)
+toWidth   = input.int(1, "Width", minval = 1, maxval = 5, inline = "ts", group = g_to)
+toExpire  = input.bool(true, "Drop a level when its period ends", group = g_to)
+
+useTNcP = input.bool(true, "TNcP  - 2nd sub-quarter in the quarter", group = g_to)
+useTMcO = input.bool(true, "TMcO - 2nd quarter in the micro",        group = g_to)
+useT90O = input.bool(true, "T90O - 2nd micro in the session",        group = g_to)
+useTDO  = input.bool(true, "TDO   - 2nd session in the day",         group = g_to)
+useTWO  = input.bool(true, "TWO  - 2nd day in the week",             group = g_to)
+useTMO  = input.bool(true, "TMO  - 2nd week in the month",           group = g_to)
+useTYO  = input.bool(true, "TYO   - QT year open, 1 April",          group = g_to)
+useT4YO = input.bool(true, "T4YO - 2nd year in the four year cycle", group = g_to)
+
+toStyle = toStyleIn == "Solid" ? line.style_solid : toStyleIn == "Dotted" ? line.style_dotted : line.style_dashed
+
+g_tb = "Table"
+tbOn    = input.bool(true, "Show table", group = g_tb)
+symYM   = input.symbol("CBOT_MINI:YM1!", "YM",  group = g_tb)
+symES   = input.symbol("CME_MINI:ES1!",  "ES",  group = g_tb)
+symNQ   = input.symbol("CME_MINI:NQ1!",  "NQ",  group = g_tb)
+symRTY  = input.symbol("CME_MINI:RTY1!", "RTY", group = g_tb)
+tbPosIn = input.string("Bottom Right", "Position", options = ["Top Left", "Top Center", "Top Right", "Middle Left", "Middle Right", "Bottom Left", "Bottom Center", "Bottom Right"], group = g_tb)
+tbSizeIn = input.string("Normal", "Text size", options = ["Tiny", "Small", "Normal", "Large"], group = g_tb)
+tbBg    = input.color(color.white,             "Background", inline = "tc", group = g_tb)
+tbText  = input.color(color.black,             "Text",       inline = "tc", group = g_tb)
+tbBord  = input.color(color.black,             "Border",     inline = "tc", group = g_tb)
+tbName  = input.color(color.gray,              "Level name", inline = "tc2", group = g_tb)
+tbUp    = input.color(color.rgb(76, 175, 80),  "Above",      inline = "tc2", group = g_tb)
+tbDn    = input.color(color.rgb(229, 57, 53),  "Below",      inline = "tc2", group = g_tb)
+
+tbPos = switch tbPosIn
+    "Top Left"      => position.top_left
+    "Top Center"    => position.top_center
+    "Top Right"     => position.top_right
+    "Middle Left"   => position.middle_left
+    "Middle Right"  => position.middle_right
+    "Bottom Left"   => position.bottom_left
+    "Bottom Center" => position.bottom_center
+    => position.bottom_right
+
+tbSize = tbSizeIn == "Tiny" ? size.tiny : tbSizeIn == "Small" ? size.small : tbSizeIn == "Large" ? size.large : size.normal
+
+
+// ─────────────────────────── the grid: 18:00 onwards ──────────────────────────
+MS_DAY  = 86400000
+MS_6H   = 21600000
+MS_90   = 5400000
+MS_225  = 1350000
+MS_5625 = 337500
+
+// Every level's opening instant and the id of the container it belongs to,
+// off the New York wall clock. Order everywhere: TNcP, TMcO, T90O, TDO, TWO,
+// TMO, TYO, T4YO.
+grid() =>
+    adj = time + shiftMs
+    tod = (hour(adj, gridTZ) * 3600 + minute(adj, gridTZ) * 60 + second(adj, gridTZ)) * 1000 + adj % 1000
+    md  = (tod - 18 * 3600000 + MS_DAY) % MS_DAY
+
+    dayStart = time - md
+    l6       = time - md % MS_6H
+    l90      = time - md % MS_90
+    l225     = time - md % MS_225
+
+    tday   = adj + MS_6H
+    dw     = dayofweek(tday, gridTZ)
+    rawDay = dw == 1 ? 7 : dw - 1
+
+    weekStart = dayStart - (rawDay - 1) * MS_DAY
+
+    tdayMid = timestamp(gridTZ, year(tday, gridTZ), month(tday, gridTZ), dayofmonth(tday, gridTZ), 12, 0, 0)
+    tueTs   = tdayMid + (2 - rawDay) * MS_DAY
+
+    mth = month(tday, gridTZ)
+    yr  = year(tday, gridTZ)
+
+    tgtTNcP = l225 + MS_5625
+    tgtTMcO = l90  + MS_225
+    tgtT90O = l6   + MS_90
+    tgtTDO  = dayStart + MS_6H
+    tgtTWO  = weekStart + MS_DAY
+
+    wkY         = year(tueTs, gridTZ)
+    wkM         = month(tueTs, gridTZ)
+    firstNoon   = timestamp(gridTZ, wkY, wkM, 1, 12, 0, 0)
+    firstTueDom = ((3 - dayofweek(firstNoon, gridTZ) + 7) % 7) + 1
+    wk2SunNoon  = timestamp(gridTZ, wkY, wkM, firstTueDom + 7, 12, 0, 0) - 2 * MS_DAY
+    tgtTMO      = timestamp(gridTZ, year(wk2SunNoon, gridTZ), month(wk2SunNoon, gridTZ), dayofmonth(wk2SunNoon, gridTZ), 18, 0, 0) - shiftMs
+
+    qtYearB  = mth >= 4 ? yr : yr - 1
+    tgtTYO   = timestamp(gridTZ, qtYearB, 3, 31, 18, 0, 0) - shiftMs
+    cycStart = yr - ((yr - 2023) % 4 + 4) % 4
+    tgtT4YO  = timestamp(gridTZ, cycStart, 12, 31, 18, 0, 0) - shiftMs
+
+    [tgtTNcP, tgtTMcO, tgtT90O, tgtTDO, tgtTWO, tgtTMO, tgtTYO, tgtT4YO, l225, l90, l6, dayStart, tgtTWO, tgtTMO, qtYearB, cycStart]
+
+// The live price of every level on whatever symbol this runs on, plus close.
+// Runs on the chart and, through request.security, on each index.
+levels() =>
+    [t0, t1, t2, t3, t4, t5, t6, t7, i0, i1, i2, i3, i4, i5, i6, i7] = grid()
+    tg  = array.from(t0, t1, t2, t3, t4, t5, t6, t7)
+    ids = array.from(i0, i1, i2, i3, i4, i5, i6, i7)
+    var price = array.new_float(8, na)
+    var cid   = array.new_int(8, na)
+    prevT = time[1]
+    for i = 0 to 7
+        c  = array.get(cid, i)
+        id = array.get(ids, i)
+        if toExpire and not na(c) and c != id
+            array.set(price, i, na)
+        t = array.get(tg, i)
+        // the first candle starting at or after the instant opens the level
+        if time >= t and prevT < t
+            array.set(price, i, open)
+            array.set(cid, i, id)
+    [array.get(price, 0), array.get(price, 1), array.get(price, 2), array.get(price, 3), array.get(price, 4), array.get(price, 5), array.get(price, 6), array.get(price, 7), close]
+
+
+// ──────────────────── which levels belong to this timeframe ───────────────────
+tfMin = timeframe.in_seconds() / 60.0
+band1 = tfMin < 1
+band2 = tfMin >= 1    and tfMin < 5
+band3 = tfMin >= 5    and tfMin < 15
+band4 = tfMin >= 15   and tfMin < 60
+band5 = tfMin >= 60   and tfMin < 1440
+band6 = tfMin >= 1440
+
+inTF = array.from(
+     useTNcP and (band1 or band2),
+     useTMcO and (band1 or band2),
+     useT90O and (band1 or band2 or band3 or band4),
+     useTDO  and (band2 or band3 or band4 or band5),
+     useTWO  and (band3 or band4 or band5),
+     useTMO  and (band4 or band5 or band6),
+     useTYO  and band6,
+     useT4YO and band6)
+
+NAMES = array.from("TNcP", "TMcO", "T90O", "TDO", "TWO", "TMO", "TYO", "T4YO")
+
+
+// ──────────────────────────── chart symbol: lines ─────────────────────────────
+[g0, g1, g2, g3, g4, g5, g6, g7, j0, j1, j2, j3, j4, j5, j6, j7] = grid()
+[c0, c1, c2, c3, c4, c5, c6, c7, cCl] = levels()
+tgts   = array.from(g0, g1, g2, g3, g4, g5, g6, g7)
+chartP = array.from(c0, c1, c2, c3, c4, c5, c6, c7)
+
+lookahead = 20
+
+var array<line>  lns = array.new<line>()
+var array<label> lbs = array.new<label>()
+if barstate.isfirst
+    for i = 0 to 7
+        array.push(lns, line.new(na, na, na, na, color = toCol, width = toWidth, style = toStyle))
+        array.push(lbs, label.new(na, na, text = array.get(NAMES, i), color = #00000000, textcolor = toCol, size = size.small, style = label.style_label_left))
+
+prevTime = time[1]
+for i = 0 to 7
+    t = array.get(tgts, i)
+    if toOn and array.get(inTF, i) and time >= t and prevTime < t
+        ln = array.get(lns, i)
+        line.set_xy1(ln, bar_index, open)
+        line.set_xy2(ln, bar_index, open)
+        label.set_xy(array.get(lbs, i), bar_index, open)
+
+if barstate.islast
+    for i = 0 to 7
+        ln = array.get(lns, i)
+        lb = array.get(lbs, i)
+        if toOn and array.get(inTF, i) and not na(array.get(chartP, i))
+            line.set_x2(ln, bar_index + lookahead)
+            label.set_x(lb, bar_index + lookahead)
+        else
+            line.set_xy1(ln, na, na)
+            line.set_xy2(ln, na, na)
+            label.set_xy(lb, na, na)
+
+
+// ──────────────────────────── the four indices ────────────────────────────────
+[y0, y1, y2, y3, y4, y5, y6, y7, yCl] = request.security(symYM,  timeframe.period, levels(), ignore_invalid_symbol = true)
+[e0, e1, e2, e3, e4, e5, e6, e7, eCl] = request.security(symES,  timeframe.period, levels(), ignore_invalid_symbol = true)
+[n0, n1, n2, n3, n4, n5, n6, n7, nCl] = request.security(symNQ,  timeframe.period, levels(), ignore_invalid_symbol = true)
+[r0, r1, r2, r3, r4, r5, r6, r7, rCl] = request.security(symRTY, timeframe.period, levels(), ignore_invalid_symbol = true)
+
+
+// ──────────────────────────────── the table ───────────────────────────────────
+// +1 above, -1 below, 0 on it, na when the level is not live
+side(float cl, float lvl) =>
+    na(cl) or na(lvl) ? na : cl > lvl ? 1 : cl < lvl ? -1 : 0
+
+var table tb = table.new(tbPos, 6, 9, bgcolor = tbBg, frame_color = tbBord, frame_width = 1, border_color = tbBord, border_width = 1)
+
+arrowCell(int col, int row, int s, float lvl) =>
+    txt = na(s) ? "—" : s == 1 ? "▲" : s == -1 ? "▼" : "="
+    clr = na(s) or s == 0 ? tbName : s == 1 ? tbUp : tbDn
+    tip = na(lvl) ? "" : str.tostring(lvl)
+    table.cell(tb, col, row, txt, text_color = clr, text_size = tbSize, tooltip = tip)
+
+if barstate.islast and tbOn
+    table.clear(tb, 0, 0, 5, 8)
+    hdr = array.from("רמה", "כיוון", "YM", "ES", "NQ", "RTY")
+    for c = 0 to 5
+        table.cell(tb, c, 0, array.get(hdr, c), text_color = tbText, text_size = tbSize)
+
+    yv = array.from(y0, y1, y2, y3, y4, y5, y6, y7)
+    ev = array.from(e0, e1, e2, e3, e4, e5, e6, e7)
+    nv = array.from(n0, n1, n2, n3, n4, n5, n6, n7)
+    rv = array.from(r0, r1, r2, r3, r4, r5, r6, r7)
+
+    row = 1
+    // biggest container on top
+    for i = 7 to 0
+        if array.get(inTF, i)
+            sY = side(yCl, array.get(yv, i))
+            sE = side(eCl, array.get(ev, i))
+            sN = side(nCl, array.get(nv, i))
+            sR = side(rCl, array.get(rv, i))
+
+            allUp = sY == 1 and sE == 1 and sN == 1 and sR == 1
+            allDn = sY == -1 and sE == -1 and sN == -1 and sR == -1
+
+            table.cell(tb, 0, row, array.get(NAMES, i), text_color = tbName, text_size = tbSize)
+            table.cell(tb, 1, row, allUp ? "▲" : allDn ? "▼" : "—", text_color = allUp ? tbUp : allDn ? tbDn : tbName, text_size = tbSize)
+            arrowCell(2, row, sY, array.get(yv, i))
+            arrowCell(3, row, sE, array.get(ev, i))
+            arrowCell(4, row, sN, array.get(nv, i))
+            arrowCell(5, row, sR, array.get(rv, i))
+            row += 1
+
+// the levels are drawn entirely with lines; this hidden plot only satisfies
+// Pine's "at least one output" rule
+plot(0, "", display = display.none, editable = false)
