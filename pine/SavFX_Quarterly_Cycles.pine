@@ -9,7 +9,7 @@ indicator("Sav FX - Cycles, True Opens & Devil Marks", shorttitle="Sav FX", over
 //
 //    row              cell          numbers
 //    1 Quadrennial     1 year        which year of the four year cycle, 2023 .. 2026
-//    2 Yearly          1 quarter     which quarter of the year, by its weekdays
+//    2 Yearly          1 quarter     which quarter of the year, by its first Monday
 //    3 Quarter Split   ~16 bars      which quarter of the quarter, daily chart only
 //    4 Weekly          1 week        which week of the month
 //    5 Daily           1 day         which day of the week, Mon 1 .. Thu 4
@@ -38,7 +38,7 @@ indicator("Sav FX - Cycles, True Opens & Devil Marks", shorttitle="Sav FX", over
 //  a quarter never runs 16 and then 17. Candles, not weekdays: four days a
 //  year print no candle at all - New Year's Day, Good Friday, Independence Day
 //  and Christmas - and counting them in would leave every cut after them a day
-//  early. 2026 reads:
+//  or more late. 2026 reads:
 //    Q1  65 candles   5 January, 28 January, 19 February, 13 March
 //    Q2  65 candles   6 April, 29 April, 21 May, 12 June
 //    Q3  66 candles   6 July, 29 July, 21 August, 14 September
@@ -350,10 +350,10 @@ qEndDay = iQtr == 1 ? qS2 : iQtr == 2 ? qS3 : iQtr == 3 ? qS4 : yB
 // Day and Christmas. Every other holiday on the calendar is a shortened
 // session on these futures and still leaves a candle, and Pine is handed no
 // holiday calendar, so these four are worked out here. They matter because the
-// split counts CANDLES: Good Friday falls inside Q2 2026 and the Fourth,
-// shifted to Friday the 3rd because it lands on the Saturday, inside Q2 as
-// well, so a cell counted in weekdays would be a candle long and every cut
-// after it would sit a day late.
+// split counts CANDLES: Good Friday, 3 April, falls inside Q1 2026, and the
+// Fourth, shifted to Friday the 3rd because it lands on the Saturday, inside
+// Q2, so a quarter counted in weekdays would be a candle long and every cut
+// after the shut day would sit a day or more late.
 easterDay(int y) =>
     int a = y % 19
     int b = int(y / 100)
@@ -389,9 +389,9 @@ shutsIn(int fromD, int uptoD) =>
 // by four. The leftover days go to the cells at the front, so a quarter never
 // runs 16 and then 17. Q1 2026 holds 65 candles, which is 17, 16, 16, 16, so
 // it reads 5 January, 28 January, 19 February, 13 March and hands over on 6
-// April. Q4 holds 64 - 66 weekdays less Christmas and New Year's Day - which
-// is 16 all four times, and reads 5 October, 27 October, 18 November, 10
-// December.
+// April - 66 weekdays less Good Friday. Q4 holds 64, 66 weekdays less
+// Christmas and New Year's Day, which is 16 all four times, and reads 5
+// October, 27 October, 18 November, 10 December.
 w0q  = dowMon(janS + qStart * MS_DAY)
 wQtr = wdCount(w0q, qEndDay - qStart + 1) - shutsIn(qStart, qEndDay + 1)
 cBas = int(math.floor(wQtr / 4))
