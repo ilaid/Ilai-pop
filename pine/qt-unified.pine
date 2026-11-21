@@ -1800,13 +1800,15 @@ f_posAt(Acc a, bool isBull, bool isH, int idx) =>
 // שבירה בין שני תת-מחזורים צמודים בלבד: הקיצונים של j מול של i. אותם חוקים כמו
 // f_findTri / f_findPair. 0 = אין · 1 = SSMT · 2 = HSSMT
 f_ssPair(Eng e, bool isBull, bool pair, int i, int j) =>
-    int r = 0
+    int    r  = 0
+    string nm = ""
     if pair
         bool yw = f_beyond(isBull, f_accAt(e.a3, isBull, false, j), f_accAt(e.a3, isBull, false, i))
         bool rw = f_beyond(isBull, f_accAt(e.a4, isBull, false, j), f_accAt(e.a4, isBull, false, i))
         bool yc = f_beyond(isBull, f_accAt(e.a3, isBull, true, j), f_accAt(e.a3, isBull, true, i))
         bool rc = f_beyond(isBull, f_accAt(e.a4, isBull, true, j), f_accAt(e.a4, isBull, true, i))
         r := yc != rc ? 2 : yw != rw ? 1 : 0
+        nm := r == 2 ? f_str2(yc, rc) : r == 1 ? f_str2(yw, rw) : ""
     else
         bool nw = f_beyond(isBull, f_accAt(e.a1, isBull, false, j), f_accAt(e.a1, isBull, false, i))
         bool ew = f_beyond(isBull, f_accAt(e.a2, isBull, false, j), f_accAt(e.a2, isBull, false, i))
@@ -1817,7 +1819,9 @@ f_ssPair(Eng e, bool isBull, bool pair, int i, int j) =>
         bool hV = isBull ? (nc or ec) and not (nc and ec and yc) : (nc or ec or yc) and not (nc and ec)
         bool wV = isBull ? (nw or ew) and not (nw and ew and yw) : (nw or ew or yw) and not (nw and ew)
         r := hV ? 2 : wV ? 1 : 0
-    r
+        nm := r == 2 ? f_str(nc, ec, yc, isBull) : r == 1 ? f_str(nw, ew, yw, isBull) : ""
+    // הנכסים שעשו את השבירה (עברו את הקיצון), מופרדים ב-/
+    [r, str.replace_all(nm, " ", "/")]
 
 f_drawSS(Eng e, Cand c, bool dim) =>
     int    k      = c.ix
@@ -1848,7 +1852,7 @@ f_drawSS(Eng e, Cand c, bool dim) =>
             int  ii = ri - 1
             int  nS = 0
             while ii >= 0 and nS < 6
-                int pt = f_ssPair(e, isBull, k >= 2, ii, jj)
+                [pt, pNm] = f_ssPair(e, isBull, k >= 2, ii, jj)
                 if pt == 0
                     ii := -1
                 else
@@ -1860,7 +1864,7 @@ f_drawSS(Eng e, Cand c, bool dim) =>
                     if t2 > t1 and not na(q1) and not na(q2)
                         float pd = atrCh * linePad
                         array.push(dLn, line.new(t1, isBull ? q1 - pd : q1 + pd, t2, isBull ? q2 - pd : q2 + pd, xloc = xloc.bar_time, color = col, width = 1))
-                        string cT = qsUseCls(e.cls) ? f_qsChain(sc, t1) + "-" + f_qsChain(sc, t2) : (hh ? "H" : "S")
+                        string cT = (qsUseCls(e.cls) ? f_qsChain(sc, t1) + "-" + f_qsChain(sc, t2) : (hh ? "H" : "S")) + (pNm != "" ? " · " + pNm : "")
                         array.push(dLb, label.new(t2, close, isBull ? "\n" + cT : cT + "\n", xloc = xloc.bar_time, yloc = isBull ? yloc.belowbar : yloc.abovebar, style = label.style_none, textcolor = col, size = size.tiny, textalign = text.align_center))
                     jj := ii
                     ii -= 1
