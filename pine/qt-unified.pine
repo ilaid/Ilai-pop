@@ -208,21 +208,6 @@ f_lastMon(int y, int m) =>
 f_obs(int t) =>
     int dw = dayofweek(t, TZ)
     dw == dayofweek.saturday ? t - DAY : dw == dayofweek.sunday ? t + DAY : t
-f_easter(int y) =>
-    int a = y % 19
-    int b = int(math.floor(y / 100))
-    int c = y % 100
-    int d = int(math.floor(b / 4))
-    int e = b % 4
-    int f = int(math.floor((b + 8) / 25))
-    int g = int(math.floor((b - f + 1) / 3))
-    int h = (19 * a + b - d - g + 15) % 30
-    int i = int(math.floor(c / 4))
-    int k = c % 4
-    int l = (32 + 2 * e + 2 * i - h - k) % 7
-    int m = int(math.floor((a + 11 * h + 22 * l) / 451))
-    int x = h + l - 7 * m + 114
-    f_d(y, int(math.floor(x / 31)), x % 31 + 1)
 f_holidays(int y) =>
     array<int> r = array.new_int()
     int j1 = f_d(y, 1, 1)
@@ -231,7 +216,7 @@ f_holidays(int y) =>
         array.push(r, f_obs(j1))
     array.push(r, f_nthDw(y, 1, dayofweek.monday, 3))       // MLK
     array.push(r, f_nthDw(y, 2, dayofweek.monday, 3))       // Presidents
-    array.push(r, f_easter(y) - 2 * DAY)                     // Good Friday
+    // Good Friday — לא נספר כחג: בחוזים יש בו מסחר (נר יומי)
     array.push(r, f_lastMon(y, 5))                           // Memorial
     if y >= 2022
         array.push(r, f_obs(f_d(y, 6, 19)))                  // Juneteenth
@@ -296,7 +281,11 @@ f_cyc(int c, int t) =>
             array.concat(hol, f_holidays(wY + 1))
             int nD  = f_tDays(qs0, qs1, hol)
             int dI  = f_tDays(qs0, timestamp(TZ, yy, mm, dd, 12, 0), hol)
-            dqIx := nD > 0 ? math.min(3, math.max(0, int(math.floor(dI * 4.0 / nD)))) : 0
+            // גבולות הרבעים: רבע / חצי / שלושה רבעים מימי המסחר, מעוגל לקרוב
+            int bq1 = math.round(nD / 4.0)
+            int bq2 = math.round(nD / 2.0)
+            int bq3 = math.round(nD * 3 / 4.0)
+            dqIx := nD > 0 ? (dI >= bq1 ? 1 : 0) + (dI >= bq2 ? 1 : 0) + (dI >= bq3 ? 1 : 0) : 0
     int  wqId = wY * 10 + wQ
     int  rf   = c == 8 ? yy : c == 7 ? wqId : c == 6 ? wqId * 10 + dqIx : c == 5 ? wkId : c == 4 ? tdId : c == 3 ? ssId : c == 2 ? ucId : qrId
     int  lf   = c == 8 ? qdId : c == 7 ? wY : c == 6 ? wqId : c == 5 ? mnId : c == 4 ? wkId : c == 3 ? tdId : c == 2 ? ssId : ucId
