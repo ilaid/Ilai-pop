@@ -1,5 +1,5 @@
 //@version=5
-indicator("Sav FX - Cycles, True Opens & Devil Marks", shorttitle="Sav FX", overlay=false, max_boxes_count=500, max_lines_count=500, max_labels_count=500)
+indicator("Sav FX - Cycles & Devil Marks", shorttitle="Sav FX", overlay=false, max_boxes_count=500, max_lines_count=500, max_labels_count=500)
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  MULTI-LEVEL QUARTERLY CYCLES
@@ -97,20 +97,12 @@ indicator("Sav FX - Cycles, True Opens & Devil Marks", shorttitle="Sav FX", over
 //  TIME BASE, shared by everything in this script
 //
 //  The trading day opens at 18:00 on the New York wall clock, and nothing else:
-//  the rows, the cell edges and the true opens all read the same clock, so none
+//  the rows, the cell edges and the dividers all read the same clock, so none
 //  of them can sit an hour from another. It holds through both daylight saving
 //  changeovers, and it does not care what zone the chart or the exchange is on,
 //  so there is nothing to put right by hand when a country moves its clocks a
 //  week before or after New York does. The shift is left in the settings for
 //  moving the ladder on purpose, and belongs on 0.
-//
-//  TRUE OPENS, drawn on the candles rather than in this pane
-//
-//  Every level is the open of the SECOND sub cycle inside its container, except
-//  TYO which marks the QT year's own start in April. A level lives only as long
-//  as its container: when the container closes the line goes until the next
-//  container prints its own open. They read off the same grid as the rows below,
-//  so a T90O always lands on a 90 min row boundary.
 //
 //  DEVIL MARKS, also on the candles
 //
@@ -124,7 +116,7 @@ g_tz = "Time Base"
 shiftH = input.float(0, "Shift From New York (hours)", minval = -12, maxval = 12, step = 0.25, group = g_tz, tooltip = "Leave this on 0. The whole script runs on the New York wall clock, so the trading day opens at 18:00 and London at 00:00 New York on every day of the year, the two daylight saving changeovers included, and whatever clock your own country or the chart is on. This is only here in case you ever want the ladder deliberately moved: a quarter of an hour at a time, either way.")
 
 // The model's own clock. Everything reads off it: the rows, the cell edges and
-// the true opens alike, so none of them can ever sit an hour from another.
+// the dividers alike, so none of them can ever sit an hour from another.
 gridTZ  = "America/New_York"
 shiftMs = int(shiftH * 3600000)
 
@@ -298,8 +290,7 @@ iWeek = dead ? na : int(math.floor((dayofmonth(tueTs, gridTZ) - 1) / 7)) + 1
 // handing over on 6 April.
 //
 // The turn day belongs to the quarter it opens, never to the one it closes.
-mth = month(tday, gridTZ)
-yr  = year(tday, gridTZ)
+yr = year(tday, gridTZ)
 
 // Monday 0 .. Sunday 6
 dowMon(int t) =>
@@ -725,7 +716,7 @@ vlOn      = input.bool(true, "Enable", group = g_vl, tooltip = "A vertical line 
 vlCol     = input.color(color.new(#787b86, 35), "Colour", inline = "vl", group = g_vl)
 vlStyleIn = input.string("Dotted", "Line style", options = ["Solid", "Dotted", "Dashed"], inline = "vl", group = g_vl)
 vlWidth   = input.int(1, "Width", minval = 1, maxval = 5, inline = "vl", group = g_vl)
-vlKeep    = input.int(50, "Lines Kept", minval = 2, maxval = 200, group = g_vl, tooltip = "How many of them stay on the chart. TradingView allows 500 lines in total and the true opens and the Devil marks want their share, so this is where to give some back if they ever run out.")
+vlKeep    = input.int(50, "Lines Kept", minval = 2, maxval = 200, group = g_vl, tooltip = "How many of them stay on the chart. TradingView allows 500 lines in total and the Devil marks want their share, so this is where to give some back if they ever run out.")
 vlNumOn   = input.bool(true, "Number each line", inline = "vn", group = g_vl)
 vlNumCol  = input.color(#787b86, "", inline = "vn", group = g_vl)
 vlNumPos  = input.string("Middle", "Height", options = ["Top", "Middle", "Bottom"], inline = "vn2", group = g_vl, tooltip = "Which quarter of its container the block opening on this line is: Q1 to Q4, the same number the row below gives it. Pine cannot see where the chart is scrolled to, so the height is read off the last hundred candles - the middle of their range, their high, or their low.")
@@ -758,287 +749,6 @@ if vlOn and vlTf and vlAt != vlAt[1]
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  TRUE OPENS
-//
-//  Drawn on the candles with force_overlay, while the rows above stay in this
-//  script's own pane. Every container and every boundary is taken from the grid
-//  already worked out above, so a true open can never sit a minute off the row
-//  that contains it, whatever the clock and shift are set to.
-//
-//  Each level is the open of the SECOND sub cycle of its container:
-//    TNcP  2nd sub-quarter in the quarter     quarter + 5:37.5
-//    TMcO  2nd quarter in the micro           micro + 22:30
-//    T90O  2nd micro in the session           session + 90 min
-//    TDO   2nd session in the day             midnight
-//    TWO   2nd day in the week                Monday 18:00
-//    TMO   2nd week in the month              the Sunday opening the week whose
-//                                             Tuesday falls on the 8th to 14th
-//    TYO   the QT year's own start            1 April, so 31 March 18:00
-//    T4YO  2nd year in the four year cycle    1 January of 2024, 2028
-// ═══════════════════════════════════════════════════════════════════════════════
-
-g_to = "True Opens"
-toOn      = input.bool(true, "Enable", group = g_to)
-toCol     = input.color(color.rgb(75, 86, 186, 65), "Colour", group = g_to)
-toStyleIn = input.string("Dashed", "Line style", options = ["Solid", "Dotted", "Dashed"], inline = "ts", group = g_to)
-toWidth   = input.int(1, "Width", minval = 1, maxval = 5, inline = "ts", group = g_to)
-toExpire  = input.bool(true, "Drop a level when its period ends", group = g_to, tooltip = "ON: the line goes the moment its container closes, and comes back once the new container prints its own open. Between 18:00 and midnight there is no TDO at all.\nOFF: the last known level stays on the chart.")
-
-useTNcP = input.bool(true, "TNcP  - 2nd sub-quarter in the quarter", group = g_to)
-useTMcO = input.bool(true, "TMcO - 2nd quarter in the micro",        group = g_to)
-useT90O = input.bool(true, "T90O - 2nd micro in the session",        group = g_to)
-useTDO  = input.bool(true, "TDO   - 2nd session in the day",         group = g_to)
-useTWO  = input.bool(true, "TWO  - 2nd day in the week",             group = g_to)
-useTMO  = input.bool(true, "TMO  - 2nd week in the month",           group = g_to)
-useTYO  = input.bool(true, "TYO   - QT year open, 1 April",          group = g_to)
-useT4YO = input.bool(true, "T4YO - 2nd year in the four year cycle", group = g_to)
-
-g_zn = "Zone Box"
-showZoneBox  = input.bool(true, "Show", group = g_zn, tooltip = "Premium or discount for the cycle this chart measures, off the chart's own open and the two above it. Hidden above the 4 hour chart. It sits in this script's pane, not on the candles, because a table cannot be forced onto the chart.")
-zonePosition = input.string("bottom_right", "Position", options = ["top_right", "top_left", "bottom_right", "bottom_left", "middle_right", "middle_left"], group = g_zn)
-
-toStyle = toStyleIn == "Solid" ? line.style_solid : toStyleIn == "Dotted" ? line.style_dotted : line.style_dashed
-
-// which levels get a line on this chart
-tfMin = tfs / 60.0
-band1 = tfMin < 1
-band2 = tfMin >= 1    and tfMin < 5
-band3 = tfMin >= 5    and tfMin < 15
-band4 = tfMin >= 15   and tfMin < 60
-band5 = tfMin >= 60   and tfMin < 1440
-band6 = tfMin >= 1440
-
-showTNcP = toOn and useTNcP and (band1 or band2)
-showTMcO = toOn and useTMcO and (band1 or band2)
-showT90O = toOn and useT90O and (band1 or band2 or band3 or band4)
-showTDO  = toOn and useTDO  and (band2 or band3 or band4 or band5)
-showTWO  = toOn and useTWO  and (band3 or band4 or band5)
-showTMO  = toOn and useTMO  and (band4 or band5 or band6)
-showTYO  = toOn and useTYO  and band6
-showT4YO = toOn and useT4YO and band6
-
-// ---------- where each level opens, all off the grid above ----------
-tgtTNcP = l225 + MS_5625          // quarter  + 5.625 min
-tgtTMcO = l90  + MS_225           // micro    + 22.5 min
-tgtT90O = l6   + MS_90            // session  + 90 min
-tgtTDO  = dayStart + MS_6H        // day      + 6 h, which is midnight
-tgtTWO  = weekStart + MS_DAY      // week     + 1 day, Monday 18:00
-
-// the month's second week: the Sunday before the Tuesday that falls on the
-// 8th to the 14th. Built on the grid clock, then pulled back by the shift so
-// it can be compared against real bar time like every other target
-wkY         = year(tueTs, gridTZ)
-wkM         = month(tueTs, gridTZ)
-firstNoon   = timestamp(gridTZ, wkY, wkM, 1, 12, 0, 0)
-firstTueDom = ((3 - dayofweek(firstNoon, gridTZ) + 7) % 7) + 1
-wk2SunNoon  = timestamp(gridTZ, wkY, wkM, firstTueDom + 7, 12, 0, 0) - 2 * MS_DAY
-tgtTMO      = timestamp(gridTZ, year(wk2SunNoon, gridTZ), month(wk2SunNoon, gridTZ), dayofmonth(wk2SunNoon, gridTZ), 18, 0, 0) - shiftMs
-
-qtYearB  = mth >= 4 ? yr : yr - 1
-tgtTYO   = timestamp(gridTZ, qtYearB, 3, 31, 18, 0, 0) - shiftMs
-cycStart = yr - ((yr - 2023) % 4 + 4) % 4
-tgtT4YO  = timestamp(gridTZ, cycStart, 12, 31, 18, 0, 0) - shiftMs
-
-// THE candle that OPENS the level: the first one starting at or after the
-// instant, never the one that merely contains it, so a boundary at 09:22:30
-// prints on the 09:23 candle. This also carries a level over a weekend gap.
-fired(int t) =>
-    time >= t and time[1] < t
-
-// ---------- lines ----------
-lookahead = 20
-
-newTOLine() =>
-    line.new(na, na, na, na, color = toCol, width = toWidth, style = toStyle, force_overlay = true)
-newTOLabel(string txt) =>
-    label.new(na, na, text = txt, color = #00000000, textcolor = toCol, size = size.small, style = label.style_label_left, force_overlay = true)
-
-var line  lnTNcP = newTOLine()
-var label lbTNcP = newTOLabel("TNcP")
-var line  lnTMcO = newTOLine()
-var label lbTMcO = newTOLabel("TMcO")
-var line  lnT90O = newTOLine()
-var label lbT90O = newTOLabel("T90O")
-var line  lnTDO  = newTOLine()
-var label lbTDO  = newTOLabel("TDO")
-var line  lnTWO  = newTOLine()
-var label lbTWO  = newTOLabel("TWO")
-var line  lnTMO  = newTOLine()
-var label lbTMO  = newTOLabel("TMO")
-var line  lnTYO  = newTOLine()
-var label lbTYO  = newTOLabel("TYO")
-var line  lnT4YO = newTOLine()
-var label lbT4YO = newTOLabel("T4YO")
-
-// Prices are captured on every timeframe, because the zone box needs levels
-// that are not necessarily drawn; only the drawing is gated by the band. Each
-// level remembers which container it belongs to, so the moment the live
-// container stops matching, the price is dropped and the line comes off.
-var float pTNcP = na
-var int   idTNcP = na
-var float pTMcO = na
-var int   idTMcO = na
-var float pT90O = na
-var int   idT90O = na
-var float pTDO = na
-var int   idTDO = na
-var float pTWO = na
-var int   idTWO = na
-var float pTMO = na
-var int   idTMO = na
-var float pTYO = na
-var int   idTYO = na
-var float pT4YO = na
-var int   idT4YO = na
-
-place(line ln, label lb, bool show) =>
-    if show
-        line.set_xy1(ln, bar_index, open)
-        line.set_xy2(ln, bar_index, open)
-        label.set_xy(lb, bar_index, open)
-
-if toExpire and not na(idTNcP) and idTNcP != l225
-    pTNcP := na
-if fired(tgtTNcP)
-    pTNcP  := open
-    idTNcP := l225
-    place(lnTNcP, lbTNcP, showTNcP)
-
-if toExpire and not na(idTMcO) and idTMcO != l90
-    pTMcO := na
-if fired(tgtTMcO)
-    pTMcO  := open
-    idTMcO := l90
-    place(lnTMcO, lbTMcO, showTMcO)
-
-if toExpire and not na(idT90O) and idT90O != l6
-    pT90O := na
-if fired(tgtT90O)
-    pT90O  := open
-    idT90O := l6
-    place(lnT90O, lbT90O, showT90O)
-
-if toExpire and not na(idTDO) and idTDO != dayStart
-    pTDO := na
-if fired(tgtTDO)
-    pTDO  := open
-    idTDO := dayStart
-    place(lnTDO, lbTDO, showTDO)
-
-if toExpire and not na(idTWO) and idTWO != tgtTWO
-    pTWO := na
-if fired(tgtTWO)
-    pTWO  := open
-    idTWO := tgtTWO
-    place(lnTWO, lbTWO, showTWO)
-
-if toExpire and not na(idTMO) and idTMO != tgtTMO
-    pTMO := na
-if fired(tgtTMO)
-    pTMO  := open
-    idTMO := tgtTMO
-    place(lnTMO, lbTMO, showTMO)
-
-if toExpire and not na(idTYO) and idTYO != qtYearB
-    pTYO := na
-if fired(tgtTYO)
-    pTYO  := open
-    idTYO := qtYearB
-    place(lnTYO, lbTYO, showTYO)
-
-if toExpire and not na(idT4YO) and idT4YO != cycStart
-    pT4YO := na
-if fired(tgtT4YO)
-    pT4YO  := open
-    idT4YO := cycStart
-    place(lnT4YO, lbT4YO, showT4YO)
-
-// A live level is extended to the right. A dead one is given na coordinates,
-// which takes it off the chart until its container prints a new open.
-finish(line ln, label lb, bool live) =>
-    if live
-        line.set_x2(ln, bar_index + lookahead)
-        label.set_x(lb, bar_index + lookahead)
-    else
-        line.set_xy1(ln, na, na)
-        line.set_xy2(ln, na, na)
-        label.set_xy(lb, na, na)
-
-if barstate.islast
-    finish(lnTNcP, lbTNcP, showTNcP and not na(pTNcP))
-    finish(lnTMcO, lbTMcO, showTMcO and not na(pTMcO))
-    finish(lnT90O, lbT90O, showT90O and not na(pT90O))
-    finish(lnTDO,  lbTDO,  showTDO  and not na(pTDO))
-    finish(lnTWO,  lbTWO,  showTWO  and not na(pTWO))
-    finish(lnTMO,  lbTMO,  showTMO  and not na(pTMO))
-    finish(lnTYO,  lbTYO,  showTYO  and not na(pTYO))
-    finish(lnT4YO, lbT4YO, showT4YO and not na(pT4YO))
-
-
-// ───────────────────────────── zone box ───────────────────────────────────────
-// Premium or discount for the cycle this chart measures: the chart's own open
-// and the one above it decide premium, discount or dead zone, and the third one
-// above turns it into super premium or super discount. Nothing above 4 hours.
-float zOwn = na
-float zUp1 = na
-float zUp2 = na
-bool  zOn  = true
-
-if band1
-    zOwn := pTNcP
-    zUp1 := pTMcO
-    zUp2 := pT90O
-else if band2
-    zOwn := pTMcO
-    zUp1 := pT90O
-    zUp2 := pTDO
-else if band3
-    zOwn := pT90O
-    zUp1 := pTDO
-    zUp2 := pTWO
-else if band4
-    zOwn := pTDO
-    zUp1 := pTWO
-    zUp2 := pTMO
-else if tfMin < 240
-    zOwn := pTWO
-    zUp1 := pTMO
-    zUp2 := pTYO
-else if tfMin == 240
-    zOwn := pTMO
-    zUp1 := pTYO
-    zUp2 := pT4YO
-else
-    zOn := false
-
-string zoneTxt = ""
-color  zoneCol = na
-
-if zOn and not na(zOwn) and not na(zUp1)
-    if close > zOwn and close > zUp1
-        bool superP = not na(zUp2) and close > zUp2
-        zoneTxt := superP ? "Super Premium" : "Premium"
-        zoneCol := color.new(#4b56ba, superP ? 10 : 55)
-    else if close < zOwn and close < zUp1
-        bool superD = not na(zUp2) and close < zUp2
-        zoneTxt := superD ? "Super Discount" : "Discount"
-        zoneCol := color.new(#ba4b4b, superD ? 10 : 55)
-    else
-        zoneTxt := "Dead Zone"
-        zoneCol := color.new(#7e7e7e, 55)
-
-zonePos = zonePosition == "top_right" ? position.top_right : zonePosition == "top_left" ? position.top_left : zonePosition == "bottom_left" ? position.bottom_left : zonePosition == "middle_right" ? position.middle_right : zonePosition == "middle_left" ? position.middle_left : position.bottom_right
-
-var table zoneTable = table.new(zonePos, 1, 1, border_width = 0, frame_width = 0)
-
-if barstate.islast
-    if showZoneBox and zoneTxt != ""
-        table.cell(zoneTable, 0, 0, zoneTxt, bgcolor = zoneCol, text_color = color.white, text_size = size.tiny)
-    else
-        table.clear(zoneTable, 0, 0)
-
-
-// ═══════════════════════════════════════════════════════════════════════════════
 //  DEVIL MARKS
 //
 //  Any candle whose body runs to one end with no wick there, or a wick small
@@ -1047,7 +757,7 @@ if barstate.islast
 //  candle can still grow the wick that would disqualify it. It then stays only
 //  while that area is untouched: once price trades through it the wick has been
 //  filled in and the mark is gone, and that part is checked live, not on close.
-//  Drawn on the candles with force_overlay, like the true opens.
+//  Drawn on the candles with force_overlay, like the quarter dividers.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 g_dev = "Devil Marks"

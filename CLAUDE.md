@@ -4,14 +4,16 @@ Two unrelated things live here:
 
 - `index.html` — a single file trade journal (Supabase backed).
 - `pine/SavFX_Quarterly_Cycles.pine` — one TradingView Pine v5 indicator in
-  four parts: the Quarterly Theory cycle ladder as rows of boxes in its own
-  pane, the True Opens as lines on the candles, the Quarter Dividers (a
-  vertical line at each turn of the block the chart is read against, 90 min on
-  5m and 22.5 min on 1m, those two timeframes only, each carrying the Q1 to Q4
-  of the block it opens), and the Devil Marks.
+  three parts: the Quarterly Theory cycle ladder as rows of boxes in its own
+  pane, the Quarter Dividers (a vertical line at each turn of the block the
+  chart is read against, 90 min on 5m and 22.5 min on 1m, those two timeframes
+  only, each carrying the Q1 to Q4 of the block it opens), and the Devil Marks.
   Everything but the ladder reaches the price chart with `force_overlay` while
   the script itself is `overlay = false`, which is the only way to have both at
   once.
+  The **True Opens were taken out** at the owner's request, and with them the
+  Premium/Discount zone box, which was computed from them. They live on as a
+  standalone script; do not put either back without being asked.
 
 ## Working on the indicator
 
