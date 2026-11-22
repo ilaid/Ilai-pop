@@ -9,8 +9,8 @@ indicator("Sav FX - Cycles & Devil Marks", shorttitle="Sav FX", overlay=false, m
 //
 //    row              cell          numbers
 //    1 Quadrennial     1 year        which year of the four year cycle, 2023 .. 2026
-//    2 Yearly          1 quarter     which quarter of the year, by its first Monday
-//    3 Quarter Split   ~16 bars      which quarter of the quarter, daily chart only
+//    2 Yearly          13 weeks      which quarter of the year, by the week's Tuesday
+//    3 Quarter Split   ~16 bars      which quarter of the quarter, by trading days
 //    4 Weekly          1 week        which week of the month
 //    5 Daily           1 day         which day of the week, Mon 1 .. Thu 4
 //    6 6 Hour          6 hours       which session: Asia 1, London 2, AM 3, PM 4
