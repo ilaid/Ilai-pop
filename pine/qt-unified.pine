@@ -174,7 +174,7 @@ f_cycName(int c) => c == 1 ? "22.5m" : c == 2 ? "90m" : c == 3 ? "Session" : c =
 //   15m    סשן                 יום מסחר
 //   1H     יום מסחר            שבוע
 //   4H     שבוע (לפי שלישי)    חודש — שבוע 5 ושבוע מת מיכל לעצמם
-//   1D     רבע ברבע השבועי     רבע שבועי (13/14 שבועות, מחולק ל-4 לפי ימים)
+//   1D     רבע ברבע השבועי     רבע שבועי (13/14 שבועות, מחולק ל-4 לפי ימי מסחר)
 //   1W     רבע שבועי           שנה שבועית (Q1 = ינואר)
 //          שנה שבועית = מיום שני של השבוע של השלישי הראשון בינואר; רבע = 13 שבועות
 //   Mo     שנה                 מחזור 4 שנים (2023–2026…)
@@ -194,6 +194,61 @@ f_wyStart(int y) =>
     int dw = dayofweek(t1, TZ)
     int k  = (dayofweek.tuesday - dw + 7) % 7
     t1 + (k - 1) * DAY
+
+// חגי הבורסה בארה"ב (NYSE/CME) — ימים בלי מסחר מלא. נחשבים ב-1D: הרבע השבועי
+// מחולק ל-4 לפי ימי מסחר, לא לפי ימים קלנדריים. תאריך = 12:00 של היום.
+f_d(int y, int m, int d) => timestamp(TZ, y, m, d, 12, 0)
+f_nthDw(int y, int m, int wd, int n) =>
+    int t1 = f_d(y, m, 1)
+    t1 + (((wd - dayofweek(t1, TZ)) + 7) % 7 + 7 * (n - 1)) * DAY
+f_lastMon(int y, int m) =>
+    int tl = f_d(y, m + 1, 1) - DAY
+    tl - (((dayofweek(tl, TZ) - dayofweek.monday) + 7) % 7) * DAY
+// שבת → שישי · ראשון → שני
+f_obs(int t) =>
+    int dw = dayofweek(t, TZ)
+    dw == dayofweek.saturday ? t - DAY : dw == dayofweek.sunday ? t + DAY : t
+f_easter(int y) =>
+    int a = y % 19
+    int b = int(math.floor(y / 100))
+    int c = y % 100
+    int d = int(math.floor(b / 4))
+    int e = b % 4
+    int f = int(math.floor((b + 8) / 25))
+    int g = int(math.floor((b - f + 1) / 3))
+    int h = (19 * a + b - d - g + 15) % 30
+    int i = int(math.floor(c / 4))
+    int k = c % 4
+    int l = (32 + 2 * e + 2 * i - h - k) % 7
+    int m = int(math.floor((a + 11 * h + 22 * l) / 451))
+    int x = h + l - 7 * m + 114
+    f_d(y, int(math.floor(x / 31)), x % 31 + 1)
+f_holidays(int y) =>
+    array<int> r = array.new_int()
+    int j1 = f_d(y, 1, 1)
+    // ראש השנה בשבת — לא נדחה לשישי (כמו ב-NYSE)
+    if dayofweek(j1, TZ) != dayofweek.saturday
+        array.push(r, f_obs(j1))
+    array.push(r, f_nthDw(y, 1, dayofweek.monday, 3))       // MLK
+    array.push(r, f_nthDw(y, 2, dayofweek.monday, 3))       // Presidents
+    array.push(r, f_easter(y) - 2 * DAY)                     // Good Friday
+    array.push(r, f_lastMon(y, 5))                           // Memorial
+    if y >= 2022
+        array.push(r, f_obs(f_d(y, 6, 19)))                  // Juneteenth
+    array.push(r, f_obs(f_d(y, 7, 4)))                       // Independence
+    array.push(r, f_nthDw(y, 9, dayofweek.monday, 1))       // Labor
+    array.push(r, f_nthDw(y, 11, dayofweek.thursday, 4))    // Thanksgiving
+    array.push(r, f_obs(f_d(y, 12, 25)))                     // Christmas
+    r
+
+// ימי מסחר מ-t0 (יום שני) עד t (לא כולל): ימי חול פחות חגים בטווח
+f_tDays(int t0, int t, array<int> hol) =>
+    int d = math.round((t - t0) / DAY)
+    int n = 5 * int(math.floor(d / 7)) + math.min(d % 7, 5)
+    for h in hol
+        if h >= t0 and h < t
+            n -= 1
+    n
 
 f_cyc(int c, int t) =>
     int  mnd  = hour(t, TZ) * 60 + minute(t, TZ)
@@ -224,7 +279,7 @@ f_cyc(int c, int t) =>
     int  qrId = ucId * 10 + qIdx
     int  qdId = int(math.floor((yy - 2023) / 4.0))
     // 1W / 1D — רבעים שבועיים של 13 שבועות (Q1 = ינואר).
-    // 1D: כל רבע שבועי מחולק ל-4 לפי מספר הימים מתחילתו עד תחילת הבא.
+    // 1D: כל רבע שבועי מחולק ל-4 לפי ימי המסחר בו (בלי סופי שבוע וחגים).
     int  wY   = year(tueT, TZ)
     int  wQ   = 1
     int  dqIx = 0
@@ -236,8 +291,11 @@ f_cyc(int c, int t) =>
         if c == 6
             int qs0 = ys0 + (wQ - 1) * 13 * 7 * DAY
             int qs1 = wQ == 4 ? f_wyStart(wY + 1) : qs0 + 13 * 7 * DAY
-            int nD  = math.round((qs1 - qs0) / DAY)
-            int dI  = math.round((timestamp(TZ, yy, mm, dd, 12, 0) - qs0) / DAY)
+            // לפי ימי מסחר: ימי חול פחות חגי הבורסה בארה"ב
+            array<int> hol = f_holidays(wY)
+            array.concat(hol, f_holidays(wY + 1))
+            int nD  = f_tDays(qs0, qs1, hol)
+            int dI  = f_tDays(qs0, timestamp(TZ, yy, mm, dd, 12, 0), hol)
             dqIx := nD > 0 ? math.min(3, math.max(0, int(math.floor(dI * 4.0 / nD)))) : 0
     int  wqId = wY * 10 + wQ
     int  rf   = c == 8 ? yy : c == 7 ? wqId : c == 6 ? wqId * 10 + dqIx : c == 5 ? wkId : c == 4 ? tdId : c == 3 ? ssId : c == 2 ? ucId : qrId
