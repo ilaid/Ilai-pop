@@ -87,7 +87,7 @@ grpCor = "הצד"
 cornerOn   = input.bool(true, "הצג את השבירות בצד", group = grpCor)
 cornerPosI = input.string("שמאל למטה", "מיקום", options = ["שמאל למטה", "שמאל באמצע", "שמאל למעלה", "ימין למטה", "ימין באמצע", "ימין למעלה"], group = grpCor)
 cornerSz   = input.string("tiny", "גודל טקסט", options = ["tiny", "small", "normal"], group = grpCor)
-cornerWhen = input.bool(true, "Q ושעה ליד האחרונה", group = grpCor)
+cornerWhen = input.bool(true, "Q ושעה ליד האחרונה", group = grpCor, tooltip = "ה-Q (הרבע שבו נוצרה השבירה) — רק בשורות של 4H ומעלה. ב-1m עד 1H — רק השעה.")
 cornerAllT = input.bool(true, "שעה ליד כל שבירה בצד", group = grpCor, tooltip = "גם ליד הפעילות וה-✗ — כדי לראות מה נוצר לפני מה. PSP — שעת נר הסווינג; Fill ו-SSMT — שעת הנר שעשה את השבירה.")
 offFade    = input.int(60, "שקיפות ממתינה (✗)", minval = 0, maxval = 90, group = grpCor, tooltip = "ממתינה נכתבת בצבע שלה (זוג 3·4 — בצבע הזוג), רק דהוי.")
 cornerTbl  = input.string("טבלה", "סידור הצד", options = ["טבלה", "שורה"], group = grpCor, tooltip = "טבלה: מסגרת · כיוון · שלישייה · זוג 3·4 · נגדיות · PCP — בתאים עם רקע, שורה לכל מסגרת.\nשורה: הסידור הקודם.")
@@ -2062,7 +2062,8 @@ f_bg(Cand c, Eng e)  => bgClr
 f_whenTx(Cand c, int cls) =>
     int tt = c.shT > 0 ? c.shT : c.t
     [wr, wl, wb, wq, wn] = f_cyc(cls, tt)
-    (wn > 0 ? " Q" + str.tostring(wn) : "") + " " + f_tmTx(c, cls)
+    // ה-Q — רק בשורות של 4H ומעלה; מתחת — רק השעה
+    (wn > 0 and cls >= 5 ? " Q" + str.tostring(wn) : "") + " " + f_tmTx(c, cls)
 
 if barstate.islast
     table.clear(cTb2, 0, 0, 4, 10 + cornerLift)
