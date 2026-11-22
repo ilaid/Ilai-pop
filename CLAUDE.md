@@ -87,7 +87,17 @@ comes in, so no chart stacks more than four rows.
 - The four year cycle is 2023, 2024, 2025, 2026, written `(year + 1) % 4 + 1`.
 - A week belongs to the month holding its **Tuesday**; a week whose Tuesday and
   Thursday fall in different months is dead and carries no number.
-- The quarter split counts the quarter's **own candles** — the day it hands
+- **The ladder is read off a date list in the settings**, not off arithmetic.
+  "Quarter Dates" holds one date per cell of the split row, `day.month.year`,
+  sixteen to a year (four quarters of four) plus one more that closes the last
+  year. Every date opens a split cell, every fourth also opens a quarter, every
+  sixteenth also opens a year, and the cell's right edge is the next date. The
+  list is parsed once on the first bar and sorted. **This is where a wrong date
+  gets fixed — in the input, by its owner, not in the code.** The arithmetic
+  below is only the fallback for a year the list does not cover; a bar outside
+  the list's span still draws off it, so do not delete it.
+- The fallback arithmetic: the quarter split counts the quarter's **own
+  candles** — the day it hands
   over is the next quarter's **first** candle, not this one's last, so it is
   **not** counted in — and divides by four, the leftover days going to the
   cells at the **front** (so a quarter never runs 16 then 17). Counting the

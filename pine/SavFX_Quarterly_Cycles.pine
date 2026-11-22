@@ -131,6 +131,10 @@ show90     = input.bool(true, "90 Minute",          group = g_cyc)
 show225    = input.bool(true, "22.5 Minute",        group = g_cyc)
 show5625   = input.bool(true, "5.625 Minute",       group = g_cyc)
 
+g_dt = "Quarter Dates"
+dtOn = input.bool(true, "Use my own dates", group = g_dt, tooltip = "ON: the year, its quarters and the quarter split are read straight off the list below, with no arithmetic at all - no candle counting, no holidays, no rounding. Only the dates you wrote. A bar outside the span the list covers falls back on the computed rule, so the years you have not listed still draw.")
+dtIn = input.text_area("5.1.2026 27.1.2026 18.2.2026 12.3.2026\n6.4.2026 28.4.2026 20.5.2026 11.6.2026\n6.7.2026 29.7.2026 20.8.2026 11.9.2026\n5.10.2026 27.10.2026 18.11.2026 10.12.2026\n4.1.2027", "Dates", group = g_dt, tooltip = "One date per cell of the split row, in order, written day.month.year. Sixteen to a year - four quarters of four cells each - and then ONE MORE date that closes the last year. Every date opens a split cell, every fourth one also opens a quarter, and every sixteenth also opens a year. Spaces, commas and new lines all separate; the order you type them in does not matter, they are sorted. A date you change here moves that cell and nothing else.")
+
 g_lab = "Labels"
 showLabels  = input.bool(true, "Show Labels", group = g_lab)
 nameRows    = input.string("Down to the session", "Names Instead Of Numbers", options = ["Down to the session", "Down to the day", "Off"], group = g_lab, tooltip = "The slow rows read better as names than as numbers, and their cells are too narrow for a three link chain on a high timeframe. This picks how far down the names go: to the session row (2026, Q3, Week 3, Wed, Asia), only to the daily row, or off for numbers everywhere. Everything below the line prints numbers.")
@@ -409,7 +413,6 @@ cut3 = cBas * 3 + math.min(cRem, 3)
 
 kIn = wdCount(w0q, math.max(0, qIn - qStart)) - shutsIn(qStart, qIn)
 iSp = kIn < cut1 ? 1 : kIn < cut2 ? 2 : kIn < cut3 ? 3 : 4
-iSplit = en3 ? iSp : na
 
 // and back: the day candle number k opens on, in days from the quarter's own
 // start. The weekday count is the first guess and every shut day inside it
@@ -452,24 +455,104 @@ cycRight  = dayStart + (yB - dIn) * MS_DAY - halfBar
 qtrRight  = dayStart + (qEndDay - dIn) * MS_DAY - halfBar
 splitRight = dayStart + (sEndDay - dIn) * MS_DAY - halfBar
 
+// ───────────────────────── THE DATE LIST ──────────────────────────────────────
+// Everything above this point works the ladder out by arithmetic. This reads it
+// off the list in the settings instead, and there is nothing to get wrong: each
+// date opens a cell of the split row, every fourth date also opens a quarter,
+// every sixteenth also opens a year, and the last date closes the last year.
+//
+// Parsed once, on the first bar, and kept. Editing the input re-runs the script
+// from the start, so the list is re-read then.
+var int[] dts = array.new_int()
+if barstate.isfirst
+    string flat = str.replace_all(str.replace_all(str.replace_all(dtIn, "\n", " "), "\t", " "), ",", " ")
+    string[] tok = str.split(flat, " ")
+    if array.size(tok) > 0
+        for i = 0 to array.size(tok) - 1
+            string t = array.get(tok, i)
+            // the shortest real date is d.m.yyyy, eight characters; anything
+            // shorter is a stray separator
+            if str.length(t) >= 8
+                string[] prt = str.split(t, ".")
+                if array.size(prt) == 3
+                    float dd = str.tonumber(array.get(prt, 0))
+                    float mm = str.tonumber(array.get(prt, 1))
+                    float yy = str.tonumber(array.get(prt, 2))
+                    if not na(dd) and not na(mm) and not na(yy)
+                        array.push(dts, timestamp(gridTZ, int(yy), int(mm), int(dd), 12, 0, 0))
+    if array.size(dts) > 1
+        array.sort(dts, order.ascending)
+
+// WHICH ENTRY THIS BAR SITS ON: the number of dates at or before it, less one.
+// The date is the snapped one, so a weekly bar that came out dated to the
+// Sunday is read against its Monday like everywhere else. Counted rather than
+// searched, because the list is short and a count cannot be off by one.
+qTs  = tdayMid + wkSnap * MS_DAY
+dLen = array.size(dts)
+int dCnt = 0
+if dLen > 0
+    for i = 0 to dLen - 1
+        if array.get(dts, i) <= qTs
+            dCnt := dCnt + 1
+dPos = dCnt - 1
+
+// the last date only closes the year, so it opens no cell of its own
+useL = dtOn and dLen > 4 and dPos >= 0 and dPos < dLen - 1
+
+int    spanYrD = na
+int    endSpD  = na
+int    endQtD  = na
+int    endCyD  = na
+int    iQtrD   = na
+int    iSpD    = na
+if useL
+    int qSlot = int(dPos / 4) * 4
+    int ySlot = int(dPos / 16) * 16
+    iSpD    := dPos - qSlot + 1
+    iQtrD   := int(qSlot / 4) % 4 + 1
+    spanYrD := year(array.get(dts, ySlot), gridTZ)
+    endSpD  := array.get(dts, dPos + 1)
+    endQtD  := array.get(dts, math.min(qSlot + 4, dLen - 1))
+    endCyD  := array.get(dts, math.min(ySlot + 16, dLen - 1))
+
+// whole days from this bar's own date to a date on the list, so a right edge
+// is built the same way as the computed ones: off this bar's 18:00 open
+dayGap(int t) =>
+    int(math.round((nz(t, tdayMid) - tdayMid) / MS_DAY))
+
+// From here down the ladder reads these, and only these. Outside the list they
+// are the computed values, so a year you have not listed draws exactly as before.
+spanYrU    = useL ? spanYrD : spanYr
+iQtrU      = useL ? iQtrD : iQtr
+iSpU       = useL ? iSpD : iSp
+iCyc4U     = int((spanYrU + 1) % 4) + 1
+cycBegU    = timestamp(gridTZ, spanYrU, 1, 1, 0, 0)
+cycRightU  = useL ? dayStart + dayGap(endCyD) * MS_DAY - halfBar : cycRight
+qtrRightU  = useL ? dayStart + dayGap(endQtD) * MS_DAY - halfBar : qtrRight
+splitRghtU = useL ? dayStart + dayGap(endSpD) * MS_DAY - halfBar : splitRight
+
+// the split row is drawn on the daily chart alone, so off it the level carries
+// no number and contributes no link to a chain
+iSplit = en3 ? iSpU : na
+
 // a cell is new when its own number changes, not when its left edge moves, so
 // the edges above are read once, on the bar that opens it
-cycId   = spanYr
-qtrId   = spanYr * 10 + iQtr
-splitId = spanYr * 100 + iQtr * 10 + iSp
+cycId   = spanYrU
+qtrId   = spanYrU * 10 + iQtrU
+splitId = spanYrU * 100 + iQtrU * 10 + iSpU
 
 // how far back the slow rows keep their cells: inside the current four year
 // cycle from the weekly chart up, where the whole cycle is the point, and inside
 // the current year below it, where older years are only clutter
-cycFirst = timestamp(gridTZ, spanYr - (iCyc4 - 1), 1, 1, 0, 0)
+cycFirst = timestamp(gridTZ, spanYrU - (iCyc4U - 1), 1, 1, 0, 0)
 // two days of slack, because a cell opens on the evening before its first date
-slowTrim = (tfs >= 604800 ? cycFirst : cycBeg) - 2 * MS_DAY
+slowTrim = (tfs >= 604800 ? cycFirst : cycBegU) - 2 * MS_DAY
 
 
 // ──────────────────────────── label construction ──────────────────────────────
 var int[] idx = array.new_int(9, na)
-array.set(idx, 0, iCyc4)
-array.set(idx, 1, iQtr)
+array.set(idx, 0, iCyc4U)
+array.set(idx, 1, iQtrU)
 array.set(idx, 2, iSplit)
 array.set(idx, 3, iWeek)
 array.set(idx, 4, iDay)
@@ -536,7 +619,7 @@ nameOf(int lvl, int yrV, int qV, int spV, int wkV, int rawV, int sessV) =>
         => ""
 
 nameFor(int lvl) =>
-    nameOf(lvl, spanYr, iQtr, iSplit, iWeek, rawDay, iSess)
+    nameOf(lvl, spanYrU, iQtrU, iSplit, iWeek, rawDay, iSess)
 
 // names reach down to this level, numbers take over below it
 namedDepth = nameRows == "Off" ? 0 : nameRows == "Down to the day" ? 5 : 6
@@ -619,13 +702,13 @@ l225 = time - off225
 l562 = time - off5625
 
 if en1
-    cell(bx1, cycId != cycId[1], slowLeft, cycRight, y1, cellText(1), fillFor(1, iCyc4), slowTrim)
+    cell(bx1, cycId != cycId[1], slowLeft, cycRightU, y1, cellText(1), fillFor(1, iCyc4U), slowTrim)
 
 if en2
-    cell(bx2, qtrId != qtrId[1], slowLeft, qtrRight, y2, cellText(2), fillFor(2, iQtr), slowTrim)
+    cell(bx2, qtrId != qtrId[1], slowLeft, qtrRightU, y2, cellText(2), fillFor(2, iQtrU), slowTrim)
 
 if en3
-    cell(bx3, splitId != splitId[1], slowLeft, splitRight, y3, cellText(3), fillFor(3, iSplit), slowTrim)
+    cell(bx3, splitId != splitId[1], slowLeft, splitRghtU, y3, cellText(3), fillFor(3, iSplit), slowTrim)
 
 if en4
     cell(bx4, weekStart != weekStart[1], weekStart, weekStart + 5 * MS_DAY, y4, cellText(4), fillFor(4, iWeek), 0)
@@ -658,7 +741,7 @@ var box[] fx = array.new_box()
 aheadOne(int lvl, int beg, int len, int probe) =>
     [c, q, w, d, raw, sn, n90, n225, n562] = idxAt(beg + probe)
     array.set(idx, 0, c)
-    array.set(idx, 1, iQtr)      // the quarter is the year's own, not the month's
+    array.set(idx, 1, iQtrU)     // the quarter is the year's own, not the month's
     array.set(idx, 2, na)
     array.set(idx, 3, w)
     array.set(idx, 4, d)
@@ -667,7 +750,7 @@ aheadOne(int lvl, int beg, int len, int probe) =>
     array.set(idx, 7, n225)
     array.set(idx, 8, n562)
     int top = lvl == 4 ? y4 : lvl == 5 ? y5 : lvl == 6 ? y6 : lvl == 7 ? y7 : lvl == 8 ? y8 : y9
-    array.push(fx, box.new(left = beg, top = top, right = beg + len, bottom = top - 1, xloc = xloc.bar_time, bgcolor = fillFor(lvl, array.get(idx, lvl - 1)), border_color = borderCol, border_width = borderW, border_style = line.style_dashed, text = cellTextOf(lvl, nameOf(lvl, 0, iQtr, na, w, raw, sn)), text_color = textCol, text_size = textSizeIn))
+    array.push(fx, box.new(left = beg, top = top, right = beg + len, bottom = top - 1, xloc = xloc.bar_time, bgcolor = fillFor(lvl, array.get(idx, lvl - 1)), border_color = borderCol, border_width = borderW, border_style = line.style_dashed, text = cellTextOf(lvl, nameOf(lvl, 0, iQtrU, na, w, raw, sn)), text_color = textCol, text_size = textSizeIn))
 
 if barstate.islast
     while array.size(fx) > 0
