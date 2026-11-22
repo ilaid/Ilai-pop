@@ -46,11 +46,12 @@ symYM   = input.symbol("CBOT_MINI:YM1!", "YM",  group = g_tb)
 symES   = input.symbol("CME_MINI:ES1!",  "ES",  group = g_tb)
 symNQ   = input.symbol("CME_MINI:NQ1!",  "NQ",  group = g_tb)
 symRTY  = input.symbol("CME_MINI:RTY1!", "RTY", group = g_tb)
-tbPosIn = input.string("Bottom Right", "Position", options = ["Top Left", "Top Center", "Top Right", "Middle Left", "Middle Right", "Bottom Left", "Bottom Center", "Bottom Right"], group = g_tb)
-tbSizeIn = input.string("Normal", "Text size", options = ["Tiny", "Small", "Normal", "Large"], group = g_tb)
+tbPosIn = input.string("Bottom Left", "Position", options = ["Top Left", "Top Center", "Top Right", "Middle Left", "Middle Right", "Bottom Left", "Bottom Center", "Bottom Right"], group = g_tb)
+tbSizeIn = input.string("Small", "Text size", options = ["Tiny", "Small", "Normal", "Large"], group = g_tb)
+tbRaise = input.int(0, "Move away from the edge (rows)", minval = 0, maxval = 30, group = g_tb, tooltip = "Adds empty, invisible rows between the table and the edge of the chart. With a Bottom position the table goes up; with a Top position it goes down.")
 tbBg    = input.color(color.white,             "Background", inline = "tc", group = g_tb)
 tbText  = input.color(color.black,             "Text",       inline = "tc", group = g_tb)
-tbBord  = input.color(color.black,             "Border",     inline = "tc", group = g_tb)
+tbBord  = input.color(color.new(color.black, 100), "Lines", inline = "tc", group = g_tb, tooltip = "Transparent by default, so the gaps between cells show the chart behind them and the empty rows used to move the table stay invisible. A solid colour also draws lines around those empty rows.")
 tbName  = input.color(color.gray,              "Level name", inline = "tc2", group = g_tb)
 tbUp    = input.color(color.rgb(76, 175, 80),  "Above",      inline = "tc2", group = g_tb)
 tbDn    = input.color(color.rgb(229, 57, 53),  "Below",      inline = "tc2", group = g_tb)
@@ -213,26 +214,38 @@ if barstate.islast
 side(float cl, float lvl) =>
     na(cl) or na(lvl) ? na : cl > lvl ? 1 : cl < lvl ? -1 : 0
 
-var table tb = table.new(tbPos, 6, 9, bgcolor = tbBg, frame_color = tbBord, frame_width = 1, border_color = tbBord, border_width = 1)
+MAXPAD = 30
+var table tb = table.new(tbPos, 6, 9 + MAXPAD, frame_width = 0, border_color = tbBord, border_width = 1)
+
+isTop = tbPos == position.top_left or tbPos == position.top_center or tbPos == position.top_right
+
+// an invisible row that only takes up space
+padRow(int r) =>
+    table.cell(tb, 0, r, " ", text_color = color.new(color.black, 100), text_size = tbSize)
 
 arrowCell(int col, int row, int s, float lvl) =>
     txt = na(s) ? "—" : s == 1 ? "▲" : s == -1 ? "▼" : "="
     clr = na(s) or s == 0 ? tbName : s == 1 ? tbUp : tbDn
     tip = na(lvl) ? "" : str.tostring(lvl)
-    table.cell(tb, col, row, txt, text_color = clr, text_size = tbSize, tooltip = tip)
+    table.cell(tb, col, row, txt, text_color = clr, bgcolor = tbBg, text_size = tbSize, tooltip = tip)
 
 if barstate.islast and tbOn
-    table.clear(tb, 0, 0, 5, 8)
+    table.clear(tb, 0, 0, 5, 8 + MAXPAD)
+    // with a Top position the empty rows go above the table, otherwise below
+    top = isTop ? tbRaise : 0
+    for p = 0 to tbRaise - 1
+        if tbRaise > 0 and isTop
+            padRow(p)
     hdr = array.from("רמה", "כיוון", "YM", "ES", "NQ", "RTY")
     for c = 0 to 5
-        table.cell(tb, c, 0, array.get(hdr, c), text_color = tbText, text_size = tbSize)
+        table.cell(tb, c, top, array.get(hdr, c), text_color = tbText, bgcolor = tbBg, text_size = tbSize)
 
     yv = array.from(y0, y1, y2, y3, y4, y5, y6, y7)
     ev = array.from(e0, e1, e2, e3, e4, e5, e6, e7)
     nv = array.from(n0, n1, n2, n3, n4, n5, n6, n7)
     rv = array.from(r0, r1, r2, r3, r4, r5, r6, r7)
 
-    row = 1
+    row = top + 1
     // biggest container on top
     for i = 7 to 0
         if array.get(inTF, i)
@@ -244,13 +257,17 @@ if barstate.islast and tbOn
             allUp = sY == 1 and sE == 1 and sN == 1 and sR == 1
             allDn = sY == -1 and sE == -1 and sN == -1 and sR == -1
 
-            table.cell(tb, 0, row, array.get(NAMES, i), text_color = tbName, text_size = tbSize)
-            table.cell(tb, 1, row, allUp ? "▲" : allDn ? "▼" : "—", text_color = allUp ? tbUp : allDn ? tbDn : tbName, text_size = tbSize)
+            table.cell(tb, 0, row, array.get(NAMES, i), text_color = tbName, bgcolor = tbBg, text_size = tbSize)
+            table.cell(tb, 1, row, allUp ? "▲" : allDn ? "▼" : "—", text_color = allUp ? tbUp : allDn ? tbDn : tbName, bgcolor = tbBg, text_size = tbSize)
             arrowCell(2, row, sY, array.get(yv, i))
             arrowCell(3, row, sE, array.get(ev, i))
             arrowCell(4, row, sN, array.get(nv, i))
             arrowCell(5, row, sR, array.get(rv, i))
             row += 1
+
+    if not isTop and tbRaise > 0
+        for p = 0 to tbRaise - 1
+            padRow(row + p)
 
 // the levels are drawn entirely with lines; this hidden plot only satisfies
 // Pine's "at least one output" rule
