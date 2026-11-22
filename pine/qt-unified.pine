@@ -94,6 +94,7 @@ cornerTbl  = input.string("טבלה", "סידור הצד", options = ["טבלה"
 tblSz      = input.string("small", "גודל הטבלה (טקסט)", options = ["tiny", "small", "normal", "large"], group = grpCor, tooltip = "tiny = הכי קטן ש-TradingView מאפשר.")
 tblStyle   = input.string("רך", "טבלה — סגנון", options = ["רך", "מסגרת"], group = grpCor, tooltip = "רך = בלי מסגרת, בלי קווים ובלי רקע — כמו שורות ה-TMO/TWO: טקסט בלבד, כותרות ושמות המסגרות באפור.\nמסגרת = הטבלה המודפסת: קווים שחורים ורקע אטום.")
 tblHdr     = input.bool(true, "טבלה — שורת כותרות", group = grpCor)
+tblDir     = input.bool(false, "טבלה — עמודת כיוון", group = grpCor, tooltip = "כבוי = הכיוון נקרא מהצבע של הפעילות. כשהכיוון בא ממסגרת גבוהה (אין למסגרת שבירה פעילה משלה) — בעמודת הפעילות כתוב למשל ▼ (15m).")
 tblOppAll  = input.bool(true, "טבלה — כל הנגדיות", group = grpCor, tooltip = "דלוק = כל הנגדיות החיות, מקובצות לפי כיוון (▼F1 F2 P · ▲S).\nכבוי = רק האחרונה מכל סוג.")
 tblOppSz   = input.string("tiny", "טבלה — גודל הכתב בנגדיות", options = ["tiny", "small", "normal", "large"], group = grpCor, tooltip = "רק עמודת הנגדיות. tiny = הכי קטן ש-TradingView מאפשר — חוסך רוחב.")
 tblOppT    = input.bool(true, "טבלה — שעות בעמודת הנגדיות", group = grpCor, tooltip = "כבוי = בנגדיות רק הסוג והחץ (▼F2 · ▼P) — הטבלה צרה יותר.")
@@ -2087,7 +2088,8 @@ if barstate.islast
         if tblHdr
             array<string> hd = array.from("", "כיוון", "פעילות", "נגדיות", "PCP")
             for i = 0 to 4
-                table.cell(cTb2, f_tc(i), 0, array.get(hd, i), text_color = soft ? color.gray : chart.fg_color, text_size = tblSz, bgcolor = hBg)
+                if i != 1 or tblDir
+                    table.cell(cTb2, f_tc(i), 0, array.get(hd, i), text_color = soft ? color.gray : chart.fg_color, text_size = tblSz, bgcolor = hBg)
             row := 1
         for cls = 8 to 1
             for k = 0 to array.size(allEng) - 1
@@ -2182,9 +2184,11 @@ if barstate.islast
                         string pdx = "◦PCP " + f_tmStr(e.pndT, cls)
 
                         table.cell(cTb2, 0, rr, f_clsName(cls), text_color = cls == tfClass ? chart.fg_color : color.gray, text_size = tblSz, bgcolor = cBg)
-                        table.cell(cTb2, 1, rr, dTx, text_color = dC, text_size = tblSz, bgcolor = cBg)
+                        if tblDir
+                            table.cell(cTb2, 1, rr, dTx, text_color = dC, text_size = tblSz, bgcolor = cBg)
                         // פעילות: השלישייה והזוג יחד — כמו בשורה, האחרונה ראשונה
-                        string aX = tA
+                        // בלי עמודת כיוון: כיוון שבא ממסגרת גבוהה נכתב בפעילות
+                        string aX = not tblDir and eD != 0 and eS != cls ? dTx + (tA != "" ? " · " + tA : "") : tA
                         table.cell(cTb2, f_tc(2), rr, aX, text_color = dC, text_size = tblSz, bgcolor = cBg)
                         // נר שעוד לא הוכרע (PCP) — בעמודה משלו, לא עם השבירות
                         table.cell(cTb2, f_tc(4), rr, pdT or pdP ? f_tmStr(e.pndT, cls) : "", text_color = pdT ? colPend : colPair, text_size = tblSz, bgcolor = cBg)
