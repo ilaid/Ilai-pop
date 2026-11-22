@@ -92,6 +92,7 @@ cornerAllT = input.bool(true, "שעה ליד כל שבירה בצד", group = gr
 offFade    = input.int(60, "שקיפות ממתינה (✗)", minval = 0, maxval = 90, group = grpCor, tooltip = "ממתינה נכתבת בצבע שלה (זוג 3·4 — בצבע הזוג), רק דהוי.")
 cornerTbl  = input.string("טבלה", "סידור הצד", options = ["טבלה", "שורה"], group = grpCor, tooltip = "טבלה: מסגרת · כיוון · שלישייה · זוג 3·4 · נגדיות · PCP — בתאים עם רקע, שורה לכל מסגרת.\nשורה: הסידור הקודם.")
 tblSz      = input.string("small", "גודל הטבלה (טקסט)", options = ["tiny", "small", "normal", "large"], group = grpCor, tooltip = "tiny = הכי קטן ש-TradingView מאפשר.")
+tblStyle   = input.string("רך", "טבלה — סגנון", options = ["רך", "מסגרת"], group = grpCor, tooltip = "רך = בלי מסגרת, בלי קווים ובלי רקע — כמו שורות ה-TMO/TWO: טקסט בלבד, כותרות ושמות המסגרות באפור.\nמסגרת = הטבלה המודפסת: קווים שחורים ורקע אטום.")
 tblHdr     = input.bool(true, "טבלה — שורת כותרות", group = grpCor)
 tblOppAll  = input.bool(true, "טבלה — כל הנגדיות", group = grpCor, tooltip = "דלוק = כל הנגדיות החיות, מקובצות לפי כיוון (▼F1 F2 P · ▲S).\nכבוי = רק האחרונה מכל סוג.")
 tblOppSz   = input.string("tiny", "טבלה — גודל הכתב בנגדיות", options = ["tiny", "small", "normal", "large"], group = grpCor, tooltip = "רק עמודת הנגדיות. tiny = הכי קטן ש-TradingView מאפשר — חוסך רוחב.")
@@ -2068,17 +2069,21 @@ f_whenTx(Cand c, int cls) =>
 if barstate.islast
     table.clear(cTb2, 0, 0, 4, 10 + cornerLift)
     if cornerOn and tfClass != 0 and cornerTbl == "טבלה"
-        // כמו טבלה מודפסת: רקע אטום בצבע הגרף, מסגרת וקווים דקים
-        table.set_border_color(cTb2, chart.fg_color)
-        table.set_frame_color(cTb2, chart.fg_color)
-        table.set_frame_width(cTb2, 1)
-        color hBg = chart.bg_color
-        color cBg = chart.bg_color
+        // מסגרת: כמו טבלה מודפסת — רקע אטום בצבע הגרף, מסגרת וקווים דקים.
+        // רך: טקסט בלבד, בלי קווים ובלי רקע.
+        bool  soft = tblStyle == "רך"
+        color none = color.new(color.black, 100)
+        table.set_border_color(cTb2, soft ? none : chart.fg_color)
+        table.set_frame_color(cTb2, soft ? none : chart.fg_color)
+        table.set_frame_width(cTb2, soft ? 0 : 1)
+        table.set_border_width(cTb2, soft ? 0 : 1)
+        color hBg = soft ? none : chart.bg_color
+        color cBg = soft ? none : chart.bg_color
         int   row = 0
         if tblHdr
             array<string> hd = array.from("", "כיוון", "פעילות", "נגדיות", "PCP")
             for i = 0 to 4
-                table.cell(cTb2, i, 0, array.get(hd, i), text_color = chart.fg_color, text_size = tblSz, bgcolor = hBg)
+                table.cell(cTb2, i, 0, array.get(hd, i), text_color = soft ? color.gray : chart.fg_color, text_size = tblSz, bgcolor = hBg)
             row := 1
         for cls = 8 to 1
             for k = 0 to array.size(allEng) - 1
