@@ -48,10 +48,10 @@ symNQ   = input.symbol("CME_MINI:NQ1!",  "NQ",  group = g_tb)
 symRTY  = input.symbol("CME_MINI:RTY1!", "RTY", group = g_tb)
 tbPosIn = input.string("Bottom Left", "Position", options = ["Top Left", "Top Center", "Top Right", "Middle Left", "Middle Right", "Bottom Left", "Bottom Center", "Bottom Right"], group = g_tb)
 tbSizeIn = input.string("Small", "Text size", options = ["Tiny", "Small", "Normal", "Large"], group = g_tb)
-tbRaise = input.int(0, "Move away from the edge (rows)", minval = 0, maxval = 30, group = g_tb, tooltip = "Adds empty, invisible rows between the table and the edge of the chart. With a Bottom position the table goes up; with a Top position it goes down.")
+tbRaise = input.float(0, "Move away from the edge (% of chart height)", minval = 0, maxval = 80, step = 1, group = g_tb, tooltip = "0 = a clean table in the corner. Above 0 an empty strip of that height is added between the table and the edge of the chart (Bottom positions go up, Top positions go down). TradingView draws the table frame around that strip too.")
 tbBg    = input.color(color.white,             "Background", inline = "tc", group = g_tb)
 tbText  = input.color(color.black,             "Text",       inline = "tc", group = g_tb)
-tbBord  = input.color(color.new(color.black, 100), "Lines", inline = "tc", group = g_tb, tooltip = "Transparent by default, so the gaps between cells show the chart behind them and the empty rows used to move the table stay invisible. A solid colour also draws lines around those empty rows.")
+tbBord  = input.color(color.black,             "Lines",      inline = "tc", group = g_tb)
 tbName  = input.color(color.gray,              "Level name", inline = "tc2", group = g_tb)
 tbUp    = input.color(color.rgb(76, 175, 80),  "Above",      inline = "tc2", group = g_tb)
 tbDn    = input.color(color.rgb(229, 57, 53),  "Below",      inline = "tc2", group = g_tb)
@@ -214,14 +214,14 @@ if barstate.islast
 side(float cl, float lvl) =>
     na(cl) or na(lvl) ? na : cl > lvl ? 1 : cl < lvl ? -1 : 0
 
-MAXPAD = 30
-var table tb = table.new(tbPos, 6, 9 + MAXPAD, frame_width = 0, border_color = tbBord, border_width = 1)
+var table tb = table.new(tbPos, 6, 10, frame_color = tbBord, frame_width = 1, border_color = tbBord, border_width = 1)
 
 isTop = tbPos == position.top_left or tbPos == position.top_center or tbPos == position.top_right
 
-// an invisible row that only takes up space
+// one empty strip across the whole table that only takes up space
 padRow(int r) =>
-    table.cell(tb, 0, r, " ", text_color = color.new(color.black, 100), text_size = tbSize)
+    table.cell(tb, 0, r, "", height = tbRaise, bgcolor = color.new(color.white, 100))
+    table.merge_cells(tb, 0, r, 5, r)
 
 arrowCell(int col, int row, int s, float lvl) =>
     txt = na(s) ? "—" : s == 1 ? "▲" : s == -1 ? "▼" : "="
@@ -230,12 +230,12 @@ arrowCell(int col, int row, int s, float lvl) =>
     table.cell(tb, col, row, txt, text_color = clr, bgcolor = tbBg, text_size = tbSize, tooltip = tip)
 
 if barstate.islast and tbOn
-    table.clear(tb, 0, 0, 5, 8 + MAXPAD)
-    // with a Top position the empty rows go above the table, otherwise below
-    top = isTop ? tbRaise : 0
-    for p = 0 to tbRaise - 1
-        if tbRaise > 0 and isTop
-            padRow(p)
+    table.clear(tb, 0, 0, 5, 9)
+    // with a Top position the empty strip goes above the table, otherwise below
+    hasPad = tbRaise > 0
+    top = isTop and hasPad ? 1 : 0
+    if isTop and hasPad
+        padRow(0)
     hdr = array.from("רמה", "כיוון", "YM", "ES", "NQ", "RTY")
     for c = 0 to 5
         table.cell(tb, c, top, array.get(hdr, c), text_color = tbText, bgcolor = tbBg, text_size = tbSize)
@@ -265,9 +265,8 @@ if barstate.islast and tbOn
             arrowCell(5, row, sR, array.get(rv, i))
             row += 1
 
-    if not isTop and tbRaise > 0
-        for p = 0 to tbRaise - 1
-            padRow(row + p)
+    if not isTop and hasPad
+        padRow(row)
 
 // the levels are drawn entirely with lines; this hidden plot only satisfies
 // Pine's "at least one output" rule
