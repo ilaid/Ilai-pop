@@ -11,6 +11,10 @@ indicator("Sav FX - True Opens + Index Table", shorttitle = "True Opens Table", 
 //  Each index's levels are worked out on its own candles with exactly the same
 //  New York wall clock grid, so "ES above TDO" means ES above ES's TDO.
 //
+//  The same answer is written on each line's label: "TDO  ▲▲▼▲" in the order
+//  YM ES NQ RTY, green when all four are above, red when all four are below.
+//  The table is optional and off by default.
+//
 //  The "כיוון" column: ▲ all four above, ▼ all four below, — mixed.
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -28,6 +32,7 @@ toCol     = input.color(color.rgb(75, 86, 186, 65), "Colour", group = g_to)
 toStyleIn = input.string("Dashed", "Line style", options = ["Solid", "Dotted", "Dashed"], inline = "ts", group = g_to)
 toWidth   = input.int(1, "Width", minval = 1, maxval = 5, inline = "ts", group = g_to)
 toExpire  = input.bool(true, "Drop a level when its period ends", group = g_to)
+lblIdx    = input.bool(true, "YM ES NQ RTY arrows on the labels", group = g_to, tooltip = "Each label reads e.g.  TDO  ▲▲▼▲  - one arrow per index, in the order YM, ES, NQ, RTY, each measured against its own open of that level. Green: all four above. Red: all four below. Line colour: mixed. · means that index has no live level yet. Tap or hover the label for the names.")
 
 useTNcP = input.bool(true, "TNcP  - 2nd sub-quarter in the quarter", group = g_to)
 useTMcO = input.bool(true, "TMcO - 2nd quarter in the micro",        group = g_to)
@@ -41,7 +46,7 @@ useT4YO = input.bool(true, "T4YO - 2nd year in the four year cycle", group = g_t
 toStyle = toStyleIn == "Solid" ? line.style_solid : toStyleIn == "Dotted" ? line.style_dotted : line.style_dashed
 
 g_tb = "Table"
-tbOn    = input.bool(true, "Show table", group = g_tb)
+tbOn    = input.bool(false, "Show table", group = g_tb, tooltip = "Off by default: the same information is already on the line labels.")
 symYM   = input.symbol("CBOT_MINI:YM1!", "YM",  group = g_tb)
 symES   = input.symbol("CME_MINI:ES1!",  "ES",  group = g_tb)
 symNQ   = input.symbol("CME_MINI:NQ1!",  "NQ",  group = g_tb)
@@ -189,17 +194,6 @@ for i = 0 to 7
         line.set_xy2(ln, bar_index, open)
         label.set_xy(array.get(lbs, i), bar_index, open)
 
-if barstate.islast
-    for i = 0 to 7
-        ln = array.get(lns, i)
-        lb = array.get(lbs, i)
-        if toOn and array.get(inTF, i) and not na(array.get(chartP, i))
-            line.set_x2(ln, bar_index + lookahead)
-            label.set_x(lb, bar_index + lookahead)
-        else
-            line.set_xy1(ln, na, na)
-            line.set_xy2(ln, na, na)
-            label.set_xy(lb, na, na)
 
 
 // ──────────────────────────── the four indices ────────────────────────────────
@@ -213,6 +207,36 @@ if barstate.islast
 // +1 above, -1 below, 0 on it, na when the level is not live
 side(float cl, float lvl) =>
     na(cl) or na(lvl) ? na : cl > lvl ? 1 : cl < lvl ? -1 : 0
+
+// ▲ above, ▼ below, = on it, · not live yet
+mark(int s) =>
+    na(s) ? "·" : s == 1 ? "▲" : s == -1 ? "▼" : "="
+
+if barstate.islast
+    yv = array.from(y0, y1, y2, y3, y4, y5, y6, y7)
+    ev = array.from(e0, e1, e2, e3, e4, e5, e6, e7)
+    nv = array.from(n0, n1, n2, n3, n4, n5, n6, n7)
+    rv = array.from(r0, r1, r2, r3, r4, r5, r6, r7)
+    for i = 0 to 7
+        ln = array.get(lns, i)
+        lb = array.get(lbs, i)
+        if toOn and array.get(inTF, i) and not na(array.get(chartP, i))
+            line.set_x2(ln, bar_index + lookahead)
+            label.set_x(lb, bar_index + lookahead)
+            if lblIdx
+                sY = side(yCl, array.get(yv, i))
+                sE = side(eCl, array.get(ev, i))
+                sN = side(nCl, array.get(nv, i))
+                sR = side(rCl, array.get(rv, i))
+                allUp = sY == 1 and sE == 1 and sN == 1 and sR == 1
+                allDn = sY == -1 and sE == -1 and sN == -1 and sR == -1
+                label.set_text(lb, array.get(NAMES, i) + "  " + mark(sY) + mark(sE) + mark(sN) + mark(sR))
+                label.set_textcolor(lb, allUp ? tbUp : allDn ? tbDn : toCol)
+                label.set_tooltip(lb, "YM " + mark(sY) + "   ES " + mark(sE) + "   NQ " + mark(sN) + "   RTY " + mark(sR))
+        else
+            line.set_xy1(ln, na, na)
+            line.set_xy2(ln, na, na)
+            label.set_xy(lb, na, na)
 
 var table tb = table.new(tbPos, 6, 9, frame_color = tbBord, frame_width = tbLineW, border_color = tbBord, border_width = tbLineW)
 
