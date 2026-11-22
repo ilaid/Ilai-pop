@@ -1038,9 +1038,10 @@ f_step(Eng e, int t, array<float> q1, array<float> q2, array<float> q3, array<fl
         for k = 0 to 1
             [d, ab, at, bb, bt, xb, xt, anyF, anyV] = f_group(k, LB, LT, LF, LM)
             if d != 0
-                // גאפ מעבר (הנר השלישי פותח מחזור חדש בפער) או גאפ שכולו VI — שייך
-                // למחזור שהוא פותח. FVG רגיל — למחזור של הנר האמצעי.
-                bool tagNow = (cycEdge and anyV) or not anyF
+                // FVG — תמיד למחזור של הנר האמצעי (הנר שהגאפ שלו; הנר השלישי רק מאשר),
+                // גם כשהנר השלישי פותח מחזור חדש בפער. גאפ שכולו VI (בין שני נרות) —
+                // למחזור שהוא פותח.
+                bool tagNow = not anyF
                 if not (newLife and not keepL and not tagNow)
                     e.gapCounter := e.gapCounter + 1
                     int gRef = tagNow ? rf : rfMid
@@ -1562,27 +1563,6 @@ f_qsAt(int sc, int t, int durMs) =>
                     pat   := h
     [found, pat]
 
-// הרצפים וה-QS של שבירה על נכס אחד. HSSMT — קודם נר השבירה של הסגירה, ואם
-// הוא לא ב-QS גם זה של הפתיל.
-f_qsAsset(Acc acc, int sc, bool isBull, int typ, int refI, int dur) =>
-    string cR  = ""
-    string cT  = ""
-    bool   hot = false
-    string pat = ""
-    for ps = 0 to 1
-        bool isH = typ == 2 and ps == 0
-        if ps == 0 or (typ == 2 and not hot)
-            [b1, p1, b2, p2, ok] = f_pts(acc, isBull, isH, refI)
-            if ok
-                [h, q] = f_qsAt(sc, b2, dur)
-                if ps == 0 or h
-                    cR := f_qsChain(sc, b1)
-                    cT := f_qsChain(sc, b2)
-                if h
-                    hot := true
-                    pat := q
-    [cR, cT, hot, pat]
-
 f_clsMs(int c) => c == 1 ? 60000 : c == 2 ? 300000 : c == 3 ? 900000 : c == 4 ? 3600000 : c == 5 ? 14400000 : 86400000
 // מספר ה-QS של נר במסגרת cls — "" כשהנר לא בחלון QS (או ש-QS כבוי במסגרת).
 // לגרף בלבד: Fill — נר העלייה האחרונה, PSP — נר הסווינג.
@@ -1595,49 +1575,29 @@ f_qsNum(int cls, int t) =>
     r
 
 // QS של משבצת SSMT k במנוע: [השורה העליונה לתווית, ★/☆, ב-QS?]
+// הנר של השבירה = הנר הראשון שלקח את הקיצון (SSMT — בפתיל, HSSMT — בסגירה;
+// SSMT שהפכה ל-HSSMT — הנר הראשון שסגר מעבר). ה-QS נבדק עליו, לא על הנר הקיצוני.
 f_ssQS(Eng e, int k) =>
     string top  = ""
     string star = ""
     bool   inQ  = false
     int    ty   = array.get(e.sTy, k)
     int    ri   = array.get(e.sRi, k)
-    if qsUseCls(e.cls) and ty != 0 and ri >= 0
+    int    tb   = array.get(e.sTm, k)
+    if qsUseCls(e.cls) and ty != 0 and ri >= 0 and tb > 0
         int    sc     = e.cls + 1
         bool   isBull = k % 2 == 1
         int    aLo    = k >= 2 ? 2 : 0
         int    aHi    = k >= 2 ? 3 : 2
-        bool   inGrp  = cA >= aLo and cA <= aHi
-        string oR  = ""
-        string oT  = ""
-        bool   oH  = false
-        string oP  = ""
-        bool   xOn = false
-        string xR  = ""
-        string xT  = ""
-        string xP  = ""
-        for a = aLo to aHi
-            [r, tt, h, pt] = f_qsAsset(f_engAcc(e, a), sc, isBull, ty, ri, f_clsMs(e.cls))
-            if a == cA
-                oR := r
-                oT := tt
-                oH := h
-                oP := pt
-            else
-                if not inGrp and a == aLo
-                    oR := r
-                    oT := tt
-                if not xOn and h
-                    xOn := true
-                    xR  := r
-                    xT  := tt
-                    xP  := pt
-        star := oH ? "★" : xOn ? "☆" : ""
-        string chR  = oR != "" ? oR : xR
-        string chT  = oT != "" ? oT : xT
-        // על הגרף — מספר ה-QS במקום ★/☆ (כמו ב-Fill וב-PSP)
-        string qN = oH ? oP : xOn ? xP : ""
-        top := chR != "" ? chR + "-" + chT + (qN != "" ? " · " + qN : "") : ""
-        inQ := oH or xOn
+        int    aR     = cA >= aLo and cA <= aHi ? cA : aLo
+        [b1, p1, b2, p2, ok] = f_pts(f_engAcc(e, aR), isBull, ty == 2, ri)
+        [h, q] = f_qsAt(sc, tb, f_clsMs(e.cls))
+        string chR = b1 > 0 ? f_qsChain(sc, b1) : ""
+        string chT = f_qsChain(sc, tb)
+        star := h ? "★" : ""
+        // על הגרף — מספר ה-QS (כמו ב-Fill וב-PSP)
+        top := chR != "" ? chR + "-" + chT + (h ? " · " + q : "") : ""
+        inQ := h
     [top, star, inQ]
 
 type Cand
