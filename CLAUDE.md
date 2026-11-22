@@ -66,50 +66,47 @@ comes in, so no chart stacks more than four rows.
 - There is no "Exchange" clock option and no need for one. The only knob is
   "Shift From New York (hours)", which belongs on 0 and is there for moving the
   ladder on purpose, not for putting daylight saving right.
-- The year and its quarters are read **off the week, not off the day**. A
-  quarter opens with the first week that *begins* inside it, so its first day is
-  the **first Monday** of January, April, July or October, and the fourth runs
-  until the next year opens — 2026 is 5.1, 6.4, 6.7, 5.10, closing 4.1.2027.
-  That is how the weekly chart draws it: whole weekly candles, nothing of the
-  quarter before inside. The year follows the same rule, so the first days of
-  January still belong to the span that opened the year before. A turn day
-  belongs to the quarter it opens, and every turn is a Monday so none can land
-  on a weekend.
-  Because every boundary is a Monday, a bar's date is **snapped forward to its
-  Monday** (`wkSnap`) before it is compared with one. The bar that opens a week
-  comes out dated to the Sunday on any symbol whose week opens before 18:00 New
-  York — the FX week opens at 17:00 — and without the snap that whole week fell
-  into the quarter before and the next quarter started a **week late**. On a
-  daily chart the snap is 0. The TYO stays on 1 April all the same: it is the QT year, not
-  this ladder. An earlier attempt put the quarters on the day of the month the
-  year opened on (2.1, 2.4, 2.7, 2.10) — that was the daily chart's reading and
-  it is wrong; do not go back to it.
-- The four year cycle is 2023, 2024, 2025, 2026, written `(year + 1) % 4 + 1`.
+- **The ladder follows the owner's written rule set, and nothing else.** It
+  was handed over in full and every date in it is reproduced exactly; it is the
+  specification, so check any change against it before committing.
+  - **Rule 1, the year and its quarters (the weekly chart).** The year opens on
+    the **Monday of the week holding the first Tuesday of January**. Every week
+    belongs to the year and quarter of **its own Tuesday**. The year is four
+    quarters of **exactly 13 weeks**, Q1 being January; a 53-week year gives
+    the extra week to **Q4** (14 weeks). A quarter opens on a Monday and closes
+    the Sunday before the next. 2024: 1.1, 1.4, 1.7, 30.9 (Q4 14 weeks).
+    2025: 6.1, 7.4, 7.7, 6.10. 2026: 5.1, 6.4, 6.7, 5.10, closing 3.1.2027.
+  - **Rule 2, the quarter of the quarter (the daily chart).** The weekly
+    quarter's **trading days** divided in four: a cell opens after a quarter, a
+    half and three quarters of them, **rounded to nearest, a half rounding up**.
+    2026: **Q1** 63 td, 5.1 · 28.1 · 20.2 · 13.3 — **Q2** 62, 6.4 · 28.4 ·
+    19.5 · 11.6 — **Q3** 64, 6.7 · 28.7 · 19.8 · 11.9 — **Q4** 62, 5.10 ·
+    27.10 · 17.11 · 10.12. 2025 and 2024 are in the Pine header comment.
+  - **The nine holidays** that are not trading days: New Year's Day, MLK (3rd
+    Mon Jan), Presidents (3rd Mon Feb), Memorial (last Mon May), Juneteenth
+    (19.6), Independence (4.7), Labor (1st Mon Sep), Thanksgiving (4th Thu Nov),
+    Christmas (25.12). A Saturday holiday moves to the Friday, a Sunday one to
+    the Monday — **except New Year's Day, which does not move back to the
+    Friday**, so a Saturday one costs no trading day. **Good Friday IS a
+    trading day**: the futures trade it. That is the one place this parts
+    company with the equity calendar.
+  - Because every boundary is a Monday, a bar's date is **snapped forward to
+    its Monday** (`wkSnap`) before its Tuesday is taken. The bar that opens a
+    week comes out dated to the Sunday on any symbol whose week opens before
+    18:00 New York — the FX week opens at 17:00 — and without the snap that
+    whole week fell into the quarter before and the next quarter started a
+    **week late**. On a daily chart the snap is 0.
+  - The inverse (`tdDayOf`) counts the candidate day's **own** holiday in, which
+    is what puts the first cell on the right day when a quarter opens on a
+    holiday: 1.1.2024 is a Monday and shut, so Q1 2024 opens on the 2nd.
+  - Earlier attempts — quarters on the day of the month the year opened on
+    (2.1/2.4/2.7/2.10), quarters on the first Monday of Jan/Apr/Jul/Oct,
+    counting candles instead of trading days, and a date list typed into the
+    settings — are all **wrong and were removed**. Do not bring any of them back.
+- The four year cycle is 2023, 2024, 2025, 2026, written `(year + 1) % 4 + 1`,
+  off the QT year.
 - A week belongs to the month holding its **Tuesday**; a week whose Tuesday and
   Thursday fall in different months is dead and carries no number.
-- **The ladder is read off a date list in the settings**, not off arithmetic.
-  "Quarter Dates" holds one date per cell of the split row, `day.month.year`,
-  sixteen to a year (four quarters of four) plus one more that closes the last
-  year. Every date opens a split cell, every fourth also opens a quarter, every
-  sixteenth also opens a year, and the cell's right edge is the next date. The
-  list is parsed once on the first bar and sorted. **This is where a wrong date
-  gets fixed — in the input, by its owner, not in the code.** The arithmetic
-  below is only the fallback for a year the list does not cover; a bar outside
-  the list's span still draws off it, so do not delete it.
-- The fallback arithmetic: the quarter split counts the quarter's **own
-  candles** — the day it hands
-  over is the next quarter's **first** candle, not this one's last, so it is
-  **not** counted in — and divides by four, the leftover days going to the
-  cells at the **front** (so a quarter never runs 16 then 17). Counting the
-  handover day in pushed every cut a day on; do not put it back. **Candles, not
-  weekdays**: four days a year print none at all — New Year's Day, Good Friday,
-  Independence Day and Christmas — and counting those in leaves every cut after
-  them a day late. Every other holiday is a shortened session and still leaves
-  a candle. 2026 reads:
-  **Q1** 64 candles, 5.1 · 27.1 · 18.2 · 12.3 — **Q2** 64, 6.4 · 28.4 · 20.5 ·
-  11.6 — **Q3** 65, 6.7 · 29.7 · 20.8 · 11.9 — **Q4** 63, 5.10 · 27.10 · 18.11
-  · 10.12. The quarter dates are the model's own, given by its owner — check
-  any change against them before committing it.
 - Friday, a dead week and the weekend carry no number: colourless cell, and a
   mark holds the link's place in the chain so every row reads the same levels
   in the same order whatever the day.
