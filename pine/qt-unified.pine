@@ -174,8 +174,9 @@ f_cycName(int c) => c == 1 ? "22.5m" : c == 2 ? "90m" : c == 3 ? "Session" : c =
 //   15m    סשן                 יום מסחר
 //   1H     יום מסחר            שבוע
 //   4H     שבוע (לפי שלישי)    חודש — שבוע 5 ושבוע מת מיכל לעצמם
-//   1D     רבע-רבעון           רבעון
-//   1W     רבעון               שנת QT (אפריל)
+//   1D     רבע ברבע השבועי     רבע שבועי (13/14 שבועות, מחולק ל-4 לפי ימים)
+//   1W     רבע שבועי           שנה שבועית (Q1 = ינואר)
+//          שנה שבועית = מיום שני של השבוע של השלישי הראשון בינואר; רבע = 13 שבועות
 //   Mo     שנה                 מחזור 4 שנים (2023–2026…)
 //
 // מחזיר [ref, life, חסום?, רבע ראשון/חסום?, מספר ה-Q במיכל]
@@ -184,8 +185,15 @@ f_cycName(int c) => c == 1 ? "22.5m" : c == 2 ? "90m" : c == 3 ? "Session" : c =
 TZ  = "America/New_York"
 DAY = 86400000
 
-f_dim(int y, int m) =>
-    m == 2 ? (((y % 4 == 0 and y % 100 != 0) or y % 400 == 0) ? 29 : 28) : (m == 4 or m == 6 or m == 9 or m == 11 ? 30 : 31)
+// שנה שבועית: מתחילה ביום שני של השבוע שבו נמצא יום השלישי הראשון של ינואר
+// (שבוע שייך לשנה של יום השלישי שלו — אותו כלל ששבוע שייך לחודש ב-4H).
+// 4 רבעים של 13 שבועות; בשנה של 53 שבועות — Q4 מקבל 14.
+// 2026: 5.1 · 6.4 · 6.7 · 5.10 · 4.1.2027.
+f_wyStart(int y) =>
+    int t1 = timestamp(TZ, y, 1, 1, 12, 0)
+    int dw = dayofweek(t1, TZ)
+    int k  = (dayofweek.tuesday - dw + 7) % 7
+    t1 + (k - 1) * DAY
 
 f_cyc(int c, int t) =>
     int  mnd  = hour(t, TZ) * 60 + minute(t, TZ)
@@ -214,22 +222,31 @@ f_cyc(int c, int t) =>
     int  ssId = tdId * 10 + sIdx
     int  ucId = ssId * 10 + uIdx
     int  qrId = ucId * 10 + qIdx
-    int  qOf  = int(math.ceil(mm / 3.0))
-    int  qtId = yy * 10 + qOf
-    int  qtYr = mm >= 4 ? yy : yy - 1
     int  qdId = int(math.floor((yy - 2023) / 4.0))
-    int  qsM  = (qOf - 1) * 3 + 1
-    int  qLn  = f_dim(yy, qsM) + f_dim(yy, qsM + 1) + f_dim(yy, qsM + 2)
-    int  qDiQ = (dd - 1) + (mm > qsM ? f_dim(yy, qsM) : 0) + (mm > qsM + 1 ? f_dim(yy, qsM + 1) : 0)
-    int  qqIx = math.min(3, math.max(0, int(math.floor(qDiQ * 4.0 / qLn))))
-    int  rf   = c == 8 ? yy : c == 7 ? qtId : c == 6 ? qtId * 10 + qqIx : c == 5 ? wkId : c == 4 ? tdId : c == 3 ? ssId : c == 2 ? ucId : qrId
-    int  lf   = c == 8 ? qdId : c == 7 ? qtYr : c == 6 ? qtId : c == 5 ? mnId : c == 4 ? wkId : c == 3 ? tdId : c == 2 ? ssId : ucId
+    // 1W / 1D — רבעים שבועיים של 13 שבועות (Q1 = ינואר).
+    // 1D: כל רבע שבועי מחולק ל-4 לפי מספר הימים מתחילתו עד תחילת הבא.
+    int  wY   = year(tueT, TZ)
+    int  wQ   = 1
+    int  dqIx = 0
+    if c == 6 or c == 7
+        int ys0 = f_wyStart(wY)
+        int mon = timestamp(TZ, year(monT, TZ), month(monT, TZ), dayofmonth(monT, TZ), 12, 0)
+        int wI  = math.round((mon - ys0) / (7 * DAY))
+        wQ := math.min(4, math.max(1, int(math.floor(wI / 13.0)) + 1))
+        if c == 6
+            int qs0 = ys0 + (wQ - 1) * 13 * 7 * DAY
+            int qs1 = wQ == 4 ? f_wyStart(wY + 1) : qs0 + 13 * 7 * DAY
+            int nD  = math.round((qs1 - qs0) / DAY)
+            int dI  = math.round((timestamp(TZ, yy, mm, dd, 12, 0) - qs0) / DAY)
+            dqIx := nD > 0 ? math.min(3, math.max(0, int(math.floor(dI * 4.0 / nD)))) : 0
+    int  wqId = wY * 10 + wQ
+    int  rf   = c == 8 ? yy : c == 7 ? wqId : c == 6 ? wqId * 10 + dqIx : c == 5 ? wkId : c == 4 ? tdId : c == 3 ? ssId : c == 2 ? ucId : qrId
+    int  lf   = c == 8 ? qdId : c == 7 ? wY : c == 6 ? wqId : c == 5 ? mnId : c == 4 ? wkId : c == 3 ? tdId : c == 2 ? ssId : ucId
     bool fri  = dw == dayofweek.friday
     // 1H — שישי חסום. 4H — שישי של שבוע 4, שבוע 5 ושבוע מת חסומים.
     bool blk  = (c == 4 and fri) or (c == 5 and ((fri and wkN == 4) or wkN == 5 or (blockDeadWeek and dead)))
     int  qWk  = (dw == dayofweek.sunday or dw == dayofweek.saturday) ? 0 : dw - 1
-    int  qYr  = mm >= 4 ? int(math.floor((mm - 4) / 3.0)) + 1 : 4
-    int  qn   = c == 1 ? qIdx + 1 : c == 2 ? uIdx + 1 : c == 3 ? sIdx + 1 : c == 4 ? qWk : c == 5 ? (own ? 0 : wkN) : c == 6 ? qqIx + 1 : c == 7 ? qYr : ((yy - 2023) % 4 + 4) % 4 + 1
+    int  qn   = c == 1 ? qIdx + 1 : c == 2 ? uIdx + 1 : c == 3 ? sIdx + 1 : c == 4 ? qWk : c == 5 ? (own ? 0 : wkN) : c == 6 ? dqIx + 1 : c == 7 ? wQ : ((yy - 2023) % 4 + 4) % 4 + 1
     bool q1   = qn == 1 or blk or (c == 5 and own)
     [rf, lf, blk, q1, qn]
 
@@ -1459,26 +1476,13 @@ f_qsDigits(int t) =>
     mQ   = (tM >= 4 ? tM - 4 : tM + 8) % 3 + 1
     str.tostring(mQ) + (wk == 0 ? "·" : str.tostring(wk)) + (dN == 0 ? "·" : str.tostring(dN)) + str.tostring(sI + 1) + str.tostring(mI + 1) + str.tostring(qI + 1) + str.tostring(sqI + 1)
 
+// רמות ה-QS של היומי: שנה במחזור 4 השנים · רבע שבועי (Q1 = ינואר) · רבע ברבע —
+// אותה חלוקה כמו מחזורי 1W / 1D.
 f_qsDay(int t) =>
-    post = hour(t, TZ) * 60 + minute(t, TZ) >= 1080
-    tdt  = post ? t + 86400000 : t
-    yy   = year(tdt, TZ)
-    mm   = month(tdt, TZ)
-    dd   = dayofmonth(tdt, TZ)
-    qMI  = mm >= 4 ? mm - 4 : mm + 8
-    qY   = mm >= 4 ? yy : yy - 1
-    qQ   = math.floor(qMI / 3) + 1
-    qsM  = qQ == 1 ? 4 : qQ == 2 ? 7 : qQ == 3 ? 10 : 1
-    qsY  = qQ == 4 ? qY + 1 : qY
-    nsM  = qsM == 10 ? 1 : qsM + 3
-    nsY  = qsM == 10 ? qsY + 1 : qsY
-    qsT  = timestamp(TZ, qsY, qsM, 1, 12, 0)
-    nsT  = timestamp(TZ, nsY, nsM, 1, 12, 0)
-    tdNT = timestamp(TZ, yy, mm, dd, 12, 0)
-    qLn  = math.round((nsT - qsT) / 86400000)
-    dSnc = math.round((tdNT - qsT) / 86400000)
-    qq   = qLn > 0 ? math.min(3, math.max(0, math.floor(dSnc * 4 / qLn))) : 0
-    str.tostring(((yy - 2023) % 4 + 4) % 4 + 1) + str.tostring(qQ) + str.tostring(qq + 1)
+    [r7, l7, b7, x7, n7] = f_cyc(7, t)
+    [r6, l6, b6, x6, n6] = f_cyc(6, t)
+    int wy = l7
+    str.tostring(((wy - 2023) % 4 + 4) % 4 + 1) + str.tostring(n7) + str.tostring(n6)
 
 f_qsK(int sc)   => sc <= 2 ? 4 : sc == 3 ? 3 : sc == 4 ? 2 : sc == 5 ? 1 : 0
 f_qsLvl(int sc) => sc <= 1 ? 6 : sc == 2 ? 5 : sc == 3 ? 4 : sc == 4 ? 3 : sc == 5 ? 2 : 1
