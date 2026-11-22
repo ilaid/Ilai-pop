@@ -451,14 +451,16 @@ f_leg(int d, bool ok, float o0, float h0, float l0, float c0, float o1, float c1
     // סשן/מיקרו) משויך למחזור שהוא פותח, גם כשההרחבה כבויה.
     [b, t, f, r and ti >= 1, v]
 
-f_group(int kind, array<float> LB, array<float> LT, array<bool> LF, array<bool> LM) =>
+// כל כיוון נבדק בנפרד: באותו צעד יכול להיות גאפ עולה (למשל VI של פתיחה בפער
+// למעלה) וגם FVG יורד — שניהם נוצרים. (קודם: העולה גבר והיורד נעלם.)
+f_group(int kind, int fd, array<float> LB, array<float> LT, array<bool> LF, array<bool> LM) =>
     int  sa   = kind == 0 ? 0 : 2
     int  sb   = kind == 0 ? 1 : 3
     bool hasC = kind == 0
     bool act  = kind == 0 or use4
     int  cU   = (na(array.get(LT, sa * 2)) ? 0 : 1) + (na(array.get(LT, sb * 2)) ? 0 : 1) + ((hasC and not na(array.get(LT, 4))) ? 1 : 0)
     int  cD   = (na(array.get(LT, sa * 2 + 1)) ? 0 : 1) + (na(array.get(LT, sb * 2 + 1)) ? 0 : 1) + ((hasC and not na(array.get(LT, 5))) ? 1 : 0)
-    int  d    = not act ? 0 : cU >= 2 ? 1 : cD >= 2 ? -1 : 0
+    int  d    = not act ? 0 : fd == 1 ? (cU >= 2 ? 1 : 0) : (cD >= 2 ? -1 : 0)
     int  di   = d == 1 ? 0 : 1
     float ab  = array.get(LB, sa * 2 + di)
     float at  = array.get(LT, sa * 2 + di)
@@ -1038,8 +1040,9 @@ f_step(Eng e, int t, array<float> q1, array<float> q2, array<float> q3, array<fl
         array<float> LT = array.from(t1u, t1d, t2u, t2d, t3u, t3d, t4u, t4d)
         array<bool>  LF = array.from(f1u, f1d, f2u, f2d, f3u, f3d, f4u, f4d)
         array<bool>  LM = array.from(m1u, m1d, m2u, m2d, m3u, m3d, m4u, m4d)
-        for k = 0 to 1
-            [d, ab, at, bb, bt, xb, xt, anyF, anyV] = f_group(k, LB, LT, LF, LM)
+        for kk = 0 to 3
+            int k = kk % 2
+            [d, ab, at, bb, bt, xb, xt, anyF, anyV] = f_group(k, kk < 2 ? -1 : 1, LB, LT, LF, LM)
             if d != 0
                 // FVG — תמיד למחזור של הנר האמצעי (הנר שהגאפ שלו; הנר השלישי רק מאשר),
                 // גם כשהנר השלישי פותח מחזור חדש בפער. גאפ שכולו VI (בין שני נרות) —
