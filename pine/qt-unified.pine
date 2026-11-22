@@ -2039,7 +2039,11 @@ cornerTop = cornerPosI == "שמאל למעלה" or cornerPosI == "ימין למ�
 rowOff    = cornerTop ? cornerLift : 0
 bgClr = color.new(color.black, 100)
 // טבלה: קווי ההפרדה בצבע הרקע של הגרף — רק התאים עם הרקע העדין נראים
-var table cTb2 = table.new(cornerPos, 5, 11 + cornerLift, border_width = 1)
+var table cTb2 = table.new(cornerPos, 8, 11 + cornerLift, border_width = 1)
+
+// טבלה רכה: עמודה מפרידה (-) בין כיוון · פעילות · נגדיות · PCP, כמו ב-TMO/TWO.
+// עמודה לוגית c → עמודה בטבלה; במסגרת — אותה עמודה.
+f_tc(int c) => tblStyle == "רך" and c >= 2 ? 2 * c - 1 : c
 
 // זוג 3·4 — מובחן בצבע בלבד
 f_itemTx(Cand c) => (c.dir == 1 ? "▲" : "▼") + c.tx
@@ -2067,7 +2071,7 @@ f_whenTx(Cand c, int cls) =>
     (wn > 0 and cls >= 5 ? " Q" + str.tostring(wn) : "") + " " + f_tmTx(c, cls)
 
 if barstate.islast
-    table.clear(cTb2, 0, 0, 4, 10 + cornerLift)
+    table.clear(cTb2, 0, 0, 7, 10 + cornerLift)
     if cornerOn and tfClass != 0 and cornerTbl == "טבלה"
         // מסגרת: כמו טבלה מודפסת — רקע אטום בצבע הגרף, מסגרת וקווים דקים.
         // רך: טקסט בלבד, בלי קווים ובלי רקע.
@@ -2083,7 +2087,7 @@ if barstate.islast
         if tblHdr
             array<string> hd = array.from("", "כיוון", "פעילות", "נגדיות", "PCP")
             for i = 0 to 4
-                table.cell(cTb2, i, 0, array.get(hd, i), text_color = soft ? color.gray : chart.fg_color, text_size = tblSz, bgcolor = hBg)
+                table.cell(cTb2, f_tc(i), 0, array.get(hd, i), text_color = soft ? color.gray : chart.fg_color, text_size = tblSz, bgcolor = hBg)
             row := 1
         for cls = 8 to 1
             for k = 0 to array.size(allEng) - 1
@@ -2181,10 +2185,18 @@ if barstate.islast
                         table.cell(cTb2, 1, rr, dTx, text_color = dC, text_size = tblSz, bgcolor = cBg)
                         // פעילות: השלישייה והזוג יחד — כמו בשורה, האחרונה ראשונה
                         string aX = tA
-                        table.cell(cTb2, 2, rr, aX, text_color = dC, text_size = tblSz, bgcolor = cBg)
+                        table.cell(cTb2, f_tc(2), rr, aX, text_color = dC, text_size = tblSz, bgcolor = cBg)
                         // נר שעוד לא הוכרע (PCP) — בעמודה משלו, לא עם השבירות
-                        table.cell(cTb2, 4, rr, pdT or pdP ? f_tmStr(e.pndT, cls) : "", text_color = pdT ? colPend : colPair, text_size = tblSz, bgcolor = cBg)
-                        table.cell(cTb2, 3, rr, oX, text_color = color.new(chart.fg_color, offFade), text_size = tblOppSz, bgcolor = cBg)
+                        table.cell(cTb2, f_tc(4), rr, pdT or pdP ? f_tmStr(e.pndT, cls) : "", text_color = pdT ? colPend : colPair, text_size = tblSz, bgcolor = cBg)
+                        table.cell(cTb2, f_tc(3), rr, oX, text_color = color.new(chart.fg_color, offFade), text_size = tblOppSz, bgcolor = cBg)
+                        // רך: "-" אפור לפני כל עמודה שיש בה משהו
+                        if soft
+                            if aX != ""
+                                table.cell(cTb2, 2, rr, "-", text_color = color.gray, text_size = tblSz, bgcolor = cBg)
+                            if oX != ""
+                                table.cell(cTb2, 4, rr, "-", text_color = color.gray, text_size = tblSz, bgcolor = cBg)
+                            if pdT or pdP
+                                table.cell(cTb2, 6, rr, "-", text_color = color.gray, text_size = tblSz, bgcolor = cBg)
                         row += 1
 
 if barstate.islast
