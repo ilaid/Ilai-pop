@@ -100,6 +100,8 @@ tblOppSz   = input.string("tiny", "טבלה — גודל הכתב בנגדיות
 tblOppT    = input.bool(true, "טבלה — שעות בעמודת הנגדיות", group = grpCor, tooltip = "כבוי = בנגדיות רק הסוג והחץ (▼F2 · ▼P) — הטבלה צרה יותר.")
 cornerLift = input.int(2, "הרם את השורות (שורות ריקות)", minval = 0, maxval = 8, group = grpCor, tooltip = "שורות ריקות בין השורות לקצה המסך — כדי שלא ייפלו על אינדיקטור אחר באותה פינה.")
 
+dbgGaps = input.bool(false, "בדיקה: הצג את כל הגאפים (זמני)", group = grpFill, tooltip = "מצייר כל גאפ קולקטיבי שהקוד מזהה במסגרת הגרף, גם אם לא נשבר: הנר האמצעי ו-Q שלו, ה-Q שהגאפ שויך אליו, האם נדרך, העומק של כל נכס, הדרגה, ואם מת. לבדיקה בלבד.")
+
 grpAl = "התראות"
 // ניסוי: שבירה חדשה במסגרת גבוהה גוברת על הכיוון של המסגרות שמתחתיה
 cascadeOn = input.bool(true, "שבירה במסגרת גבוהה גוברת על הנמוכות (ניסוי)", group = "הכלל", tooltip = "דלוק: שבירה במסגרת נמוכה (1m) הופכת ל-✗ כשאחריה נוצרה שבירה פעילה הפוכה במסגרת גבוהה יותר (5m). שבירת 1m שנוצרה אחרי ה-5m — לא מושפעת, גם אם היא נגד ה-5m.\nכשהשבירה הגבוהה מתה — היא מפסיקה להשפיע, והנמוכות חוזרות.\nמי לפני מי: לפי השעה של השבירה כפי שכתובה בצד (PSP — נר הסווינג; Fill שעלה דרגה — נר העלייה).\nבצד: ⇡5m ליד שם המסגרת = אין לה שבירה משלה שקובעת, והכיוון שלה בא מ-5m.\nכבוי: כל מסגרת לעצמה.")
@@ -333,6 +335,7 @@ type Gap
     int    fTime   = 0
     int    fFirst  = 0    // הנר שבו השבירה נרשמה לראשונה (לפני עליות דרגה)
     int    fLagI   = -1   // המשבצת שהייתה המפגר כשהשבירה נרשמה
+    int    midT    = 0    // הנר האמצעי (לבדיקה)
 
 f_newGap(int id, int kind, int d, float ab, float at, float bb, float bt, float cb, float ct, int ref, int oT) =>
     Gap.new(id = id, kind = kind, dir = d, aBot = ab, aTop = at, bBot = bb, bTop = bt, cBot = cb, cTop = ct, refId = ref, originT = oT, aExt = d == 1 ? at : ab, bExt = d == 1 ? bt : bb, cExt = d == 1 ? ct : cb)
@@ -1046,7 +1049,9 @@ f_step(Eng e, int t, array<float> q1, array<float> q2, array<float> q3, array<fl
                     e.gapCounter := e.gapCounter + 1
                     int gRef = tagNow ? rf : rfMid
                     int oT   = anyF ? (tFst != 0 ? tFst : tMid != 0 ? tMid : t) : (tMid != 0 ? tMid : t)
-                    array.push(e.gaps, f_newGap(e.gapCounter, k, d, ab, at, bb, bt, xb, xt, gRef, oT))
+                    Gap ng = f_newGap(e.gapCounter, k, d, ab, at, bb, bt, xb, xt, gRef, oT)
+                    ng.midT := tMid
+                    array.push(e.gaps, ng)
                     f_trim(e.gaps)
 
         if array.size(e.gaps) > 0
@@ -2038,6 +2043,22 @@ if barstate.islast
                             color pc = f_colP(b)
                             bool pa = b.dir == ld and not f_suppT(b.dir, b.born, tfClass)
                             f_drawPsp(eCh, b, pa ? pc : color.new(pc, pspOffT))
+        // בדיקה: כל הגאפים במנוע של הגרף
+        if dbgGaps and array.size(eCh.gaps) > 0
+            for i = 0 to array.size(eCh.gaps) - 1
+                Gap g = array.get(eCh.gaps, i)
+                [gb, gt] = f_fillBounds(g)
+                [mr, ml, mb, mq, mn] = f_cyc(eCh.cls, g.midT)
+                string dp = ""
+                for a = 0 to 2
+                    float dd = g.depthOf(a)
+                    if not na(dd)
+                        dp := dp + (dp == "" ? "" : " ") + f_slotName(g.kind, a) + " " + str.tostring(dd, "#.##")
+                string tx = (g.dir == 1 ? "▲" : "▼") + (g.kind == 1 ? "zug " : "") + " mid " + (g.midT > 0 ? str.format_time(eCh.cls >= 6 ? g.midT + 21600000 : g.midT, eCh.cls >= 6 ? "dd/MM" : "dd/MM HH:mm", TZ) : "?") + " Q" + str.tostring(mn) + (g.refId == mr ? " ref=mid" : " ref≠mid") + (g.armed ? " · armed" : " · not armed") + " · F" + str.tostring(g.fDeg) + (g.dead ? " · dead" : "") + "\n" + dp
+                float yy = na(gt) ? close : (gb + gt) / 2
+                array.push(dLb, label.new(g.originT, yy, tx, xloc = xloc.bar_time, yloc = yloc.price, style = label.style_label_left, color = color.new(color.gray, 80), textcolor = chart.fg_color, size = size.tiny))
+                if not na(gt)
+                    array.push(dBx, box.new(left = g.originT, top = gt, right = time, bottom = gb, xloc = xloc.bar_time, border_color = color.new(color.gray, 30), border_width = 1, border_style = line.style_dotted, bgcolor = color.new(color.gray, 92)))
 
 // ═══════════════════════════════════════════════════════════════════
 // הצד — שורה לכל מסגרת, מהגבוהה לנמוכה:
