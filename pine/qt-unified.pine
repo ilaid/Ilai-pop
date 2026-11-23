@@ -57,7 +57,7 @@ pspRule  = input.string("הנכס של הגרף", "מתי PSP נחשב נלקח"
 pspDepth = input.int(5, "כמה PSP לזכור לכל מסגרת", minval = 1, maxval = 10, group = grpPsp)
 pspBoth  = input.bool(true, "נר שהוא גם סווינג היי וגם סווינג לואו — שני PSP", group = grpPsp, tooltip = "דלוק: נר כזה יוצר שני PSP נפרדים — לעליות (על השפל) ולירידות (על השיא). כל אחד חי ונלקח לבד.\nכבוי (כמו ב-ADI): רק אחד — לפי מספר הנכסים שעשו סווינג בכל צד, ובשוויון לירידות.")
 pspPartSt = input.string("צורה חלולה", "PSP שנכס אחר כבר לקח", options = ["צורה חלולה", "רגיל"], group = grpPsp, tooltip = "PSP שעדיין חי (הנכס של הגרף לא לקח אותו), אבל נכס אחר שבשבירה כבר עבר את הקצה של נר הסווינג אצלו.\nצורה חלולה: ● ← ○, ■ ← □, ◆ ← ◇, ★ ← ☆, ▲ ← △ — באותו צבע ובאותו חוזק של PSP רגיל.")
-livePend = input.bool(true, "Fill / SSMT שנבנית בנר שעוד לא נסגר (בעמודת ה-PCP)", group = grpPsp, tooltip = "בעמודת ה-PCP: ◦▼F2 · ◦▲H — שבירה שהייתה נרשמת אם הנר היה נסגר עכשיו (חדשה, או עלייה בדרגה). נעלמת אם הנר נסגר בלי שבירה.")
+livePend = input.bool(true, "Fill שנבנית בנר שעוד לא נסגר (בעמודת ה-PCP)", group = grpPsp, tooltip = "בעמודת ה-PCP: ◦▼F2 — Fill שהייתה נרשמת אם הנר היה נסגר עכשיו (חדשה, או עלייה בדרגה). נעלמת אם הנר נסגר בלי שבירה.")
 showPend = input.bool(true, "סמן נר PCP שעוד לא הוכרע", tooltip = "נר שנסגר עם דיברגנס ומחכה לסגירה הבאה כדי לדעת אם הוא סווינג (PSP).\nעל הגרף — נקודה מעל הנר, והיא נעלמת ברגע שהנר כבר לא יכול להיות סווינג.\nבצד — מ-5m ומעלה: ◦PCP והשעה של הנר, בסוף השורה (בצבע הזוג כשזה 3·4).", group = grpPsp)
 colPend  = input.color(color.new(#000000, 0), "צבע PCP ממתין", tooltip = "על ערכת נושא כהה — להחליף ללבן.", group = grpPsp)
 
@@ -878,13 +878,12 @@ type Eng
     array<float>  rH                  // הגבוה/נמוך של כל נכס מאז הצעד האחרון —
     array<float>  rL                  // הנר של המסגרת שעוד לא נסגר
     int           runT       = 0
-    array<float>  rC                  // הסגירה הנוכחית של הנר שעוד לא נסגר
     int           rT         = 0      // פתיחת הנר שעוד לא נסגר
     array<int>    alS                 // התראות שממתינות: מספר רץ והטקסט
     int           alC        = 0
     array<string> alT
 
-f_newEng(int c) => Eng.new(cls = c, h1 = array.new_float(8, na), h2 = array.new_float(8, na), h3 = array.new_float(8, na), h4 = array.new_float(8, na), gaps = array.new<Gap>(), a1 = f_newAcc(), a2 = f_newAcc(), a3 = f_newAcc(), a4 = f_newAcc(), sTy = array.new_int(4, 0), sRi = array.new_int(4, -1), sSq = array.new_int(4, 0), sTm = array.new_int(4, 0), sLb = array.new_string(4, ""), pT = array.new<PBrk>(), pP = array.new<PBrk>(), rH = array.new_float(4, na), rL = array.new_float(4, na), rC = array.new_float(4, na), alS = array.new_int(), alT = array.new_string())
+f_newEng(int c) => Eng.new(cls = c, h1 = array.new_float(8, na), h2 = array.new_float(8, na), h3 = array.new_float(8, na), h4 = array.new_float(8, na), gaps = array.new<Gap>(), a1 = f_newAcc(), a2 = f_newAcc(), a3 = f_newAcc(), a4 = f_newAcc(), sTy = array.new_int(4, 0), sRi = array.new_int(4, -1), sSq = array.new_int(4, 0), sTm = array.new_int(4, 0), sLb = array.new_string(4, ""), pT = array.new<PBrk>(), pP = array.new<PBrk>(), rH = array.new_float(4, na), rL = array.new_float(4, na), alS = array.new_int(), alT = array.new_string())
 
 f_engAcc(Eng e, int a) => a == 0 ? e.a1 : a == 1 ? e.a2 : a == 2 ? e.a3 : e.a4
 
@@ -1269,15 +1268,10 @@ f_feed(Eng e, array<int> at, array<float> ao, array<float> ah, array<float> al, 
     for a = 0 to 3
         array.set(e.rH, a, na)
         array.set(e.rL, a, na)
-        array.set(e.rC, a, na)
     e.rT := 0
     if szA > 0 and szT == szA and nUse == szA - 1
         int tl = array.get(at, szA - 1)
         e.rT := tl
-        array.set(e.rC, 0, array.get(ac, szA - 1))
-        array.set(e.rC, 1, f_lastAt(bt, bc, szB, tl))
-        array.set(e.rC, 2, f_lastAt(ct, cc, szC, tl))
-        array.set(e.rC, 3, f_lastAt(dt, dc, szD, tl))
         array.set(e.rH, 0, array.get(ah, szA - 1))
         array.set(e.rL, 0, array.get(al, szA - 1))
         array.set(e.rH, 1, f_lastAt(bt, bh, szB, tl))
@@ -1435,10 +1429,6 @@ f_run(Eng e) =>
     f_run1(e, 1, c2H, c2L, rst)
     f_run1(e, 2, c3H, c3L, rst)
     f_run1(e, 3, c4H, c4L, rst)
-    array.set(e.rC, 0, c1C)
-    array.set(e.rC, 1, c2C)
-    array.set(e.rC, 2, c3C)
-    array.set(e.rC, 3, c4C)
     e.rT := time
     rst
 
@@ -1477,30 +1467,12 @@ f_fillLive(Eng e, Gap g) =>
             deg := 0
     deg
 
-// שבירה שנבנית בנר שעוד לא נסגר: Fill או SSMT/HSSMT שהייתה נרשמת אם הנר היה
-// נסגר עכשיו (חדשה, או עלייה בדרגה). רק לתצוגה בעמודת ה-PCP — "◦▼F2".
-f_accLive(Acc a, float h, float l, float c) =>
-    if not na(h)
-        a.hi := na(a.hi) ? h : math.max(a.hi, h)
-    if not na(l)
-        a.lo := na(a.lo) ? l : math.min(a.lo, l)
-    if not na(c)
-        a.hc := na(a.hc) ? c : math.max(a.hc, c)
-        a.lc := na(a.lc) ? c : math.min(a.lc, c)
-    0
-
-f_accRest(Acc a, float h, float l, float hc, float lc) =>
-    a.hi := h
-    a.lo := l
-    a.hc := hc
-    a.lc := lc
-    0
-
+// Fill שנבנית בנר שעוד לא נסגר: הייתה נרשמת אם הנר היה נסגר עכשיו (חדשה, או
+// עלייה בדרגה). רק לתצוגה בעמודת ה-PCP — "◦▼F2".
 f_livePend(Eng e) =>
     string out = ""
     if e.started and e.rT > 0 and e.rT != e.lastT
         [lrf, llf, lblk, lq1, lqn] = f_cyc(e.cls, e.rT)
-        bool sameRef = lrf == e.refId
         if not lblk and llf == e.lifeId
             // Fill
             for kd = 0 to 3
@@ -1533,30 +1505,6 @@ f_livePend(Eng e) =>
                                 best := dg
                 if best > 0
                     out := out + (out == "" ? "" : " ") + "◦" + (fdir == 1 ? "▲" : "▼") + "F" + str.tostring(best) + (fk == 1 ? pairTag : "")
-            // SSMT / HSSMT — רק כשהנר החי באותו תת-מחזור כמו הקודם
-            if sameRef
-                array<Acc> accs = array.from(e.a1, e.a2, e.a3, e.a4)
-                array<float> sv = array.new_float()
-                for a = 0 to 3
-                    Acc x = array.get(accs, a)
-                    array.push(sv, x.hi)
-                    array.push(sv, x.lo)
-                    array.push(sv, x.hc)
-                    array.push(sv, x.lc)
-                    f_accLive(x, array.get(e.rH, a), array.get(e.rL, a), array.get(e.rC, a))
-                for k = 0 to 3
-                    bool isBull = k % 2 == 1
-                    if k < 2 or use4
-                        [tT, tI, tS] = f_findTri(isBull, e.a1, e.a2, e.a3)
-                        [pT2, pI2, pS2] = f_findPair(isBull, e.a3, e.a4)
-                        int    bT = k < 2 ? tT : pT2
-                        int    bI = k < 2 ? tI : pI2
-                        string bS = k < 2 ? tS : pS2
-                        int oT = array.get(e.sTy, k)
-                        if bT != 0 and not f_closed(bS) and (oT == 0 or bI != array.get(e.sRi, k) or (oT == 1 and bT == 2))
-                            out := out + (out == "" ? "" : " ") + "◦" + (isBull ? "▲" : "▼") + (bT == 2 ? "H" : "S") + (k >= 2 ? pairTag : "")
-                for a = 0 to 3
-                    f_accRest(array.get(accs, a), array.get(sv, a * 4), array.get(sv, a * 4 + 1), array.get(sv, a * 4 + 2), array.get(sv, a * 4 + 3))
     out
 
 // ═══════════════════════════════════════════════════════════════════
