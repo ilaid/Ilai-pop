@@ -1534,9 +1534,9 @@ f_qsAt(int sc, int t, int durMs) =>
         for i = 0 to kHi - kLo + 1
             k = i == 0 ? kOwn : kLo + i - 1
             if not found
-                s1 = str.substring(d1, k, k + 3)
-                s2 = str.substring(d2, k, k + 3)
-                h  = f_qsHot(s1) ? s1 : f_qsHot(s2) ? s2 : ""
+                z1 = str.substring(d1, k, k + 3)
+                z2 = str.substring(d2, k, k + 3)
+                h  = f_qsHot(z1) ? z1 : f_qsHot(z2) ? z2 : ""
                 if h != ""
                     found := true
                     pat   := h

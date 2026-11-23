@@ -1534,9 +1534,9 @@ f_qsAt(int sc, int t, int durMs) =>
         for i = 0 to kHi - kLo + 1
             k = i == 0 ? kOwn : kLo + i - 1
             if not found
-                s1 = str.substring(d1, k, k + 3)
-                s2 = str.substring(d2, k, k + 3)
-                h  = f_qsHot(s1) ? s1 : f_qsHot(s2) ? s2 : ""
+                z1 = str.substring(d1, k, k + 3)
+                z2 = str.substring(d2, k, k + 3)
+                h  = f_qsHot(z1) ? z1 : f_qsHot(z2) ? z2 : ""
                 if h != ""
                     found := true
                     pat   := h
@@ -2431,19 +2431,19 @@ if tfClass != 0 and barstate.isconfirmed
     float px = close
     for g in eCh.gaps
         if not g.dead and g.fDeg > 0 and f_fillLive(eCh, g) > 0
-            int s0 = na(tTO) ? 0 : (g.dir == -1 ? (px > tTO ? 1 : -1) : (px < tTO ? 1 : -1))
-            f_tNew(Trk.new("F" + str.tostring(g.id), 0, g.dir, g.id, g.kind == 1, s0))
+            int sd0 = na(tTO) ? 0 : (g.dir == -1 ? (px > tTO ? 1 : -1) : (px < tTO ? 1 : -1))
+            f_tNew(Trk.new("F" + str.tostring(g.id), 0, g.dir, g.id, g.kind == 1, sd0))
     for k = 0 to 3
         if array.get(eCh.sTy, k) != 0 and not f_closed(array.get(eCh.sLb, k))
             int dk = k % 2 == 1 ? 1 : -1
-            int s1 = na(tTO) ? 0 : (dk == -1 ? (px > tTO ? 1 : -1) : (px < tTO ? 1 : -1))
-            f_tNew(Trk.new("S" + str.tostring(k) + "_" + str.tostring(array.get(eCh.sRi, k)), 1, dk, k, k >= 2, s1))
+            int sd1 = na(tTO) ? 0 : (dk == -1 ? (px > tTO ? 1 : -1) : (px < tTO ? 1 : -1))
+            f_tNew(Trk.new("S" + str.tostring(k) + "_" + str.tostring(array.get(eCh.sRi, k)), 1, dk, k, k >= 2, sd1))
     for s = 0 to 1
         array<PBrk> st = s == 0 ? eCh.pT : eCh.pP
         for b in st
             if not f_pspGone(eCh, b)
-                int s2 = na(tTO) ? 0 : (b.dir == -1 ? (px > tTO ? 1 : -1) : (px < tTO ? 1 : -1))
-                f_tNew(Trk.new("P" + str.tostring(s) + "_" + str.tostring(b.born) + "_" + str.tostring(b.dir), 2, b.dir, b.born, s == 1, s2))
+                int sd2 = na(tTO) ? 0 : (b.dir == -1 ? (px > tTO ? 1 : -1) : (px < tTO ? 1 : -1))
+                f_tNew(Trk.new("P" + str.tostring(s) + "_" + str.tostring(b.born) + "_" + str.tostring(b.dir), 2, b.dir, b.born, s == 1, sd2))
     // מי מתה
     array<string> dead = array.new_string()
     for k in tTrk
