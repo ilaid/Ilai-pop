@@ -1467,45 +1467,6 @@ f_fillLive(Eng e, Gap g) =>
             deg := 0
     deg
 
-// Fill שנבנית בנר שעוד לא נסגר: הייתה נרשמת אם הנר היה נסגר עכשיו (חדשה, או
-// עלייה בדרגה). רק לתצוגה בעמודת ה-PCP — "◦▼F2".
-f_livePend(Eng e) =>
-    string out = ""
-    if e.started and e.rT > 0 and e.rT != e.lastT
-        [lrf, llf, lblk, lq1, lqn] = f_cyc(e.cls, e.rT)
-        if not lblk and llf == e.lifeId
-            // Fill
-            for kd = 0 to 3
-                int fk   = kd >= 2 ? 1 : 0
-                int fdir = kd % 2 == 1 ? 1 : -1
-                int best = 0
-                if (fk == 0 or use4) and array.size(e.gaps) > 0
-                    for g in e.gaps
-                        if not g.dead and g.kind == fk and g.dir == fdir and (g.armed or g.refId != lrf)
-                            float sa = g.aExt
-                            float sb = g.bExt
-                            float sc = g.cExt
-                            bool  up = g.dir == 1
-                            int   ia = fk == 0 ? 0 : 2
-                            int   ib = fk == 0 ? 1 : 3
-                            float ra = up ? array.get(e.rL, ia) : array.get(e.rH, ia)
-                            float rb = up ? array.get(e.rL, ib) : array.get(e.rH, ib)
-                            float rc = up ? array.get(e.rL, 2) : array.get(e.rH, 2)
-                            if not na(g.aTop) and not na(ra)
-                                g.aExt := up ? math.min(sa, ra) : math.max(sa, ra)
-                            if not na(g.bTop) and not na(rb)
-                                g.bExt := up ? math.min(sb, rb) : math.max(sb, rb)
-                            if fk == 0 and not na(g.cTop) and not na(rc)
-                                g.cExt := up ? math.min(sc, rc) : math.max(sc, rc)
-                            int dg = g.fracDeg()
-                            g.aExt := sa
-                            g.bExt := sb
-                            g.cExt := sc
-                            if dg > g.fDeg and dg > best
-                                best := dg
-                if best > 0
-                    out := out + (out == "" ? "" : " ") + "◦" + (fdir == 1 ? "▲" : "▼") + "F" + str.tostring(best) + (fk == 1 ? pairTag : "")
-    out
 
 // ═══════════════════════════════════════════════════════════════════
 // הכלל — השבירות החיות של מסגרת, והאחרונה מביניהן
@@ -1654,6 +1615,46 @@ f_sup(string ch) =>
     c == "a" ? "ᵃ" : c == "b" ? "ᵇ" : c == "c" ? "ᶜ" : c == "d" ? "ᵈ" : c == "e" ? "ᵉ" : c == "f" ? "ᶠ" : c == "g" ? "ᵍ" : c == "h" ? "ʰ" : c == "i" ? "ⁱ" : c == "j" ? "ʲ" : c == "k" ? "ᵏ" : c == "l" ? "ˡ" : c == "m" ? "ᵐ" : c == "n" ? "ⁿ" : c == "o" ? "ᵒ" : c == "p" ? "ᵖ" : c == "r" ? "ʳ" : c == "s" ? "ˢ" : c == "t" ? "ᵗ" : c == "u" ? "ᵘ" : c == "v" ? "ᵛ" : c == "w" ? "ʷ" : c == "x" ? "ˣ" : c == "y" ? "ʸ" : c == "z" ? "ᶻ" : c
 
 pairTag = f_sup(str.substring(nm3, 0, 1)) + f_sup(str.substring(nm4, 0, 1))
+
+// Fill שנבנית בנר שעוד לא נסגר: הייתה נרשמת אם הנר היה נסגר עכשיו (חדשה, או
+// עלייה בדרגה). רק לתצוגה בעמודת ה-PCP — "◦▼F2".
+f_livePend(Eng e) =>
+    string out = ""
+    if e.started and e.rT > 0 and e.rT != e.lastT
+        [lrf, llf, lblk, lq1, lqn] = f_cyc(e.cls, e.rT)
+        if not lblk and llf == e.lifeId
+            // Fill
+            for kd = 0 to 3
+                int fk   = kd >= 2 ? 1 : 0
+                int fdir = kd % 2 == 1 ? 1 : -1
+                int best = 0
+                if (fk == 0 or use4) and array.size(e.gaps) > 0
+                    for g in e.gaps
+                        if not g.dead and g.kind == fk and g.dir == fdir and (g.armed or g.refId != lrf)
+                            float sa = g.aExt
+                            float sb = g.bExt
+                            float sc = g.cExt
+                            bool  up = g.dir == 1
+                            int   ia = fk == 0 ? 0 : 2
+                            int   ib = fk == 0 ? 1 : 3
+                            float ra = up ? array.get(e.rL, ia) : array.get(e.rH, ia)
+                            float rb = up ? array.get(e.rL, ib) : array.get(e.rH, ib)
+                            float rc = up ? array.get(e.rL, 2) : array.get(e.rH, 2)
+                            if not na(g.aTop) and not na(ra)
+                                g.aExt := up ? math.min(sa, ra) : math.max(sa, ra)
+                            if not na(g.bTop) and not na(rb)
+                                g.bExt := up ? math.min(sb, rb) : math.max(sb, rb)
+                            if fk == 0 and not na(g.cTop) and not na(rc)
+                                g.cExt := up ? math.min(sc, rc) : math.max(sc, rc)
+                            int dg = g.fracDeg()
+                            g.aExt := sa
+                            g.bExt := sb
+                            g.cExt := sc
+                            if dg > g.fDeg and dg > best
+                                best := dg
+                if best > 0
+                    out := out + (out == "" ? "" : " ") + "◦" + (fdir == 1 ? "▲" : "▼") + "F" + str.tostring(best) + (fk == 1 ? pairTag : "")
+    out
 
 f_cands(Eng e) =>
     array<Cand> out = array.new<Cand>()
