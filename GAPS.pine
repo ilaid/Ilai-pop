@@ -26,7 +26,8 @@ indicator("QT Gaps | Collective + Chart", overlay = true, max_boxes_count = 300)
 // "דרוך" = תת-המחזור שבו נולד הגאפ כבר הסתיים — בדיוק כמו בהצצה של SSMT Fill:
 //   1H — רק גאפים מימים קודמים של השבוע (ביום שלישי: של שני)
 //   15m — רק מסשנים קודמים של אותו יום · 4H — רק משבועות קודמים של החודש
-//   1m/5m — רבעים/מיקרו קודמים · 1D/1W/Mo — רבע-רבעון/רבעון/שנה קודמים
+//   1m/5m — רבעים/מיקרו קודמים · Mo — שנים קודמות במחזור
+//   1D — רבעי-רבע קודמים בתוך הרבע השבועי · 1W — רבעים שבועיים קודמים בשנה
 // ברירת המחדל: רק דרוכים (כמו הישן). כיבוי = גם גאפים מתת-המחזור הנוכחי.
 // ═══════════════════════════════════════════════════════════════════
 
@@ -199,28 +200,92 @@ sessionId  = tradeDayId * 10 + sessionIdx
 microId    = sessionId * 10 + microIdx
 quarterId  = microId * 10 + quarterIdx
 
-// כמה ימים יש בחודש — כולל שנה מעוברת לפי הכלל המלא
-f_dim(int y, int m) =>
-    m == 2 ? (((y % 4 == 0 and y % 100 != 0) or y % 400 == 0) ? 29 : 28) : (m == 4 or m == 6 or m == 9 or m == 11 ? 30 : 31)
+// ═══════════════════════════════════════════════════════════════════
+// הזמנים הגדולים — גרף שבועי (1W) וגרף יומי (1D)
+//
+// 1W: שנת השבועות מתחילה ביום שני של השבוע שבו יום השלישי הראשון של ינואר.
+//     כל שבוע שייך לשנה ולרבע של יום השלישי שלו. 4 רבעים × 13 שבועות;
+//     בשנה של 53 שבועות השבוע הנוסף נכנס ל-Q4. תת-מחזור = רבע, מיכל = שנה.
+// 1D: כל רבע שבועי מחולק ל-4 לפי ימי מסחר (ימי חול פחות חגי הבורסה;
+//     Good Friday נספר). כל רבע-רבעון מתחיל אחרי ¼, ½ ו-¾ מימי המסחר,
+//     מעוגל לקרוב (חצי ומעלה — למעלה). תת-מחזור = רבע-רבעון, מיכל = הרבע השבועי.
+// החישוב בימי לוח (UTC בצהריים), כדי ששעון קיץ לא יזיז גבולות.
+// ═══════════════════════════════════════════════════════════════════
 
-// רבעון = שלושה חודשים קלנדריים. שנת QT מתחילה באפריל — המיכל של הגרף
-// השבועי (§3). מחזור 4 שנים = שנים קלנדריות, 2023–2026, 2027–2030 (§4).
-qOfYear  = int(math.ceil(tdMon / 3.0))
-qtrId    = tdYear * 10 + qOfYear
-yearId   = tdYear
-qtYearId = tdMon >= 4 ? tdYear : tdYear - 1
-quadId   = int(math.floor((tdYear - 2023) / 4.0))
+DAY = 86400000
 
-// ── רבע-רבעון — תת-המחזור של הגרף היומי ──
-// אורך הרבעון בפועל (90–92 יום) חלקי ארבע, בימי לוח שלמים מתוך התאריך.
-qStartMon = (qOfYear - 1) * 3 + 1
-qLenD     = f_dim(tdYear, qStartMon) + f_dim(tdYear, qStartMon + 1) + f_dim(tdYear, qStartMon + 2)
-qDayInQ   = (tdDom - 1) + (tdMon > qStartMon ? f_dim(tdYear, qStartMon) : 0) + (tdMon > qStartMon + 1 ? f_dim(tdYear, qStartMon + 1) : 0)
-qqIdx     = math.min(3, math.max(0, int(math.floor(qDayInQ * 4.0 / qLenD))))
-qqId      = qtrId * 10 + qqIdx
+f_ms(int y, int m, int d) =>
+    timestamp("UTC", y, m, d, 12, 0)
 
-refCycleId  = tfClass == 8 ? yearId : tfClass == 7 ? qtrId : tfClass == 6 ? qqId : tfClass == 5 ? weekId : tfClass == 4 ? tradeDayId : tfClass == 3 ? sessionId : tfClass == 2 ? microId : tfClass == 1 ? quarterId : 0
-lifeCycleId = tfClass == 8 ? quadId : tfClass == 7 ? qtYearId : tfClass == 6 ? qtrId : tfClass == 5 ? monthId : tfClass == 4 ? weekId : tfClass == 3 ? tradeDayId : tfClass == 2 ? sessionId : tfClass == 1 ? microId : 0
+// חגי הבורסה בארה"ב: חג בשבת עובר לשישי, בראשון — לשני.
+// יוצא דופן: ראש השנה בשבת לא עובר לשישי.
+f_isHol(int t) =>
+    int  m = month(t, "UTC")
+    int  d = dayofmonth(t, "UTC")
+    int  w = dayofweek(t, "UTC")
+    bool h = false
+    if w >= dayofweek.monday and w <= dayofweek.friday
+        bool mon = w == dayofweek.monday
+        bool fri = w == dayofweek.friday
+        h := (m == 1 and d == 1) or (m == 1 and d == 2 and mon) or (m == 1 and mon and d >= 15 and d <= 21) or (m == 2 and mon and d >= 15 and d <= 21) or (m == 5 and mon and d >= 25) or (m == 9 and mon and d <= 7) or (m == 11 and w == dayofweek.thursday and d >= 22 and d <= 28) or (m == 6 and (d == 19 or (fri and d == 18) or (mon and d == 20))) or (m == 7 and (d == 4 or (fri and d == 3) or (mon and d == 5))) or (m == 12 and (d == 25 or (fri and d == 24) or (mon and d == 26)))
+    h
+
+f_isTD(int t) =>
+    int w = dayofweek(t, "UTC")
+    w >= dayofweek.monday and w <= dayofweek.friday and not f_isHol(t)
+
+// יום שני של השבוע שבו נמצא יום השלישי הראשון של ינואר
+f_wyStart(int y) =>
+    int j   = f_ms(y, 1, 1)
+    int pw  = (dayofweek(j, "UTC") + 5) % 7      // שני = 0 … ראשון = 6
+    int off = (1 - pw + 7) % 7                   // ימים עד יום השלישי הראשון
+    j + (off - 1) * DAY
+
+// [שנה, רבע 0..3, תחילת הרבע, תחילת הרבע הבא] של תאריך (צהריים UTC)
+f_wq(int t) =>
+    int mon = t - ((dayofweek(t, "UTC") + 5) % 7) * DAY
+    int y   = year(mon + DAY, "UTC")
+    int s   = f_wyStart(y)
+    int wi  = int(math.round((mon - s) / (7.0 * DAY)))
+    int q   = math.min(3, int(math.floor(wi / 13.0)))
+    int qs  = s + q * 91 * DAY
+    int qe  = q < 3 ? qs + 91 * DAY : f_wyStart(y + 1)
+    [y, q, qs, qe]
+
+// רבע-רבעון 0..3 של תאריך בתוך הרבע השבועי, לפי ימי מסחר. יום שאינו יום
+// מסחר שייך לרבע-רבעון של יום המסחר שלפניו.
+f_qq(int t, int qs, int qe) =>
+    int n   = 0
+    int idx = -1
+    int cur = qs
+    while cur < qe
+        if f_isTD(cur)
+            n += 1
+            if cur <= t
+                idx += 1
+        cur += DAY
+    idx := math.max(idx, 0)
+    (idx >= math.round(n / 4.0) ? 1 : 0) + (idx >= math.round(n / 2.0) ? 1 : 0) + (idx >= math.round(n * 3 / 4.0) ? 1 : 0)
+
+// החודשי: שנה → מחזור 4 שנים (ללא שינוי)
+yearId = tdYear
+quadId = int(math.floor((tdYear - 2023) / 4.0))
+
+// היומי והשבועי — רק כשהגרף באחד מהם
+var int wqY = 0
+var int wqQ = 0
+var int qqI = 0
+if tfClass == 6 or tfClass == 7
+    [wy, wq, wqs, wqe] = f_wq(f_ms(tdYear, tdMon, tdDom))
+    wqY := wy
+    wqQ := wq
+    if tfClass == 6
+        qqI := f_qq(f_ms(tdYear, tdMon, tdDom), wqs, wqe)
+wqId = wqY * 10 + wqQ + 1          // רבע שבועי
+wqqId = wqId * 10 + qqI            // רבע-רבעון
+
+refCycleId  = tfClass == 8 ? yearId : tfClass == 7 ? wqId : tfClass == 6 ? wqqId : tfClass == 5 ? weekId : tfClass == 4 ? tradeDayId : tfClass == 3 ? sessionId : tfClass == 2 ? microId : tfClass == 1 ? quarterId : 0
+lifeCycleId = tfClass == 8 ? quadId : tfClass == 7 ? wqY : tfClass == 6 ? wqId : tfClass == 5 ? monthId : tfClass == 4 ? weekId : tfClass == 3 ? tradeDayId : tfClass == 2 ? sessionId : tfClass == 1 ? microId : 0
 
 newRefCycle  = ta.change(refCycleId)  != 0
 newLifeCycle = ta.change(lifeCycleId) != 0
@@ -329,14 +394,10 @@ f_subName(int c, int t) =>
         int dsm  = dw == dayofweek.sunday ? 6 : dw - 2
         int tueT = tdt - dsm * 86400000 + 86400000
         r := "W" + str.tostring(math.floor((dayofmonth(tueT, TZ) - 1) / 7) + 1)
-    else if c == 6
-        int qOf  = int(math.ceil(mm / 3.0))
-        int qsM  = (qOf - 1) * 3 + 1
-        int qLn  = f_dim(yy, qsM) + f_dim(yy, qsM + 1) + f_dim(yy, qsM + 2)
-        int qDiQ = (dd - 1) + (mm > qsM ? f_dim(yy, qsM) : 0) + (mm > qsM + 1 ? f_dim(yy, qsM + 1) : 0)
-        r := "QQ" + str.tostring(math.min(3, math.max(0, int(math.floor(qDiQ * 4.0 / qLn)))) + 1)
-    else if c == 7
-        r := "Q" + str.tostring(int(math.ceil(mm / 3.0)))
+    else if c == 6 or c == 7
+        int dm = f_ms(yy, mm, dd)
+        [gy, gq, gqs, gqe] = f_wq(dm)
+        r := c == 7 ? "Q" + str.tostring(gq + 1) : "QQ" + str.tostring(f_qq(dm, gqs, gqe) + 1)
     else if c == 8
         r := str.tostring(yy)
     r
