@@ -961,7 +961,9 @@ f_step(Eng e, int t, array<float> q1, array<float> q2, array<float> q3, array<fl
         int  rfMid   = e.started ? e.refId : rf
         int  lfMid   = e.started ? e.lifeId : lf
         bool q1Mid   = e.lastQ1
-        bool keepL   = e.cls <= 2 or e.cls == 4
+        // אין "זרע": מיכל חדש מתחיל נקי בכל המסגרות — אין שבירה בין Q4 של המיכל הקודם
+        // ל-Q1 של החדש (1m/5m בין מיקרו/סשן, 1H בין שישי לשני). 4H — בין שבועות רק בתוך החודש.
+        bool keepL   = false
         bool newLife = e.started and lf != e.lifeId
         bool newRef  = e.started and rf != e.refId
         int  prevRef = e.refId
