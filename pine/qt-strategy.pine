@@ -1,0 +1,641 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0
+// QT Strategy v0.1 — אסטרטגיה אחת: נזילות → שבירות קורלציה → כניסה בדקה.
+// הכל מחושב בכל נר, כדי שיהיה בקטסט (Strategy Tester) ובהמשך התראות לברוקר.
+//
+// הרצה: גרף MNQ (או MES) של דקה אחת.
+//
+// 1. נזילות (נכס הגרף): גבוה/נמוך של המחזור הקודם, וגאפים של המחזור הקודם
+//    (חוק התדלוק) — סשן (15m) · יום (1H) · שבוע (4H).
+//    אזור דובי = המחיר לקח גבוה של מחזור קודם / עלה לתוך גאפ של המחזור הקודם.
+//    אזור שורי = הפוך. האזור תקף X דקות.
+// 2. שבירות קורלציה בין NQ · ES · YM, בכל מסגרת מול תת-המחזור שלה:
+//    SSMT — נכס אחד לקח את קיצון תת-המחזור הקודם ונכס אחר לא
+//           (1m מול רבע · 5m מול 90 דק' · 15m מול סשן · 1H מול יום).
+//           מתה כשכל הנכסים סגרו מעבר לקיצון. כל מיכל חדש מתחיל נקי.
+//    PSP  — נר סווינג שבו הנכסים לא מסכימים על הצבע, מאושר ע"י הנר הבא.
+//           לא ב-Q1 של המיכל / בזמן חסום. מת כשנכס הגרף חוצה את קצה הנר.
+//    כיוון מסגרת = השבירה החיה האחרונה.
+// 3. כניסה: באזור — לפחות N שבירות תומכות (5m / 15m / 1H, מסגרות או סוגים
+//    שונים, במסגרות שהכיוון שלהן תואם), לפחות אחת חדשה מאז האזור,
+//    ואז טריגר 1m באותו כיוון (PSP או SSMT).
+//    סטופ: מעבר לנר השבירה של הטריגר. יעד: הנזילות הקרובה בכיוון שמרוחקת
+//    לפחות R מינימלי; אין — יחס קבוע (אפשרות).
+//
+// v0.1 — עוד לא: Fill (גאפ קולקטיבי), HSSMT, If–Then, פולבקים, מסגרת גבוהה גוברת.
+//@version=6
+strategy("QT Strategy v0.1", shorttitle = "QT Strat", overlay = true, initial_capital = 10000, default_qty_type = strategy.fixed, default_qty_value = 1, commission_type = strategy.commission.cash_per_contract, commission_value = 0.62, slippage = 1, max_labels_count = 50, max_lines_count = 50)
+
+// ══════════════════════════════════════════════════════════════
+// הגדרות
+// ══════════════════════════════════════════════════════════════
+GS = "נכסים (נכס הגרף = נכס 1)"
+symES = input.symbol("CME_MINI:MES1!",  "נכס 2", group = GS)
+symYM = input.symbol("CBOT_MINI:MYM1!", "נכס 3", group = GS)
+
+GE = "כניסה"
+needN   = input.int(2, "שבירות תומכות — מינימום", minval = 1, maxval = 6, group = GE)
+use5    = input.bool(true, "תומכות מ-5m", group = GE, inline = "tf")
+use15   = input.bool(true, "15m", group = GE, inline = "tf")
+use60   = input.bool(true, "1H", group = GE, inline = "tf")
+trigPSP = input.bool(true, "טריגר: PSP 1m", group = GE, inline = "tr")
+trigSS  = input.bool(true, "SSMT 1m", group = GE, inline = "tr")
+zoneWin = input.int(90, "האזור תקף (דקות)", minval = 5, maxval = 600, group = GE)
+zS      = input.bool(true, "אזור: סשן", group = GE, inline = "z")
+zD      = input.bool(true, "יום", group = GE, inline = "z")
+zW      = input.bool(true, "שבוע", group = GE, inline = "z")
+
+GX = "סטופ ויעד"
+bufTk  = input.int(2, "סטופ — טיקים מעבר לנר", minval = 0, maxval = 40, group = GX)
+maxRsk = input.float(40, "סיכון מקסימלי (נקודות)", minval = 1, group = GX)
+minRR  = input.float(1.5, "יעד — מרחק מינימלי (R)", minval = 0.5, step = 0.1, group = GX)
+useFb  = input.bool(true, "אין נזילות מתאימה — יעד קבוע", group = GX, inline = "fb")
+fbRR   = input.float(2.0, "R", minval = 0.5, step = 0.1, group = GX, inline = "fb")
+
+GT = "זמן"
+sess   = input.session("0200-1600", "שעות מסחר (ניו יורק)", group = GT, tooltip = "מחוץ לשעות — אין כניסות, ופוזיציה פתוחה נסגרת.")
+noFri  = input.bool(false, "בלי שישי", group = GT)
+maxDay = input.int(3, "מקסימום עסקאות ביום", minval = 1, maxval = 20, group = GT)
+
+GG = "הגדרת גאפ (זהה ל-SSMT Fill)"
+fvgOn        = input.bool(true, "FVG", group = GG)
+volImbOn     = input.bool(true, "VI", group = GG)
+extendBodies = input.bool(true, "הרחבה לגופים", group = GG)
+viMinTicks   = input.int(4, "VI לבד — מינימום טיקים", minval = 1, maxval = 100, group = GG)
+viMergeTicks = input.int(1, "הרחבה — מינימום טיקים", minval = 1, maxval = 100, group = GG)
+
+// ══════════════════════════════════════════════════════════════
+// מחזורי QT
+// רמות: 1 = רבע 22.5 · 2 = 90 דק' · 3 = סשן · 4 = יום · 5 = שבוע
+// מחזיר [תת-מחזור, מיכל, מיקום במיכל, חסום, שם]
+// ══════════════════════════════════════════════════════════════
+TZ = "America/New_York"
+
+f_ser(int y, int m, int d) =>
+    int(math.floor(timestamp("UTC", y, m, d, 0, 0) / 86400000.0))
+f_m(int s) =>
+    month(s * 86400000, "UTC")
+f_d(int s) =>
+    dayofmonth(s * 86400000, "UTC")
+f_y(int s) =>
+    year(s * 86400000, "UTC")
+
+SES  = array.from("אסיה", "לונדון", "AM", "PM")
+DAYN = array.from("ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת")
+
+f_cyc(int lv, int t) =>
+    int    sub  = na
+    int    cont = na
+    int    pos  = na
+    bool   blk  = false
+    string nm   = ""
+    if not na(t)
+        int td   = t + 21600000
+        int dS   = f_ser(year(td, TZ), month(td, TZ), dayofmonth(td, TZ))
+        int sod  = ((hour(t, TZ) * 3600 + minute(t, TZ) * 60 + second(t, TZ)) - 64800 + 86400) % 86400
+        int dw   = (dS + 4) % 7
+        int mon  = dw == 0 ? dS - 6 : dS - (dw - 1)
+        int tue  = mon + 1
+        int tM   = f_m(tue)
+        bool dead = f_m(mon + 3) != tM
+        int wk   = int(math.floor((f_d(tue) - 1) / 7.0)) + 1
+        int se   = int(math.floor(sod / 21600.0))
+        int mi   = int(math.floor(sod / 5400.0))
+        if lv == 1
+            int qi = int(math.floor(sod / 1350.0))
+            sub  := dS * 64 + qi
+            cont := dS * 16 + mi
+            pos  := qi % 4
+            nm   := "Q" + str.tostring(qi % 4 + 1)
+        else if lv == 2
+            sub  := dS * 16 + mi
+            cont := dS * 4 + se
+            pos  := mi % 4
+            nm   := SES.get(se) + " " + str.tostring(mi % 4 + 1)
+        else if lv == 3
+            sub  := dS * 4 + se
+            cont := dS
+            pos  := se
+            nm   := SES.get(se)
+        else if lv == 4
+            sub  := dS
+            cont := mon
+            pos  := math.max(0, math.min(4, dw - 1))
+            blk  := dw == 5 or dw == 6 or dw == 0
+            nm   := DAYN.get(dw)
+        else
+            bool own = dead or wk == 5
+            sub  := mon
+            cont := own ? -mon : f_y(tue) * 12 + tM
+            pos  := own ? 0 : wk - 1
+            blk  := own
+            nm   := dead ? "שבוע מת" : "שבוע " + str.tostring(wk)
+    [sub, cont, pos, blk, nm]
+
+// ══════════════════════════════════════════════════════════════
+// נזילות — כמו ב-QT Liquidity Map, לנכס הגרף בלבד
+// ══════════════════════════════════════════════════════════════
+f_leg(int d, bool ok, float o0, float h0, float l0, float c0, float o1, float c1, float h2, float l2, float cX2, float o2, float tk, bool edge) =>
+    float b  = na
+    float t  = na
+    int   ti = math.round(math.abs(o0 - c1) / tk)
+    int   pi = math.round(math.abs(o1 - cX2) / tk)
+    bool  f  = fvgOn and ok and (d == 1 ? l0 > h2 : h0 < l2)
+    bool  r  = ok and (d == 1 ? (o0 > c1 and (edge or (c1 > o1 and c0 > o0))) : (o0 < c1 and (edge or (c1 < o1 and c0 < o0))))
+    bool  m  = extendBodies and r and ti >= viMergeTicks
+    bool  p  = extendBodies and pi >= viMergeTicks and (d == 1 ? (o1 > cX2 and cX2 > o2 and c1 > o1) : (o1 < cX2 and cX2 < o2 and c1 < o1))
+    bool  v  = volImbOn and r and ti >= viMinTicks
+    if f
+        if d == 1
+            b := (extendBodies and o1 > h2 and pi >= viMergeTicks) ? cX2 : h2
+            t := (extendBodies and l0 > c1 and ti >= viMergeTicks) ? o0 : l0
+            if p
+                b := math.min(b, cX2)
+        else
+            t := (extendBodies and o1 < l2 and pi >= viMergeTicks) ? cX2 : l2
+            b := (extendBodies and h0 < c1 and ti >= viMergeTicks) ? o0 : h0
+            if p
+                t := math.max(t, cX2)
+    if (f and m) or (v and (not f or extendBodies))
+        if d == 1
+            b := na(b) ? c1 : math.min(b, c1)
+            t := na(t) ? o0 : math.max(t, o0)
+        else
+            t := na(t) ? c1 : math.max(t, c1)
+            b := na(b) ? o0 : math.min(b, o0)
+    [b, t, f, m, v]
+
+type MG
+    int   dir
+    float top
+    float bot
+    int   sub
+    int   bt
+    int   deadT  = 0
+    int   touchT = 0
+
+type Lv
+    int       lv
+    bool      on
+    array<MG> gaps
+    int       lastT  = 0
+    int       aSub
+    float     aH
+    float     aL
+    int       cS
+    int       cC
+    int       cP
+    bool      cB     = false
+    string    cN     = ""
+    string    pN     = ""
+    int       cStart = 0
+    int       pS
+    int       pC
+    int       pP
+    bool      pB     = false
+    bool      valid  = false
+    float     eH
+    float     eL
+    int       eHT    = 0
+    int       eLT    = 0
+
+method feed(Lv s, int t1, int t2, float o1, float h1, float l1, float c1, float o2, float c2, float h3, float l3, float c3, float o3, float tk) =>
+    if s.on and not na(t1) and t1 != s.lastT and not na(c1)
+        s.lastT := t1
+        [s3, x1, x2, x3, x4] = f_cyc(s.lv, t1)
+        if na(s.aSub) or s3 != s.aSub
+            s.aSub := s3
+            s.aH   := h1
+            s.aL   := l1
+        else
+            s.aH := math.max(s.aH, h1)
+            s.aL := math.min(s.aL, l1)
+        for g in s.gaps
+            if g.deadT == 0 and (g.dir == 1 ? c1 < g.bot : c1 > g.top)
+                g.deadT := t1
+        [sM, y1, y2, y3, y4] = f_cyc(s.lv, t2)
+        bool ok   = not na(o2) and not na(h3) and not na(o3)
+        bool edge = s3 != sM
+        for d in array.from(1, -1)
+            [b, t, f, m, v] = f_leg(d, ok, o1, h1, l1, c1, o2, c2, h3, l3, c3, o3, tk, edge)
+            if not na(t) and not na(b) and t > b
+                bool tagNow = (edge and m) or not f
+                s.gaps.push(MG.new(d, t, b, tagNow ? s3 : sM, tagNow ? t1 : t2))
+        while s.gaps.size() > 120
+            s.gaps.shift()
+    0
+
+method upd(Lv s, float h, float l) =>
+    if s.on
+        [sub, cont, pos, blk, nm] = f_cyc(s.lv, time)
+        if not na(sub) and (na(s.cS) or sub != s.cS)
+            if not na(s.cS)
+                s.pS := s.cS
+                s.pC := s.cC
+                s.pP := s.cP
+                s.pB := s.cB
+                s.pN := s.cN
+                s.eH := s.aSub == s.cS ? s.aH : na
+                s.eL := s.aSub == s.cS ? s.aL : na
+            s.cS     := sub
+            s.cC     := cont
+            s.cP     := pos
+            s.cB     := blk
+            s.cStart := time
+            s.eHT    := 0
+            s.eLT    := 0
+            bool normal = not na(s.pS) and s.pC == cont and s.pP == pos - 1
+            s.valid := not blk and not s.pB and normal
+            if s.gaps.size() > 0
+                for i = s.gaps.size() - 1 to 0
+                    MG g = s.gaps.get(i)
+                    if g.sub != s.pS and g.sub != s.cS
+                        s.gaps.remove(i)
+        s.cN := nm
+        if not na(s.eH) and s.eHT == 0 and h > s.eH
+            s.eHT := time
+        if not na(s.eL) and s.eLT == 0 and l < s.eL
+            s.eLT := time
+        if s.valid
+            for g in s.gaps
+                if g.sub == s.pS and g.touchT == 0 and (g.deadT == 0 or g.deadT >= s.cStart)
+                    if g.dir == 1 ? l <= g.top : h >= g.bot
+                        g.touchT := time
+    0
+
+f_go(Lv s, string tf) =>
+    [t1, t2, o1, h1, l1, c1, o2, c2, h3, l3, c3, o3] = request.security(syminfo.tickerid, tf, [time[1], time[2], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]])
+    s.feed(t1, t2, o1, h1, l1, c1, o2, c2, h3, l3, c3, o3, syminfo.mintick)
+
+var Lv LS = Lv.new(lv = 3, on = zS, gaps = array.new<MG>())
+var Lv LD = Lv.new(lv = 4, on = zD, gaps = array.new<MG>())
+var Lv LW = Lv.new(lv = 5, on = zW, gaps = array.new<MG>())
+
+f_go(LS, "15")
+f_go(LD, "60")
+f_go(LW, "240")
+LS.upd(high, low)
+LD.upd(high, low)
+LW.upd(high, low)
+
+// ══════════════════════════════════════════════════════════════
+// שבירות קורלציה — מנוע לכל מסגרת. נכסים: 0 = הגרף · 1 = נכס 2 · 2 = נכס 3
+// ══════════════════════════════════════════════════════════════
+type Brk
+    int   dir             // 1 = שורית · -1 = דובית
+    int   typ             // 1 = SSMT · 2 = PSP
+    int   t               // רגע השבירה (SSMT — הנר שלקח · PSP — נר הסווינג)
+    int   rt              // נר הגרף שבו נרשמה
+    float lvl             // PSP: קצה נר הסווינג (נכס הגרף)
+    float r0              // SSMT: הקיצון של תת-המחזור הקודם לכל נכס
+    float r1
+    float r2
+    bool  k0 = false
+    bool  k1 = false
+    bool  k2 = false
+
+type Eng
+    int          cls
+    int          lv
+    int          lastT   = 0
+    array<float> o                // 3 נכסים × 3 נרות: a*3 + k (k = 0 החדש)
+    array<float> h
+    array<float> l
+    array<float> c
+    array<int>   tt
+    int          cS
+    int          cC
+    int          cP
+    bool         cB      = false
+    int          pS
+    int          pC
+    int          pP
+    bool         pB      = false
+    array<float> pH
+    array<float> pL
+    array<float> nH
+    array<float> nL
+    bool         rBear   = false
+    bool         rBull   = false
+    array<Brk>   bk
+    int          newRT   = 0      // נר הגרף של השבירה האחרונה שנרשמה
+    int          newDir  = 0
+    int          newTyp  = 0
+    float        newStop = na
+
+f_newEng(int cls, int lv) =>
+    Eng.new(cls = cls, lv = lv, o = array.new<float>(9, na), h = array.new<float>(9, na), l = array.new<float>(9, na), c = array.new<float>(9, na), tt = array.new<int>(3, 0), pH = array.new<float>(3, na), pL = array.new<float>(3, na), nH = array.new<float>(3, na), nL = array.new<float>(3, na), bk = array.new<Brk>())
+
+method reg(Eng e, Brk b, float stp) =>
+    e.bk.push(b)
+    e.newRT   := time
+    e.newDir  := b.dir
+    e.newTyp  := b.typ
+    e.newStop := stp
+    while e.bk.size() > 30
+        e.bk.shift()
+    0
+
+// נר סגור חדש במסגרת של המנוע
+method step(Eng e, int t, float o0, float h0, float l0, float c0, float o1, float h1, float l1, float c1, float o2, float h2, float l2, float c2) =>
+    if not na(t) and t != e.lastT and not na(c0) and not na(c1) and not na(c2)
+        e.lastT := t
+        array<float> no = array.from(o0, o1, o2)
+        array<float> nh = array.from(h0, h1, h2)
+        array<float> nl = array.from(l0, l1, l2)
+        array<float> nc = array.from(c0, c1, c2)
+        for a = 0 to 2
+            for k = 2 to 1
+                e.o.set(a * 3 + k, e.o.get(a * 3 + k - 1))
+                e.h.set(a * 3 + k, e.h.get(a * 3 + k - 1))
+                e.l.set(a * 3 + k, e.l.get(a * 3 + k - 1))
+                e.c.set(a * 3 + k, e.c.get(a * 3 + k - 1))
+            e.o.set(a * 3, no.get(a))
+            e.h.set(a * 3, nh.get(a))
+            e.l.set(a * 3, nl.get(a))
+            e.c.set(a * 3, nc.get(a))
+        e.tt.set(2, e.tt.get(1))
+        e.tt.set(1, e.tt.get(0))
+        e.tt.set(0, t)
+        // החלפת תת-מחזור; מיכל חדש — מתחילים נקי
+        [sub, cont, pos, blk, nm] = f_cyc(e.lv, t)
+        if na(e.cS) or sub != e.cS
+            if not na(e.cS)
+                e.pS := e.cS
+                e.pC := e.cC
+                e.pP := e.cP
+                e.pB := e.cB
+                for a = 0 to 2
+                    e.pH.set(a, e.nH.get(a))
+                    e.pL.set(a, e.nL.get(a))
+                if cont != e.cC
+                    e.bk.clear()
+            e.cS := sub
+            e.cC := cont
+            e.cP := pos
+            e.cB := blk
+            e.rBear := false
+            e.rBull := false
+            for a = 0 to 2
+                e.nH.set(a, na)
+                e.nL.set(a, na)
+        for a = 0 to 2
+            e.nH.set(a, na(e.nH.get(a)) ? nh.get(a) : math.max(e.nH.get(a), nh.get(a)))
+            e.nL.set(a, na(e.nL.get(a)) ? nl.get(a) : math.min(e.nL.get(a), nl.get(a)))
+        // SSMT מתה כשכל הנכסים סגרו מעבר לקיצון
+        if e.bk.size() > 0
+            for i = e.bk.size() - 1 to 0
+                Brk b = e.bk.get(i)
+                if b.typ == 1
+                    if not b.k0 and (b.dir == -1 ? c0 > b.r0 : c0 < b.r0)
+                        b.k0 := true
+                    if not b.k1 and (b.dir == -1 ? c1 > b.r1 : c1 < b.r1)
+                        b.k1 := true
+                    if not b.k2 and (b.dir == -1 ? c2 > b.r2 : c2 < b.r2)
+                        b.k2 := true
+                    if b.k0 and b.k1 and b.k2
+                        e.bk.remove(i)
+        // SSMT חדשה — פעם אחת לכל כיוון בתת-מחזור
+        bool valid = not na(e.pS) and e.pC == cont and e.pP == pos - 1 and not blk and not e.pB
+        if valid
+            int nUp = 0
+            int nDn = 0
+            for a = 0 to 2
+                if e.nH.get(a) > e.pH.get(a)
+                    nUp += 1
+                if e.nL.get(a) < e.pL.get(a)
+                    nDn += 1
+            if nUp > 0 and nUp < 3 and not e.rBear
+                e.rBear := true
+                e.reg(Brk.new(dir = -1, typ = 1, t = t, rt = time, r0 = e.pH.get(0), r1 = e.pH.get(1), r2 = e.pH.get(2)), h0)
+            if nDn > 0 and nDn < 3 and not e.rBull
+                e.rBull := true
+                e.reg(Brk.new(dir = 1, typ = 1, t = t, rt = time, r0 = e.pL.get(0), r1 = e.pL.get(1), r2 = e.pL.get(2)), l0)
+        // PSP — הנר האמצעי (k = 1) סווינג בנכס הגרף, והנכסים לא מסכימים על הצבע
+        if not na(e.h.get(2))
+            int t1 = e.tt.get(1)
+            [s1, cx, p1, b1, n1] = f_cyc(e.lv, t1)
+            bool okQ = p1 != 0 and not b1
+            bool swH = e.h.get(1) > e.h.get(0) and e.h.get(1) > e.h.get(2)
+            bool swL = e.l.get(1) < e.l.get(0) and e.l.get(1) < e.l.get(2)
+            int nG = 0
+            int nR = 0
+            for a = 0 to 2
+                float cc = e.c.get(a * 3 + 1)
+                float oo = e.o.get(a * 3 + 1)
+                if cc > oo
+                    nG += 1
+                if cc < oo
+                    nR += 1
+            if okQ and nG > 0 and nR > 0
+                if swH
+                    e.reg(Brk.new(dir = -1, typ = 2, t = t1, rt = time, lvl = e.h.get(1)), e.h.get(1))
+                if swL
+                    e.reg(Brk.new(dir = 1, typ = 2, t = t1, rt = time, lvl = e.l.get(1)), e.l.get(1))
+    0
+
+// PSP מת כשנכס הגרף חוצה את קצה נר הסווינג
+method pspKill(Eng e, float h, float l) =>
+    if e.bk.size() > 0
+        for i = e.bk.size() - 1 to 0
+            Brk b = e.bk.get(i)
+            if b.typ == 2 and (b.dir == -1 ? h > b.lvl : l < b.lvl)
+                e.bk.remove(i)
+    0
+
+// כיוון המסגרת: השבירה החיה האחרונה
+f_dir(Eng e) =>
+    int d  = 0
+    int bt = 0
+    for b in e.bk
+        if b.t >= bt
+            bt := b.t
+            d  := b.dir
+    d
+
+var Eng e1  = f_newEng(1, 1)
+var Eng e5  = f_newEng(2, 2)
+var Eng e15 = f_newEng(3, 3)
+var Eng e60 = f_newEng(4, 4)
+
+f_htf(string sym, string tf) =>
+    request.security(sym, tf, [time[1], open[1], high[1], low[1], close[1]])
+
+[ta5, ao5, ah5, al5, ac5] = f_htf(syminfo.tickerid, "5")
+[tb5, bo5, bh5, bl5, bc5] = f_htf(symES, "5")
+[tc5, co5, ch5, cl5, cc5] = f_htf(symYM, "5")
+[ta15, ao15, ah15, al15, ac15] = f_htf(syminfo.tickerid, "15")
+[tb15, bo15, bh15, bl15, bc15] = f_htf(symES, "15")
+[tc15, co15, ch15, cl15, cc15] = f_htf(symYM, "15")
+[ta60, ao60, ah60, al60, ac60] = f_htf(syminfo.tickerid, "60")
+[tb60, bo60, bh60, bl60, bc60] = f_htf(symES, "60")
+[tc60, co60, ch60, cl60, cc60] = f_htf(symYM, "60")
+[bo1, bh1, bl1, bc1] = request.security(symES, timeframe.period, [open, high, low, close])
+[co1, ch1, cl1, cc1] = request.security(symYM, timeframe.period, [open, high, low, close])
+
+is1m = timeframe.in_seconds() == 60
+
+e5.step(ta5, ao5, ah5, al5, ac5, bo5, bh5, bl5, bc5, co5, ch5, cl5, cc5)
+e15.step(ta15, ao15, ah15, al15, ac15, bo15, bh15, bl15, bc15, co15, ch15, cl15, cc15)
+e60.step(ta60, ao60, ah60, al60, ac60, bo60, bh60, bl60, bc60, co60, ch60, cl60, cc60)
+if is1m
+    e1.step(time, open, high, low, close, bo1, bh1, bl1, bc1, co1, ch1, cl1, cc1)
+e1.pspKill(high, low)
+e5.pspKill(high, low)
+e15.pspKill(high, low)
+e60.pspKill(high, low)
+
+// ══════════════════════════════════════════════════════════════
+// אזור נזילות
+// ══════════════════════════════════════════════════════════════
+f_zone(Lv s) =>
+    int z = 0
+    if s.on
+        if s.eHT == time
+            z := -1
+        if s.eLT == time
+            z := 1
+        if s.valid
+            for g in s.gaps
+                if g.sub == s.pS and g.touchT == time
+                    z := g.bot > close[1] ? -1 : g.top < close[1] ? 1 : z
+    z
+
+var int zT   = 0
+var int zDir = 0
+var string zNm = ""
+zs = f_zone(LS)
+zd = f_zone(LD)
+zw = f_zone(LW)
+if zs != 0
+    zT   := time
+    zDir := zs
+    zNm  := "סשן"
+if zd != 0
+    zT   := time
+    zDir := zd
+    zNm  := "יום"
+if zw != 0
+    zT   := time
+    zDir := zw
+    zNm  := "שבוע"
+
+// שבירות תומכות: [כמה (מסגרת × סוג), יש חדשה מאז האזור]
+f_supp(int D, int zt) =>
+    int  n     = 0
+    bool fresh = false
+    for k = 0 to 2
+        Eng  e  = k == 0 ? e5 : k == 1 ? e15 : e60
+        bool on = k == 0 ? use5 : k == 1 ? use15 : use60
+        if on and f_dir(e) == D
+            bool hS = false
+            bool hP = false
+            for b in e.bk
+                if b.dir == D
+                    if b.typ == 1
+                        hS := true
+                    else
+                        hP := true
+                    if b.rt >= zt
+                        fresh := true
+            n += (hS ? 1 : 0) + (hP ? 1 : 0)
+    [n, fresh]
+
+// יעד: הנזילות הקרובה בכיוון D, לפחות minD מהמחיר
+f_target(int D, float px, float minD) =>
+    float best = na
+    for k = 0 to 2
+        Lv s = k == 0 ? LS : k == 1 ? LD : LW
+        if s.on
+            float ex = D == -1 ? s.eL : s.eH
+            bool  tk = D == -1 ? s.eLT > 0 : s.eHT > 0
+            if not na(ex) and not tk and (D == -1 ? px - ex : ex - px) >= minD
+                best := na(best) or math.abs(ex - px) < math.abs(best - px) ? ex : best
+            if s.valid
+                for g in s.gaps
+                    if g.sub == s.pS and g.touchT == 0 and g.deadT == 0
+                        float ge = D == -1 ? g.top : g.bot
+                        if (D == -1 ? px - ge : ge - px) >= minD
+                            best := na(best) or math.abs(ge - px) < math.abs(best - px) ? ge : best
+    best
+
+// ══════════════════════════════════════════════════════════════
+// עסקאות
+// ══════════════════════════════════════════════════════════════
+inSess = not na(time(timeframe.period, sess, TZ))
+[dSub, dC, dP, dBlk, dNm] = f_cyc(4, time)
+var int lastDay = na
+var int dayN    = 0
+if na(lastDay) or dSub != lastDay
+    lastDay := dSub
+    dayN    := 0
+
+var float tStop = na
+var float tTgt  = na
+var string sig  = ""
+
+[nBear, fBear] = f_supp(-1, zT)
+[nBull, fBull] = f_supp(1, zT)
+
+if is1m and strategy.position_size == 0 and inSess and not (noFri and dBlk) and dayN < maxDay
+    if zDir != 0 and time - zT <= zoneWin * 60000
+        int  D     = zDir
+        int  n     = D == 1 ? nBull : nBear
+        bool fresh = D == 1 ? fBull : fBear
+        bool trig  = e1.newRT == time and e1.newDir == D and ((e1.newTyp == 2 and trigPSP) or (e1.newTyp == 1 and trigSS))
+        if n >= needN and fresh and trig
+            float stp  = D == -1 ? e1.newStop + bufTk * syminfo.mintick : e1.newStop - bufTk * syminfo.mintick
+            float risk = math.abs(close - stp)
+            if risk > 0 and risk <= maxRsk and (D == -1 ? stp > close : stp < close)
+                float tgt = f_target(D, close, minRR * risk)
+                if na(tgt) and useFb
+                    tgt := close + D * fbRR * risk
+                if not na(tgt)
+                    string id = D == 1 ? "L" : "S"
+                    strategy.entry(id, D == 1 ? strategy.long : strategy.short, comment = (D == 1 ? "▲ " : "▼ ") + zNm + " · " + str.tostring(n) + " שבירות · " + (e1.newTyp == 2 ? "PSP" : "SSMT"))
+                    strategy.exit(id + " x", id, stop = stp, limit = tgt)
+                    tStop := stp
+                    tTgt  := tgt
+                    dayN  += 1
+                    zDir  := 0
+
+if strategy.position_size != 0 and not inSess
+    strategy.close_all(comment = "סוף שעות המסחר")
+if strategy.position_size == 0 and strategy.position_size[1] == 0
+    tStop := na
+    tTgt  := na
+
+plot(strategy.position_size != 0 ? tStop : na, "סטופ", color.new(#ef5350, 0), 1, plot.style_linebr)
+plot(strategy.position_size != 0 ? tTgt : na, "יעד", color.new(#26a69a, 0), 1, plot.style_linebr)
+
+// ══════════════════════════════════════════════════════════════
+// מצב — מה האסטרטגיה רואה עכשיו
+// ══════════════════════════════════════════════════════════════
+var table st = table.new(position.top_right, 2, 7, border_width = 0)
+CLR = color.new(color.black, 100)
+f_dTx(Eng e) =>
+    int d = f_dir(e)
+    d == 1 ? "▲" : d == -1 ? "▼" : "—"
+f_dCol(Eng e) =>
+    int d = f_dir(e)
+    d == 1 ? #26a69a : d == -1 ? #ef5350 : #787b86
+
+if barstate.islast
+    st.clear(0, 0, 1, 6)
+    if not is1m
+        st.cell(0, 0, "QT Strategy רצה על גרף של דקה אחת", text_color = #f0b400, text_size = size.small, bgcolor = CLR)
+    else
+        st.cell(0, 0, "QT Strat", text_color = #787b86, text_size = size.small, bgcolor = CLR)
+        st.cell(0, 1, "1m", text_color = #787b86, text_size = size.small, bgcolor = CLR)
+        st.cell(1, 1, f_dTx(e1), text_color = f_dCol(e1), text_size = size.small, bgcolor = CLR)
+        st.cell(0, 2, "5m", text_color = #787b86, text_size = size.small, bgcolor = CLR)
+        st.cell(1, 2, f_dTx(e5), text_color = f_dCol(e5), text_size = size.small, bgcolor = CLR)
+        st.cell(0, 3, "15m", text_color = #787b86, text_size = size.small, bgcolor = CLR)
+        st.cell(1, 3, f_dTx(e15), text_color = f_dCol(e15), text_size = size.small, bgcolor = CLR)
+        st.cell(0, 4, "1H", text_color = #787b86, text_size = size.small, bgcolor = CLR)
+        st.cell(1, 4, f_dTx(e60), text_color = f_dCol(e60), text_size = size.small, bgcolor = CLR)
+        bool zOn = zDir != 0 and time - zT <= zoneWin * 60000
+        string zTx = zOn ? (zDir == 1 ? "▲ " : "▼ ") + zNm + " · לפני " + str.tostring(math.round((time - zT) / 60000)) + " דק'" : "אין"
+        st.cell(0, 5, "אזור", text_color = #787b86, text_size = size.small, bgcolor = CLR)
+        st.cell(1, 5, zTx, text_color = zOn ? (zDir == 1 ? #26a69a : #ef5350) : #787b86, text_size = size.small, bgcolor = CLR)
+        st.cell(0, 6, "תומכות", text_color = #787b86, text_size = size.small, bgcolor = CLR)
+        st.cell(1, 6, "▲" + str.tostring(nBull) + "  ▼" + str.tostring(nBear), text_color = #b2b5be, text_size = size.small, bgcolor = CLR)
