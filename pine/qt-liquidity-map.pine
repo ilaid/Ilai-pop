@@ -1,16 +1,13 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0
 // QT Liquidity Map — שלב 1 במערכת המסחר: לאן המחיר צריך ללכת, בכל 4 הנכסים.
 //
-// לכל נכס ולכל רמה (חודש · שבוע · יום · סשן · 90 דק'):
-//   נזילות חיצונית — הגבוה / הנמוך של המחזור הקודם: H / L = נלקח במחזור הנוכחי.
-//   נזילות פנימית  — הגאפים של המחזור הקודם באותו מיכל (חוק התדלוק):
-//       ▼1/2  = גאפ שורי (תמיכה): המחיר חזר ל-1 מתוך 2 הגאפים
-//       ▲0/1  = גאפ דובי (התנגדות): עוד לא חזר
-//       ✗1    = גאפ אחד נשבר במחזור הזה (סגירה מעבר לקצה הרחוק, במסגרת של הגאפ)
-//       —     = אין חזרה בתת-מחזור הזה (ראשון במיכל / זמן חסום)
-//       ∅     = למחזור הקודם לא נשאר גאפ פתוח
-//   צבע: ירוק = גאפ תמיכה שהמחיר בתוכו/נגע והוא מחזיק · אדום = גאפ התנגדות מחזיק.
-// מעבר עם העכבר על תא — המחירים, השעות ומה קרה לכל גאפ.
+// לכל רמה (חודש · שבוע · יום · סשן · 90 דק') הטבלה כותבת במילים, לנכס של הגרף:
+//   1. מה קרה לקיצון של המחזור הקודם — "לקח נמוך של שלישי" (נזילות חיצונית).
+//   2. מה קרה לגאפים של המחזור הקודם באותו מיכל (חוק התדלוק, נזילות פנימית):
+//      "גאפ מעל (3): עוד לא חזר · 26,452" / "חזר ✓" / "חזר ונשבר ✗".
+//   3. אילו נכסים אחרים במצב שונה — "YM: לקח גבוה ונמוך · גאפ מתחת (2): חזר ונשבר ✗".
+//   צבע: ירוק = חזר לגאפ מתחת והוא מחזיק · אדום = חזר לגאפ מעל והוא מחזיק.
+// על הגרף: קווים לגבוה/נמוך של המחזורים הקודמים, וקופסאות לגאפים של המחזור הקודם.
 //
 // גאפ = SSMT Fill (FVG + VI + הרחבה לגופים). FVG שייך למחזור של הנר האמצעי,
 // VI / גאפ פתיחה — למחזור שהוא פותח. מת ב-IFVG (סגירה במסגרת שלו מעבר לקצה הרחוק).
@@ -76,9 +73,9 @@ f_m(int s) =>
 f_d(int s) =>
     dayofmonth(s * 86400000, "UTC")
 
-SES = array.from("Asia", "London", "AM", "PM")
-DAYN = array.from("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
-MON = array.from("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+SES = array.from("אסיה", "לונדון", "AM", "PM")
+DAYN = array.from("ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת")
+MON = array.from("ינואר", "פברואר", "מרץ", "אפריל", "מאי", "יוני", "יולי", "אוגוסט", "ספטמבר", "אוקטובר", "נובמבר", "דצמבר")
 
 f_cyc(int lv, int t) =>
     int    sub  = na
@@ -120,7 +117,7 @@ f_cyc(int lv, int t) =>
             cont := own ? -mon : f_y(tue) * 12 + tM
             pos  := own ? 0 : wk - 1
             blk  := own
-            nm   := dead ? "DW" : "W" + str.tostring(wk)
+            nm   := dead ? "שבוע מת" : "שבוע " + str.tostring(wk)
         else
             // חודש — לפי יום המסחר (קלנדרי). נזילות חיצונית בלבד.
             sub  := f_y(dS) * 12 + f_m(dS) - 1
@@ -190,6 +187,7 @@ type Lv
     int       cP
     bool      cB     = false
     string    cN     = ""
+    string    pN     = ""
     int       cStart = 0
     // המחזור הקודם
     int       pS
@@ -244,6 +242,7 @@ method upd(Lv s, float h, float l) =>
                 s.pC := s.cC
                 s.pP := s.cP
                 s.pB := s.cB
+                s.pN := s.cN
                 // הצבירה עדיין על המחזור שנגמר — זה הגבוה/נמוך שלו
                 s.eH := s.aSub == s.cS ? s.aH : na
                 s.eL := s.aSub == s.cS ? s.aL : na
@@ -324,53 +323,15 @@ f_asset(2, sym3)
 f_asset(3, sym4)
 
 // ══════════════════════════════════════════════════════════════
-// טבלה
+// טבלה — משפטים לנכס של הגרף, ושורה רק על נכסים שבמצב אחר
 // ══════════════════════════════════════════════════════════════
 f_name(string s) =>
     array<string> p = str.split(s, ":")
-    str.replace_all(p.get(p.size() - 1), "1!", "")
+    string n = str.replace_all(p.get(p.size() - 1), "1!", "")
+    n == "MNQ" ? "NQ" : n == "MES" ? "ES" : n == "MYM" ? "YM" : n == "M2K" ? "RTY" : n
 
 NMS = array.from(f_name(sym1), f_name(sym2), f_name(sym3), f_name(sym4))
-LVN = array.from("", "", "90", "סשן", "יום", "שבוע", "", "חודש")
-PFX = array.from("", "", "P90", "PS", "PD", "PW", "", "PM")
-
-f_t(int t) =>
-    str.format_time(t, "EEE HH:mm", TZ)
-
-f_cell(Lv s) =>
-    string ext = ""
-    string gp  = ""
-    string tp  = ""
-    color  c   = cTxt
-    if not na(s.eH)
-        ext := (s.eHT > 0 ? "H" : "") + (s.eLT > 0 ? "L" : "")
-        ext := ext == "" ? "·" : ext
-        tp  := "גבוה קודם " + str.tostring(s.eH, format.mintick) + (s.eHT > 0 ? "  נלקח " + f_t(s.eHT) : "") + "\nנמוך קודם " + str.tostring(s.eL, format.mintick) + (s.eLT > 0 ? "  נלקח " + f_t(s.eLT) : "")
-    if s.lv != 7
-        if not s.valid
-            gp := "—"
-        else
-            for d in array.from(1, -1)
-                int  n    = 0
-                int  k    = 0
-                int  b    = 0
-                bool hold = false
-                for g in s.gaps
-                    if g.sub == s.pS and g.dir == d and (g.deadT == 0 or g.deadT >= s.cStart)
-                        n += 1
-                        if g.touchT > 0
-                            k += 1
-                            if g.deadT == 0
-                                hold := true
-                        if g.deadT > 0
-                            b += 1
-                        tp += "\n" + (d == 1 ? "▼ " : "▲ ") + str.tostring(g.bot, format.mintick) + "–" + str.tostring(g.top, format.mintick) + " · נוצר " + f_t(g.bt) + (g.touchT > 0 ? " · חזר " + f_t(g.touchT) : " · עוד לא") + (g.deadT > 0 ? " · נשבר ✗" : "")
-                if n > 0
-                    gp += (gp == "" ? "" : " ") + (d == 1 ? "▼" : "▲") + str.tostring(k) + "/" + str.tostring(n) + (b > 0 ? "✗" + str.tostring(b) : "")
-                if hold
-                    c := d == 1 ? cUp : cDn
-            gp := gp == "" ? "∅" : gp
-    [str.trim(ext + " " + gp), c, tp]
+LVN = array.from("", "", "90 דק'", "סשן", "יום", "שבוע", "", "חודש")
 
 pTop = posH == "שמאל" ? position.top_left : posH == "מרכז" ? position.top_center : position.top_right
 pMid = posH == "שמאל" ? position.middle_left : posH == "מרכז" ? position.middle_center : position.middle_right
@@ -380,30 +341,109 @@ tSz  = txtSz == "זעיר" ? size.tiny : txtSz == "קטן" ? size.small : size.n
 CLR  = color.new(color.black, 100)
 nAs  = use4 ? 4 : 3
 
-var table tb = table.new(tPos, 5, 6, border_width = 0)
+chTk = syminfo.prefix + ":" + syminfo.ticker
+chIx = drawAs == "אוטומטי" ? (chTk == sym2 ? 1 : chTk == sym3 ? 2 : (use4 and chTk == sym4) ? 3 : 0) : math.min(int(str.tonumber(drawAs)) - 1, nAs - 1)
+
+f_px(float p) =>
+    str.tostring(p, format.mintick)
+
+// גאפים של המחזור הקודם בצד אחד: [כמה, כמה חזר, כמה נשבר, הקצה הקרוב של הבא שלא חזר]
+f_gaps(Lv s, int d) =>
+    int   n  = 0
+    int   k  = 0
+    int   b  = 0
+    float nx = na
+    for g in s.gaps
+        if g.sub == s.pS and g.dir == d and (g.deadT == 0 or g.deadT >= s.cStart)
+            n += 1
+            if g.touchT > 0
+                k += 1
+            if g.deadT > 0
+                b += 1
+            if g.touchT == 0 and g.deadT == 0
+                nx := d == 1 ? (na(nx) ? g.top : math.max(nx, g.top)) : (na(nx) ? g.bot : math.min(nx, g.bot))
+    [n, k, b, nx]
+
+// מה קרה לקיצון של המחזור הקודם
+f_extTx(Lv s, bool brief) =>
+    string r = ""
+    if not na(s.eH)
+        bool h = s.eHT > 0
+        bool l = s.eLT > 0
+        string of = brief ? "" : " של " + s.pN
+        r := h and l ? "לקח גבוה ונמוך" + of : h ? "לקח גבוה" + of : l ? "לקח נמוך" + of : "עוד לא לקח קיצון" + of
+    r
+
+// מה קרה לגאפים בצד אחד
+f_gapTx(Lv s, int d, bool brief) =>
+    [n, k, b, nx] = f_gaps(s, d)
+    string side = d == 1 ? "גאפ מתחת" : "גאפ מעל"
+    string r = ""
+    if n > 0
+        string cnt = n > 1 ? " (" + str.tostring(n) + ")" : ""
+        if k == 0
+            r := side + cnt + ": עוד לא חזר" + (brief or na(nx) ? "" : " · " + f_px(nx))
+        else if b == n
+            r := side + cnt + ": חזר ונשבר ✗"
+        else
+            r := side + cnt + ": חזר ✓" + (b > 0 ? " · " + str.tostring(b) + " נשבר" : "") + (brief or na(nx) ? "" : " · הבא " + f_px(nx))
+    r
+
+f_gapsAll(Lv s, bool brief) =>
+    string r = ""
+    if s.lv != 7
+        if not s.valid
+            r := brief ? "" : (s.cB or s.pB) ? "זמן חסום — אין חזרה לגאפ" : "ראשון במיכל — אין גאפ לחזור אליו"
+        else
+            string a = f_gapTx(s, -1, brief)
+            string c = f_gapTx(s, 1, brief)
+            r := a == "" and c == "" ? "לא נשאר גאפ פתוח" : a == "" ? c : c == "" ? a : a + "\n" + c
+    r
+
+f_brief(Lv s) =>
+    string e = f_extTx(s, true)
+    string g = str.replace_all(f_gapsAll(s, true), "\n", " · ")
+    e == "" ? g : g == "" ? e : e + " · " + g
+
+// צבע: יש גאפ שחזרו אליו והוא מחזיק — ירוק (מתחת) / אדום (מעל)
+f_col(Lv s) =>
+    color c = cTxt
+    if s.valid
+        [n1, k1, b1, x1] = f_gaps(s, 1)
+        [n2, k2, b2, x2] = f_gaps(s, -1)
+        c := k1 > b1 ? cUp : k2 > b2 ? cDn : cTxt
+    c
+
+var table tb = table.new(tPos, 2, 6, border_width = 0)
 
 if barstate.islast
-    tb.clear(0, 0, 4, 5)
-    tb.cell(0, 0, "QT Liq", text_color = cHead, text_size = tSz, bgcolor = CLR)
-    for i = 0 to nAs - 1
-        tb.cell(i + 1, 0, NMS.get(i), text_color = cHead, text_size = tSz, bgcolor = CLR)
+    tb.clear(0, 0, 1, 5)
+    tb.cell(0, 0, "נזילות · " + NMS.get(chIx), text_color = cHead, text_size = tSz, bgcolor = CLR, text_halign = text.align_right)
     int r = 1
     for k = 0 to 4
         array<Lv> L = k == 0 ? LM : k == 1 ? LW : k == 2 ? LD : k == 3 ? LS : L90
-        Lv s0 = L.get(0)
-        if s0.on
-            tb.cell(0, r, LVN.get(s0.lv) + " " + s0.cN, text_color = cHead, text_size = tSz, bgcolor = CLR, text_halign = text.align_left)
+        Lv s = L.get(chIx)
+        if s.on
+            string head = LVN.get(s.lv) + "\n" + s.cN + (s.pN != "" ? " מול " + s.pN : "")
+            string body = f_extTx(s, false)
+            string gp   = f_gapsAll(s, false)
+            body := body == "" ? gp : gp == "" ? body : body + "\n" + gp
+            // נכסים במצב אחר
+            string me   = f_brief(s)
+            string diff = ""
             for i = 0 to nAs - 1
-                [tx, c, tp] = f_cell(L.get(i))
-                tb.cell(i + 1, r, tx, text_color = c, text_size = tSz, bgcolor = CLR, tooltip = tp)
+                if i != chIx
+                    string o = f_brief(L.get(i))
+                    if o != me
+                        diff += (diff == "" ? "" : "\n") + NMS.get(i) + ": " + o
+            body += "\n" + (diff == "" ? "כל הנכסים באותו מצב" : diff)
+            tb.cell(0, r, head, text_color = cHead, text_size = tSz, bgcolor = CLR, text_halign = text.align_right, text_valign = text.align_top)
+            tb.cell(1, r, body, text_color = f_col(s), text_size = tSz, bgcolor = CLR, text_halign = text.align_right, text_valign = text.align_top)
             r += 1
 
 // ══════════════════════════════════════════════════════════════
 // על הגרף — הנכס שנבחר
 // ══════════════════════════════════════════════════════════════
-chTk = syminfo.prefix + ":" + syminfo.ticker
-chIx = drawAs == "אוטומטי" ? (chTk == sym2 ? 1 : chTk == sym3 ? 2 : (use4 and chTk == sym4) ? 3 : 0) : math.min(int(str.tonumber(drawAs)) - 1, nAs - 1)
-
 var array<box>   bxs = array.new<box>()
 var array<line>  lns = array.new<line>()
 var array<label> lbs = array.new<label>()
@@ -415,7 +455,7 @@ f_extLine(Lv s) =>
             bool   tk = z == 0 ? s.eHT > 0 : s.eLT > 0
             color  c  = color.new(z == 0 ? cDn : cUp, tk ? 70 : 20)
             lns.push(line.new(x1 = s.cStart, y1 = y, x2 = time, y2 = y, xloc = xloc.bar_time, extend = extend.right, color = c, style = tk ? line.style_dotted : line.style_dashed, width = 1))
-            lbs.push(label.new(bar_index + 3, y, PFX.get(s.lv) + (z == 0 ? "H" : "L") + (tk ? " ✓" : ""), style = label.style_label_left, color = CLR, textcolor = c, size = size.tiny))
+            lbs.push(label.new(bar_index + 3, y, (z == 0 ? "גבוה " : "נמוך ") + s.pN + (tk ? " ✓ נלקח" : ""), style = label.style_label_left, color = CLR, textcolor = c, size = size.tiny))
     0
 
 if barstate.islast
@@ -443,5 +483,5 @@ if barstate.islast
         for g in gs.gaps
             if g.sub == gs.pS and (g.deadT == 0 or g.deadT >= gs.cStart)
                 color c = g.deadT > 0 ? color.gray : g.dir == 1 ? cUp : cDn
-                string tx = (g.dir == 1 ? "▼ " : "▲ ") + LVN.get(gs.lv) + (g.touchT > 0 ? " ✓" : "") + (g.deadT > 0 ? " ✗" : "")
+                string tx = "גאפ של " + gs.pN + (g.deadT > 0 ? " · נשבר ✗" : g.touchT > 0 ? " · חזר ✓" : " · יעד")
                 bxs.push(box.new(left = g.bt, top = g.top, right = time, bottom = g.bot, xloc = xloc.bar_time, extend = extend.right, border_color = color.new(c, 60), border_width = 1, bgcolor = color.new(c, 88), text = tx, text_size = size.tiny, text_color = color.new(c, 20), text_halign = text.align_right, text_valign = text.align_center))
