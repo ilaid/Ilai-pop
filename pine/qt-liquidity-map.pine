@@ -1,0 +1,447 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0
+// QT Liquidity Map — שלב 1 במערכת המסחר: לאן המחיר צריך ללכת, בכל 4 הנכסים.
+//
+// לכל נכס ולכל רמה (חודש · שבוע · יום · סשן · 90 דק'):
+//   נזילות חיצונית — הגבוה / הנמוך של המחזור הקודם: H / L = נלקח במחזור הנוכחי.
+//   נזילות פנימית  — הגאפים של המחזור הקודם באותו מיכל (חוק התדלוק):
+//       ▼1/2  = גאפ שורי (תמיכה): המחיר חזר ל-1 מתוך 2 הגאפים
+//       ▲0/1  = גאפ דובי (התנגדות): עוד לא חזר
+//       ✗1    = גאפ אחד נשבר במחזור הזה (סגירה מעבר לקצה הרחוק, במסגרת של הגאפ)
+//       —     = אין חזרה בתת-מחזור הזה (ראשון במיכל / זמן חסום)
+//       ∅     = למחזור הקודם לא נשאר גאפ פתוח
+//   צבע: ירוק = גאפ תמיכה שהמחיר בתוכו/נגע והוא מחזיק · אדום = גאפ התנגדות מחזיק.
+// מעבר עם העכבר על תא — המחירים, השעות ומה קרה לכל גאפ.
+//
+// גאפ = SSMT Fill (FVG + VI + הרחבה לגופים). FVG שייך למחזור של הנר האמצעי,
+// VI / גאפ פתיחה — למחזור שהוא פותח. מת ב-IFVG (סגירה במסגרת שלו מעבר לקצה הרחוק).
+// מחזורים: שעון ניו יורק, יום מסחר מ-18:00. שבוע שייך לחודש של יום השלישי שלו.
+//@version=6
+indicator("QT Liquidity Map", shorttitle = "QT Liq", overlay = true, max_boxes_count = 100, max_lines_count = 100, max_labels_count = 100)
+
+// ══════════════════════════════════════════════════════════════
+// הגדרות
+// ══════════════════════════════════════════════════════════════
+GS = "נכסים"
+sym1 = input.symbol("CME_MINI:MNQ1!",  "נכס 1", group = GS)
+sym2 = input.symbol("CME_MINI:MES1!",  "נכס 2", group = GS)
+sym3 = input.symbol("CBOT_MINI:MYM1!", "נכס 3", group = GS)
+use4 = input.bool(true, "נכס 4 פעיל", group = GS, inline = "s4")
+sym4 = input.symbol("CME_MINI:M2K1!",  "", group = GS, inline = "s4")
+
+GL = "רמות"
+useM  = input.bool(true,  "חודש (נזילות חיצונית בלבד)", group = GL)
+useW  = input.bool(true,  "שבוע (גאפים של 4H)", group = GL)
+useD  = input.bool(true,  "יום (גאפים של 1H)", group = GL)
+useS  = input.bool(true,  "סשן (גאפים של 15m)", group = GL)
+use90 = input.bool(false, "90 דק' (גאפים של 5m)", group = GL)
+
+GD = "על הגרף"
+drawAs = input.string("אוטומטי", "נכס לציור", options = ["אוטומטי", "1", "2", "3", "4"], group = GD, tooltip = "אוטומטי = הנכס מהרשימה שתואם לגרף (אחרת נכס 1).")
+drawLv = input.string("יום", "גאפים של המחזור הקודם — רמה", options = ["כבוי", "שבוע", "יום", "סשן", "90 דק'"], group = GD)
+extM   = input.bool(true,  "קו לגבוה/נמוך של החודש הקודם", group = GD)
+extW   = input.bool(true,  "קו לגבוה/נמוך של השבוע הקודם", group = GD)
+extD   = input.bool(true,  "קו לגבוה/נמוך של היום הקודם", group = GD)
+extS   = input.bool(true,  "קו לגבוה/נמוך של הסשן הקודם", group = GD)
+ext90  = input.bool(false, "קו לגבוה/נמוך של ה-90 הקודם", group = GD)
+
+GT = "טבלה"
+posV  = input.string("למעלה", "גובה", options = ["למעלה", "באמצע", "למטה"], group = GT)
+posH  = input.string("ימין", "צד", options = ["שמאל", "מרכז", "ימין"], group = GT)
+txtSz = input.string("קטן", "גודל כתב", options = ["זעיר", "קטן", "רגיל"], group = GT)
+cUp   = input.color(#26a69a, "תמיכה / שורי", group = GT)
+cDn   = input.color(#ef5350, "התנגדות / דובי", group = GT)
+cTxt  = input.color(#b2b5be, "טקסט", group = GT)
+cHead = input.color(#787b86, "כותרות", group = GT)
+
+GG = "הגדרת גאפ (זהה ל-SSMT Fill)"
+fvgOn        = input.bool(true, "זהה FVG (שלושה נרות)", group = GG)
+volImbOn     = input.bool(true, "זהה VI — גאפ סגירה/פתיחה בין שני נרות", group = GG)
+extendBodies = input.bool(true, "הרחב גאפים לגופי הנרות", group = GG)
+viMinTicks   = input.int(4, "VI לבד — מינימום טיקים", minval = 1, maxval = 100, group = GG)
+viMergeTicks = input.int(1, "הרחבה — מינימום טיקים", minval = 1, maxval = 100, group = GG)
+
+// ══════════════════════════════════════════════════════════════
+// מחזורי QT מתוך חותמת זמן
+// רמות: 2 = 90 דק' · 3 = סשן · 4 = יום · 5 = שבוע · 7 = חודש
+// מחזיר [תת-מחזור, מיכל, מיקום, חסום, שם]
+// ══════════════════════════════════════════════════════════════
+TZ = "America/New_York"
+
+f_ser(int y, int m, int d) =>
+    int(math.floor(timestamp("UTC", y, m, d, 0, 0) / 86400000.0))
+f_y(int s) =>
+    year(s * 86400000, "UTC")
+f_m(int s) =>
+    month(s * 86400000, "UTC")
+f_d(int s) =>
+    dayofmonth(s * 86400000, "UTC")
+
+SES = array.from("Asia", "London", "AM", "PM")
+DAYN = array.from("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
+MON = array.from("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+f_cyc(int lv, int t) =>
+    int    sub  = na
+    int    cont = na
+    int    pos  = na
+    bool   blk  = false
+    string nm   = ""
+    if not na(t)
+        int td   = t + 21600000
+        int dS   = f_ser(year(td, TZ), month(td, TZ), dayofmonth(td, TZ))
+        int sod  = ((hour(t, TZ) * 3600 + minute(t, TZ) * 60 + second(t, TZ)) - 64800 + 86400) % 86400
+        int dw   = (dS + 4) % 7
+        int mon  = dw == 0 ? dS - 6 : dS - (dw - 1)
+        int tue  = mon + 1
+        int tM   = f_m(tue)
+        bool dead = f_m(mon + 3) != tM
+        int wk   = int(math.floor((f_d(tue) - 1) / 7.0)) + 1
+        int se   = int(math.floor(sod / 21600.0))
+        if lv == 2
+            int mi = int(math.floor(sod / 5400.0))
+            sub  := dS * 16 + mi
+            cont := dS * 4 + se
+            pos  := mi % 4
+            nm   := SES.get(se) + " " + str.tostring(mi % 4 + 1)
+        else if lv == 3
+            sub  := dS * 4 + se
+            cont := dS
+            pos  := se
+            nm   := SES.get(se)
+        else if lv == 4
+            sub  := dS
+            cont := mon
+            pos  := math.max(0, math.min(4, dw - 1))
+            blk  := dw == 5 or dw == 6 or dw == 0
+            nm   := DAYN.get(dw)
+        else if lv == 5
+            bool own = dead or wk == 5
+            sub  := mon
+            cont := own ? -mon : f_y(tue) * 12 + tM
+            pos  := own ? 0 : wk - 1
+            blk  := own
+            nm   := dead ? "DW" : "W" + str.tostring(wk)
+        else
+            // חודש — לפי יום המסחר (קלנדרי). נזילות חיצונית בלבד.
+            sub  := f_y(dS) * 12 + f_m(dS) - 1
+            cont := f_y(dS)
+            pos  := f_m(dS) - 1
+            nm   := MON.get(f_m(dS) - 1)
+    [sub, cont, pos, blk, nm]
+
+// ══════════════════════════════════════════════════════════════
+// רגל של גאפ — העתק של f_leg מ-SSMT Fill
+// נרות: 1 = (o2,h2,l2,cX2) · 2 = (o1,c1) · 3 = (o0,h0,l0,c0)
+// ══════════════════════════════════════════════════════════════
+f_leg(int d, bool ok, float o0, float h0, float l0, float c0, float o1, float c1, float h2, float l2, float cX2, float o2, float tk, bool edge) =>
+    float b  = na
+    float t  = na
+    int   ti = math.round(math.abs(o0 - c1) / tk)
+    int   pi = math.round(math.abs(o1 - cX2) / tk)
+    bool  f  = fvgOn and ok and (d == 1 ? l0 > h2 : h0 < l2)
+    bool  r  = ok and (d == 1 ? (o0 > c1 and (edge or (c1 > o1 and c0 > o0))) : (o0 < c1 and (edge or (c1 < o1 and c0 < o0))))
+    bool  m  = extendBodies and r and ti >= viMergeTicks
+    bool  p  = extendBodies and pi >= viMergeTicks and (d == 1 ? (o1 > cX2 and cX2 > o2 and c1 > o1) : (o1 < cX2 and cX2 < o2 and c1 < o1))
+    bool  v  = volImbOn and r and ti >= viMinTicks
+    if f
+        if d == 1
+            b := (extendBodies and o1 > h2 and pi >= viMergeTicks) ? cX2 : h2
+            t := (extendBodies and l0 > c1 and ti >= viMergeTicks) ? o0 : l0
+            if p
+                b := math.min(b, cX2)
+        else
+            t := (extendBodies and o1 < l2 and pi >= viMergeTicks) ? cX2 : l2
+            b := (extendBodies and h0 < c1 and ti >= viMergeTicks) ? o0 : h0
+            if p
+                t := math.max(t, cX2)
+    if (f and m) or (v and (not f or extendBodies))
+        if d == 1
+            b := na(b) ? c1 : math.min(b, c1)
+            t := na(t) ? o0 : math.max(t, o0)
+        else
+            t := na(t) ? c1 : math.max(t, c1)
+            b := na(b) ? o0 : math.min(b, o0)
+    [b, t, f, m, v]
+
+// ══════════════════════════════════════════════════════════════
+// מצב לכל נכס ולכל רמה
+// ══════════════════════════════════════════════════════════════
+type MG
+    int   dir             // 1 = שורי (תמיכה) · -1 = דובי (התנגדות)
+    float top
+    float bot
+    int   sub             // תת-המחזור שהגאפ שייך אליו
+    int   bt              // זמן הנר שהגאפ שייך אליו
+    int   deadT  = 0      // מתי נשבר (IFVG)
+    int   touchT = 0      // מתי המחיר חזר אליו (בתת-המחזור שאחרי שלו)
+
+type Lv
+    int       lv
+    bool      on
+    array<MG> gaps
+    int       lastT  = 0
+    // צבירת הגבוה/נמוך מנרות המסגרת של הרמה
+    int       aSub
+    float     aH
+    float     aL
+    // המחזור הנוכחי (לפי נר הגרף)
+    int       cS
+    int       cC
+    int       cP
+    bool      cB     = false
+    string    cN     = ""
+    int       cStart = 0
+    // המחזור הקודם
+    int       pS
+    int       pC
+    int       pP
+    bool      pB     = false
+    bool      valid  = false
+    // נזילות חיצונית של המחזור הקודם, ומתי נלקחה
+    float     eH
+    float     eL
+    int       eHT    = 0
+    int       eLT    = 0
+
+f_newLv(int lv, bool on) =>
+    Lv.new(lv = lv, on = on, gaps = array.new<MG>())
+
+// נר סגור חדש במסגרת של הרמה: צבירת קיצון, IFVG, גאפים חדשים
+method feed(Lv s, int t1, int t2, float o1, float h1, float l1, float c1, float o2, float c2, float h3, float l3, float c3, float o3, float tk) =>
+    if s.on and not na(t1) and t1 != s.lastT and not na(c1)
+        s.lastT := t1
+        [s3, x1, x2, x3, x4] = f_cyc(s.lv, t1)
+        if na(s.aSub) or s3 != s.aSub
+            s.aSub := s3
+            s.aH   := h1
+            s.aL   := l1
+        else
+            s.aH := math.max(s.aH, h1)
+            s.aL := math.min(s.aL, l1)
+        if s.lv != 7
+            for g in s.gaps
+                if g.deadT == 0 and (g.dir == 1 ? c1 < g.bot : c1 > g.top)
+                    g.deadT := t1
+            [sM, y1, y2, y3, y4] = f_cyc(s.lv, t2)
+            bool ok   = not na(o2) and not na(h3) and not na(o3)
+            bool edge = s3 != sM
+            for d in array.from(1, -1)
+                [b, t, f, m, v] = f_leg(d, ok, o1, h1, l1, c1, o2, c2, h3, l3, c3, o3, tk, edge)
+                if not na(t) and not na(b) and t > b
+                    bool tagNow = (edge and m) or not f
+                    s.gaps.push(MG.new(d, t, b, tagNow ? s3 : sM, tagNow ? t1 : t2))
+            while s.gaps.size() > 120
+                s.gaps.shift()
+    0
+
+// נר הגרף: החלפת מחזור, לקיחת קיצון, חזרה לגאפ של הקודם
+method upd(Lv s, float h, float l) =>
+    if s.on
+        [sub, cont, pos, blk, nm] = f_cyc(s.lv, time)
+        if not na(sub) and (na(s.cS) or sub != s.cS)
+            if not na(s.cS)
+                s.pS := s.cS
+                s.pC := s.cC
+                s.pP := s.cP
+                s.pB := s.cB
+                // הצבירה עדיין על המחזור שנגמר — זה הגבוה/נמוך שלו
+                s.eH := s.aSub == s.cS ? s.aH : na
+                s.eL := s.aSub == s.cS ? s.aL : na
+            s.cS     := sub
+            s.cC     := cont
+            s.cP     := pos
+            s.cB     := blk
+            s.cStart := time
+            s.eHT    := 0
+            s.eLT    := 0
+            bool normal = not na(s.pS) and s.pC == cont and s.pP == pos - 1
+            s.valid := s.lv != 7 and not blk and not s.pB and normal
+            // רק הגאפים של הקודם ושל הנוכחי רלוונטיים
+            if s.gaps.size() > 0
+                for i = s.gaps.size() - 1 to 0
+                    MG g = s.gaps.get(i)
+                    if g.sub != s.pS and g.sub != s.cS
+                        s.gaps.remove(i)
+        s.cN := nm
+        if not na(s.eH) and s.eHT == 0 and h > s.eH
+            s.eHT := time
+        if not na(s.eL) and s.eLT == 0 and l < s.eL
+            s.eLT := time
+        if s.valid
+            for g in s.gaps
+                if g.sub == s.pS and g.touchT == 0 and (g.deadT == 0 or g.deadT >= s.cStart)
+                    if g.dir == 1 ? l <= g.top : h >= g.bot
+                        g.touchT := time
+    0
+
+// ══════════════════════════════════════════════════════════════
+// נתונים
+// ══════════════════════════════════════════════════════════════
+chS  = timeframe.in_seconds()
+on90 = use90 and chS <= 300
+onS  = useS and chS <= 900
+onD  = useD and chS <= 3600
+onW  = useW and chS <= 14400
+onM  = useM and chS <= 14400
+
+tf90 = on90 ? "5" : timeframe.period
+tfS  = onS ? "15" : timeframe.period
+tfD  = onD ? "60" : timeframe.period
+tfW  = (onW or onM) ? "240" : timeframe.period
+
+f_new(int lv, bool on) =>
+    array.from(f_newLv(lv, on), f_newLv(lv, on), f_newLv(lv, on), f_newLv(lv, on and use4))
+
+var array<Lv> L90 = f_new(2, on90)
+var array<Lv> LS  = f_new(3, onS)
+var array<Lv> LD  = f_new(4, onD)
+var array<Lv> LW  = f_new(5, onW)
+var array<Lv> LM  = f_new(7, onM)
+
+f_go(Lv s, string sym, string tf, float tk) =>
+    [t1, t2, o1, h1, l1, c1, o2, c2, h3, l3, c3, o3] = request.security(sym, tf, [time[1], time[2], open[1], high[1], low[1], close[1], open[2], close[2], high[3], low[3], close[3], open[3]])
+    s.feed(t1, t2, o1, h1, l1, c1, o2, c2, h3, l3, c3, o3, tk)
+
+// נכס אחד: קודם הגאפים של הנרות שנסגרו, אחר כך החלפת מחזור — כך גאפ של הנר
+// האמצעי נכנס למחזור הקודם לפני שבודקים מולו
+f_asset(int i, string sym) =>
+    [h, l, tk] = request.security(sym, timeframe.period, [high, low, syminfo.mintick])
+    f_go(LM.get(i), sym, tfW, tk)
+    f_go(LW.get(i), sym, tfW, tk)
+    f_go(LD.get(i), sym, tfD, tk)
+    f_go(LS.get(i), sym, tfS, tk)
+    f_go(L90.get(i), sym, tf90, tk)
+    LM.get(i).upd(h, l)
+    LW.get(i).upd(h, l)
+    LD.get(i).upd(h, l)
+    LS.get(i).upd(h, l)
+    L90.get(i).upd(h, l)
+    0
+
+f_asset(0, sym1)
+f_asset(1, sym2)
+f_asset(2, sym3)
+f_asset(3, sym4)
+
+// ══════════════════════════════════════════════════════════════
+// טבלה
+// ══════════════════════════════════════════════════════════════
+f_name(string s) =>
+    array<string> p = str.split(s, ":")
+    str.replace_all(p.get(p.size() - 1), "1!", "")
+
+NMS = array.from(f_name(sym1), f_name(sym2), f_name(sym3), f_name(sym4))
+LVN = array.from("", "", "90", "סשן", "יום", "שבוע", "", "חודש")
+PFX = array.from("", "", "P90", "PS", "PD", "PW", "", "PM")
+
+f_t(int t) =>
+    str.format_time(t, "EEE HH:mm", TZ)
+
+f_cell(Lv s) =>
+    string ext = ""
+    string gp  = ""
+    string tp  = ""
+    color  c   = cTxt
+    if not na(s.eH)
+        ext := (s.eHT > 0 ? "H" : "") + (s.eLT > 0 ? "L" : "")
+        ext := ext == "" ? "·" : ext
+        tp  := "גבוה קודם " + str.tostring(s.eH, format.mintick) + (s.eHT > 0 ? "  נלקח " + f_t(s.eHT) : "") + "\nנמוך קודם " + str.tostring(s.eL, format.mintick) + (s.eLT > 0 ? "  נלקח " + f_t(s.eLT) : "")
+    if s.lv != 7
+        if not s.valid
+            gp := "—"
+        else
+            for d in array.from(1, -1)
+                int  n    = 0
+                int  k    = 0
+                int  b    = 0
+                bool hold = false
+                for g in s.gaps
+                    if g.sub == s.pS and g.dir == d and (g.deadT == 0 or g.deadT >= s.cStart)
+                        n += 1
+                        if g.touchT > 0
+                            k += 1
+                            if g.deadT == 0
+                                hold := true
+                        if g.deadT > 0
+                            b += 1
+                        tp += "\n" + (d == 1 ? "▼ " : "▲ ") + str.tostring(g.bot, format.mintick) + "–" + str.tostring(g.top, format.mintick) + " · נוצר " + f_t(g.bt) + (g.touchT > 0 ? " · חזר " + f_t(g.touchT) : " · עוד לא") + (g.deadT > 0 ? " · נשבר ✗" : "")
+                if n > 0
+                    gp += (gp == "" ? "" : " ") + (d == 1 ? "▼" : "▲") + str.tostring(k) + "/" + str.tostring(n) + (b > 0 ? "✗" + str.tostring(b) : "")
+                if hold
+                    c := d == 1 ? cUp : cDn
+            gp := gp == "" ? "∅" : gp
+    [str.trim(ext + " " + gp), c, tp]
+
+pTop = posH == "שמאל" ? position.top_left : posH == "מרכז" ? position.top_center : position.top_right
+pMid = posH == "שמאל" ? position.middle_left : posH == "מרכז" ? position.middle_center : position.middle_right
+pBot = posH == "שמאל" ? position.bottom_left : posH == "מרכז" ? position.bottom_center : position.bottom_right
+tPos = posV == "למעלה" ? pTop : posV == "באמצע" ? pMid : pBot
+tSz  = txtSz == "זעיר" ? size.tiny : txtSz == "קטן" ? size.small : size.normal
+CLR  = color.new(color.black, 100)
+nAs  = use4 ? 4 : 3
+
+var table tb = table.new(tPos, 5, 6, border_width = 0)
+
+if barstate.islast
+    tb.clear(0, 0, 4, 5)
+    tb.cell(0, 0, "QT Liq", text_color = cHead, text_size = tSz, bgcolor = CLR)
+    for i = 0 to nAs - 1
+        tb.cell(i + 1, 0, NMS.get(i), text_color = cHead, text_size = tSz, bgcolor = CLR)
+    int r = 1
+    for k = 0 to 4
+        array<Lv> L = k == 0 ? LM : k == 1 ? LW : k == 2 ? LD : k == 3 ? LS : L90
+        Lv s0 = L.get(0)
+        if s0.on
+            tb.cell(0, r, LVN.get(s0.lv) + " " + s0.cN, text_color = cHead, text_size = tSz, bgcolor = CLR, text_halign = text.align_left)
+            for i = 0 to nAs - 1
+                [tx, c, tp] = f_cell(L.get(i))
+                tb.cell(i + 1, r, tx, text_color = c, text_size = tSz, bgcolor = CLR, tooltip = tp)
+            r += 1
+
+// ══════════════════════════════════════════════════════════════
+// על הגרף — הנכס שנבחר
+// ══════════════════════════════════════════════════════════════
+chTk = syminfo.prefix + ":" + syminfo.ticker
+chIx = drawAs == "אוטומטי" ? (chTk == sym2 ? 1 : chTk == sym3 ? 2 : (use4 and chTk == sym4) ? 3 : 0) : math.min(int(str.tonumber(drawAs)) - 1, nAs - 1)
+
+var array<box>   bxs = array.new<box>()
+var array<line>  lns = array.new<line>()
+var array<label> lbs = array.new<label>()
+
+f_extLine(Lv s) =>
+    if s.on and not na(s.eH)
+        for z = 0 to 1
+            float  y  = z == 0 ? s.eH : s.eL
+            bool   tk = z == 0 ? s.eHT > 0 : s.eLT > 0
+            color  c  = color.new(z == 0 ? cDn : cUp, tk ? 70 : 20)
+            lns.push(line.new(x1 = s.cStart, y1 = y, x2 = time, y2 = y, xloc = xloc.bar_time, extend = extend.right, color = c, style = tk ? line.style_dotted : line.style_dashed, width = 1))
+            lbs.push(label.new(bar_index + 3, y, PFX.get(s.lv) + (z == 0 ? "H" : "L") + (tk ? " ✓" : ""), style = label.style_label_left, color = CLR, textcolor = c, size = size.tiny))
+    0
+
+if barstate.islast
+    for x in bxs
+        x.delete()
+    for x in lns
+        x.delete()
+    for x in lbs
+        x.delete()
+    bxs.clear()
+    lns.clear()
+    lbs.clear()
+    if extM
+        f_extLine(LM.get(chIx))
+    if extW
+        f_extLine(LW.get(chIx))
+    if extD
+        f_extLine(LD.get(chIx))
+    if extS
+        f_extLine(LS.get(chIx))
+    if ext90
+        f_extLine(L90.get(chIx))
+    Lv gs = drawLv == "שבוע" ? LW.get(chIx) : drawLv == "יום" ? LD.get(chIx) : drawLv == "סשן" ? LS.get(chIx) : drawLv == "90 דק'" ? L90.get(chIx) : na
+    if not na(gs) and gs.on and gs.valid
+        for g in gs.gaps
+            if g.sub == gs.pS and (g.deadT == 0 or g.deadT >= gs.cStart)
+                color c = g.deadT > 0 ? color.gray : g.dir == 1 ? cUp : cDn
+                string tx = (g.dir == 1 ? "▼ " : "▲ ") + LVN.get(gs.lv) + (g.touchT > 0 ? " ✓" : "") + (g.deadT > 0 ? " ✗" : "")
+                bxs.push(box.new(left = g.bt, top = g.top, right = time, bottom = g.bot, xloc = xloc.bar_time, extend = extend.right, border_color = color.new(c, 60), border_width = 1, bgcolor = color.new(c, 88), text = tx, text_size = size.tiny, text_color = color.new(c, 20), text_halign = text.align_right, text_valign = text.align_center))
