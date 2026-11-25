@@ -56,6 +56,11 @@ sess   = input.session("0200-1600", "שעות מסחר (ניו יורק)", group
 noFri  = input.bool(false, "בלי שישי", group = GT)
 maxDay = input.int(3, "מקסימום עסקאות ביום", minval = 1, maxval = 20, group = GT)
 
+GV = "תצוגה"
+tblPos   = input.string("למטה משמאל", "טבלת מצב", options = ["למטה משמאל", "למטה מימין", "למעלה משמאל", "למעלה מימין"], group = GV)
+showZone = input.bool(true, "צבע רקע כשאזור נזילות פעיל", group = GV)
+showTrig = input.bool(true, "סמן טריגר 1m בתוך אזור", group = GV)
+
 GG = "הגדרת גאפ (זהה ל-SSMT Fill)"
 fvgOn        = input.bool(true, "FVG", group = GG)
 volImbOn     = input.bool(true, "VI", group = GG)
@@ -576,27 +581,56 @@ var string sig  = ""
 [nBear, fBear] = f_supp(-1, zT)
 [nBull, fBull] = f_supp(1, zT)
 
-if is1m and strategy.position_size == 0 and inSess and not (noFri and dBlk) and dayN < maxDay
-    if zDir != 0 and time - zT <= zoneWin * 60000
-        int  D     = zDir
-        int  n     = D == 1 ? nBull : nBear
-        bool fresh = D == 1 ? fBull : fBear
-        bool trig  = e1.newRT == time and e1.newDir == D and ((e1.newTyp == 2 and trigPSP) or (e1.newTyp == 1 and trigSS))
-        if n >= needN and fresh and trig
-            float stp  = D == -1 ? e1.newStop + bufTk * syminfo.mintick : e1.newStop - bufTk * syminfo.mintick
-            float risk = math.abs(close - stp)
-            if risk > 0 and risk <= maxRsk and (D == -1 ? stp > close : stp < close)
-                float tgt = f_target(D, close, minRR * risk)
-                if na(tgt) and useFb
-                    tgt := close + D * fbRR * risk
-                if not na(tgt)
-                    string id = D == 1 ? "L" : "S"
-                    strategy.entry(id, D == 1 ? strategy.long : strategy.short, comment = (D == 1 ? "▲ " : "▼ ") + zNm + " · " + str.tostring(n) + " שבירות · " + (e1.newTyp == 2 ? "PSP" : "SSMT"))
-                    strategy.exit(id + " x", id, stop = stp, limit = tgt)
-                    tStop := stp
-                    tTgt  := tgt
-                    dayN  += 1
-                    zDir  := 0
+// אבחון: כמה אזורים, כמה טריגרים בתוך אזור, ולמה לא נכנסנו
+var int cZone = 0
+var int cTrig = 0
+var int cTime = 0
+var int cNoN  = 0
+var int cNoF  = 0
+var int cRisk = 0
+var int cTgt  = 0
+var int cOk   = 0
+if zs != 0 or zd != 0 or zw != 0
+    cZone += 1
+
+zOnNow  = zDir != 0 and time - zT <= zoneWin * 60000
+trigNow = is1m and zOnNow and e1.newRT == time and e1.newDir == zDir and ((e1.newTyp == 2 and trigPSP) or (e1.newTyp == 1 and trigSS))
+zDirNow = zDir
+
+if trigNow
+    cTrig += 1
+    int   D     = zDir
+    int   n     = D == 1 ? nBull : nBear
+    bool  fresh = D == 1 ? fBull : fBear
+    float stp   = D == -1 ? e1.newStop + bufTk * syminfo.mintick : e1.newStop - bufTk * syminfo.mintick
+    float risk  = math.abs(close - stp)
+    bool  rOk   = risk > 0 and risk <= maxRsk and (D == -1 ? stp > close : stp < close)
+    float tgt   = rOk ? f_target(D, close, minRR * risk) : na
+    if rOk and na(tgt) and useFb
+        tgt := close + D * fbRR * risk
+    if strategy.position_size != 0 or not inSess or (noFri and dBlk) or dayN >= maxDay
+        cTime += 1
+    else if n < needN
+        cNoN += 1
+    else if not fresh
+        cNoF += 1
+    else if not rOk
+        cRisk += 1
+    else if na(tgt)
+        cTgt += 1
+    else
+        cOk += 1
+        string id = D == 1 ? "L" : "S"
+        strategy.entry(id, D == 1 ? strategy.long : strategy.short, comment = (D == 1 ? "▲ " : "▼ ") + zNm + " · " + str.tostring(n) + " שבירות · " + (e1.newTyp == 2 ? "PSP" : "SSMT"))
+        strategy.exit(id + " x", id, stop = stp, limit = tgt)
+        tStop := stp
+        tTgt  := tgt
+        dayN  += 1
+        zDir  := 0
+
+bgcolor(showZone and zOnNow ? color.new(zDirNow == 1 ? #26a69a : #ef5350, 92) : na, title = "אזור נזילות")
+plotshape(showTrig and trigNow and zDirNow == -1, "טריגר ▼", shape.triangledown, location.abovebar, color.new(#ef5350, 30), size = size.tiny)
+plotshape(showTrig and trigNow and zDirNow == 1, "טריגר ▲", shape.triangleup, location.belowbar, color.new(#26a69a, 30), size = size.tiny)
 
 if strategy.position_size != 0 and not inSess
     strategy.close_all(comment = "סוף שעות המסחר")
@@ -610,7 +644,8 @@ plot(strategy.position_size != 0 ? tTgt : na, "יעד", color.new(#26a69a, 0), 1
 // ══════════════════════════════════════════════════════════════
 // מצב — מה האסטרטגיה רואה עכשיו
 // ══════════════════════════════════════════════════════════════
-var table st = table.new(position.top_right, 2, 7, border_width = 0)
+tbPos = tblPos == "למטה משמאל" ? position.bottom_left : tblPos == "למטה מימין" ? position.bottom_right : tblPos == "למעלה משמאל" ? position.top_left : position.top_right
+var table st = table.new(tbPos, 2, 9, border_width = 0)
 CLR = color.new(color.black, 100)
 f_dTx(Eng e) =>
     int d = f_dir(e)
@@ -620,7 +655,7 @@ f_dCol(Eng e) =>
     d == 1 ? #26a69a : d == -1 ? #ef5350 : #787b86
 
 if barstate.islast
-    st.clear(0, 0, 1, 6)
+    st.clear(0, 0, 1, 8)
     if not is1m
         st.cell(0, 0, "QT Strategy רצה על גרף של דקה אחת", text_color = #f0b400, text_size = size.small, bgcolor = CLR)
     else
@@ -639,3 +674,7 @@ if barstate.islast
         st.cell(1, 5, zTx, text_color = zOn ? (zDir == 1 ? #26a69a : #ef5350) : #787b86, text_size = size.small, bgcolor = CLR)
         st.cell(0, 6, "תומכות", text_color = #787b86, text_size = size.small, bgcolor = CLR)
         st.cell(1, 6, "▲" + str.tostring(nBull) + "  ▼" + str.tostring(nBear), text_color = #b2b5be, text_size = size.small, bgcolor = CLR)
+        st.cell(0, 7, "מאז ההתחלה", text_color = #787b86, text_size = size.small, bgcolor = CLR)
+        st.cell(1, 7, str.tostring(cZone) + " אזורים · " + str.tostring(cTrig) + " טריגרים באזור · " + str.tostring(cOk) + " עסקאות", text_color = #b2b5be, text_size = size.small, bgcolor = CLR)
+        st.cell(0, 8, "למה לא", text_color = #787b86, text_size = size.small, bgcolor = CLR)
+        st.cell(1, 8, "חסרות שבירות " + str.tostring(cNoN) + " · אין חדשה " + str.tostring(cNoF) + " · סיכון " + str.tostring(cRisk) + " · יעד " + str.tostring(cTgt) + " · זמן/פוזיציה " + str.tostring(cTime), text_color = #b2b5be, text_size = size.small, bgcolor = CLR)
