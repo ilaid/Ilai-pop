@@ -108,6 +108,7 @@ cascadeOn = input.bool(true, "שבירה במסגרת גבוהה גוברת על
 alertOn = input.bool(true, "התראה על כל שבירה חדשה (5m ומעלה)", group = grpAl, tooltip = "Fill חדש או שעלה דרגה, SSMT/HSSMT חדשה (או S שהפכה ל-H), PSP חדש — בכל מסגרת מ-5m ומעלה שהאינדיקטור מחשב.\nכדי לקבל אותן: Alert על האינדיקטור עם התנאי Any alert() function call. הן רצות בשרתי TradingView גם כשהגרף סגור.")
 
 grpMtf = "מסגרות זמן"
+fastCalc    = input.bool(true, "חישוב מהיר — רק התקופה האחרונה", group = grpMtf, tooltip = "כל מסגרת מחושבת רק על התקופה האחרונה (לפחות שני מיכלים שלה מלאים): 1m — יום · 5m — יומיים · 15m — 4 ימים · 1H — 15 יום · 4H — 70 יום · 1D — 220 יום · 1W — 750 יום.\nמה שבטבלה ובצד ימין לא משתנה; שבירות ישנות בצד שמאל של הגרף לא מצוירות.\nכבוי = כל ההיסטוריה (איטי).")
 lowerLevels = input.int(4, "כמה מדרגות מתחת לגרף", minval = 0, maxval = 4, group = grpMtf, tooltip = "אם מופיעה שגיאת Memory limits — להוריד ל-3 או 2.")
 heavyLow    = input.bool(false, "כלול גם מסגרות כבדות מתחת לגרף", group = grpMtf, tooltip = "כבוי (מומלץ): מסגרת מתחת לגרף נכנסת רק אם בנר אחד של הגרף יש עד 16 נרות שלה — למשל בגרף 15m: 5m ו-1m · בגרף 1H: 15m ו-5m · בגרף 4H: 1H ו-15m.\nדלוק: גם 1m בגרף שעתי, 5m בגרף 4H וכו'. כל נר כזה = עשרות תת-נרות × 4 נכסים, ובהיסטוריה ארוכה או ב-Replay זה חורג ממגבלת הזיכרון של TradingView (Memory limits exceeded).")
 
@@ -1030,6 +1031,10 @@ f_step(Eng e, int t, array<float> q1, array<float> q2, array<float> q3, array<fl
                 array<float> qa = gu.kind == 0 ? q1 : q3
                 array<float> qb = gu.kind == 0 ? q2 : q4
                 gu.track(rf, array.get(qa, 1), array.get(qa, 2), array.get(qa, 3), array.get(qb, 1), array.get(qb, 2), array.get(qb, 3), array.get(q3, 1), array.get(q3, 2), array.get(q3, 3))
+            // גאפ שמת (IFVG) — כבר לא חלק מהמחזור: נמחק מיד, פחות עבודה בכל נר
+            for i = array.size(e.gaps) - 1 to 0
+                if array.get(e.gaps, i).dead
+                    array.remove(e.gaps, i)
 
         bool cycEdge = newRef
         [b1u, t1u, f1u, m1u, v1u] = f_legA(1, q1, tk1, cycEdge, true)
@@ -1231,8 +1236,13 @@ f_naQ() =>
     array.new_float(12, na)
 
 // p1..p4 = לנכס יש נר בצעד הזה. נכס בלי נר מדלג — ההיסטוריה שלו לא זזה.
+// מהירות: כל מנוע מחשב רק את התקופה האחרונה — לפחות שני מיכלים שלו מלאים.
+// מה שחי עכשיו (בכל מסגרת, גם PSP ישן של 4H) תמיד בתוך המיכל הנוכחי, אז הוא נשמר.
+f_lookD(int c) => c == 1 ? 1 : c == 2 ? 2 : c == 3 ? 4 : c == 4 ? 15 : c == 5 ? 70 : c == 6 ? 220 : c == 7 ? 750 : 3000
+f_inLook(int c, int t) => not fastCalc or t >= last_bar_time - f_lookD(c) * 86400000
+
 f_push(Eng e, int t, bool p1, bool p2, bool p3, bool p4, float xo1, float xh1, float xl1, float xc1, float xo2, float xh2, float xl2, float xc2, float xo3, float xh3, float xl3, float xc3, float xo4, float xh4, float xl4, float xc4) =>
-    if not na(t) and t != e.lastT and (p1 or p2)
+    if not na(t) and t != e.lastT and (p1 or p2) and f_inLook(e.cls, t)
         array<float> q1 = p1 ? f_hist(e.h1, xo1, xh1, xl1, xc1) : f_naQ()
         array<float> q2 = p2 ? f_hist(e.h2, xo2, xh2, xl2, xc2) : f_naQ()
         array<float> q3 = p3 ? f_hist(e.h3, xo3, xh3, xl3, xc3) : f_naQ()
