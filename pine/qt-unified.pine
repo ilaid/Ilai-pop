@@ -1855,6 +1855,8 @@ var int bootT = timenow
 var array<box>   dBx = array.new_box()
 var array<label> dLb = array.new_label()
 var array<line>  dLn = array.new_line()
+var array<int>   ssLT = array.new_int()     // תוויות SSMT שכבר צוירו: הנר והצד
+var array<bool>  ssLU = array.new_bool()
 
 // גבולות הגאפ על נכס הגרף. na = לנכס הגרף אין רגל בגאפ.
 f_fillBounds(Gap g) =>
@@ -1884,12 +1886,22 @@ f_drawFill(Eng e, Cand c, bool dim) =>
     color  col = dim ? color.new(f_colC(c), 55) : f_colC(c)
     bool   up  = g.dir == 1
     string qN  = f_qsNum(e.cls, g.fTime)
-    string txt = "F" + str.tostring(f_fillLive(e, g)) + " " + g.fLead + (qN != "" ? " · " + qN : "")
+    int    deg = f_fillLive(e, g)
+    // ברור יותר: דרגה, כיוון, לאן המוביל הגיע · מי נכנס (✓) ומי המפגר (✗)
+    array<string> pr = str.split(g.fLead, "+")
+    string who = ""
+    for [i, nm] in pr
+        who := who + (who == "" ? "" : " · ") + nm + (i == 0 ? " ✓" : i == array.size(pr) - 1 ? " ✗" : "")
+    string lvl = deg == 1 ? "נגיעה" : deg == 2 ? "CE" : "קצה"
+    string txt = "F" + str.tostring(deg) + (up ? " ▲ " : " ▼ ") + lvl + "\n" + who + (qN != "" ? " · " + qN : "")
     [gb, gt] = f_fillBounds(g)
+    // קו CE מקווקו בתוך הקופסה
+    if showBox and not na(gt)
+        array.push(dLn, line.new(g.originT, (gb + gt) / 2, time, (gb + gt) / 2, xloc = xloc.bar_time, color = color.new(col, 50), style = line.style_dashed, width = 1))
     if showBox and not na(gt)
         array.push(dBx, box.new(left = g.originT, top = gt, right = time, bottom = gb, xloc = xloc.bar_time, border_color = color.new(col, 45), border_width = 1, bgcolor = color.new(col, boxTransp), text = txt, text_color = col, text_size = lblSize, text_halign = text.align_right, text_valign = text.align_center))
     else
-        array.push(dLb, label.new(g.fTime, close, txt + "\n\n", xloc = xloc.bar_time, yloc = up ? yloc.belowbar : yloc.abovebar, style = label.style_none, textcolor = col, size = lblSize))
+        array.push(dLb, label.new(g.fTime, close, up ? "\n\n" + txt : txt + "\n\n", xloc = xloc.bar_time, yloc = up ? yloc.belowbar : yloc.abovebar, style = label.style_none, textcolor = col, size = lblSize))
     if fillMark == "קו אנכי"
         array.push(dLn, line.new(g.fTime, low, g.fTime, high, xloc = xloc.bar_time, extend = extend.both, color = color.new(col, markTransp), style = line.style_dotted, width = 1))
     else if fillMark == "חץ"
@@ -1951,7 +1963,18 @@ f_drawSS(Eng e, Cand c, bool dim) =>
             float y2  = isBull ? p2 - pad - sh : p2 + pad + sh
             array.push(dLn, line.new(b1, y1, b2, y2, xloc = xloc.bar_time, color = col, width = 1))
         string txt = (c.qTop != "" ? c.qTop + "\n" : "") + f_cycName(e.cls) + " " + (isH ? "HSSMT" : "SSMT") + " · " + f_assets(lb)
-        array.push(dLb, label.new(b2, close, isBull ? "\n" + txt : txt + "\n", xloc = xloc.bar_time, yloc = isBull ? yloc.belowbar : yloc.abovebar, style = label.style_none, textcolor = col, size = lblSize, textalign = text.align_center))
+        // כמה תוויות כבר יושבות על אותו נר באותו צד — מזיזים את הזאת מעליהן/מתחתן
+        int nSt = 0
+        for [i, tt] in ssLT
+            if tt == b2 and array.get(ssLU, i) == isBull
+                nSt += 1
+        array.push(ssLT, b2)
+        array.push(ssLU, isBull)
+        string pad = ""
+        if nSt > 0
+            for j = 1 to nSt * 3
+                pad += "\n"
+        array.push(dLb, label.new(b2, close, isBull ? "\n" + pad + txt : txt + "\n" + pad, xloc = xloc.bar_time, yloc = isBull ? yloc.belowbar : yloc.abovebar, style = label.style_none, textcolor = col, size = lblSize, textalign = text.align_center))
         // שרשרת: אחורה, כל עוד תת-המחזור הקודם נשבר ע"י זה שאחריו באותו כיוון —
         // קו לכל זוג (i → i+1) על נכס הגרף, עם הרצף שלו מתחת/מעל
         if ssChain and onCh and showLine
@@ -2112,6 +2135,8 @@ if barstate.islast
         label.delete(array.pop(dLb))
     while array.size(dLn) > 0
         line.delete(array.pop(dLn))
+    array.clear(ssLT)
+    array.clear(ssLU)
     if tfClass != 0
         array<Cand> cc = f_cands(eCh)
         int ld = array.get(effD, 0)
