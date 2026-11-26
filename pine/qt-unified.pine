@@ -1893,13 +1893,10 @@ f_drawFill(Eng e, Cand c, bool dim) =>
     for [i, nm] in pr
         who := who + (who == "" ? "" : " · ") + nm + (i == 0 ? " ✓" : i == array.size(pr) - 1 ? " ✗" : "")
     string lvl = deg == 1 ? "נגיעה" : deg == 2 ? "CE" : "קצה"
-    string txt = "F" + str.tostring(deg) + (up ? " ▲ " : " ▼ ") + lvl + "\n" + who + (qN != "" ? " · " + qN : "")
+    string txt = "F" + str.tostring(deg) + (up ? " ▲ " : " ▼ ") + lvl + " · " + who + (qN != "" ? " · " + qN : "")
     [gb, gt] = f_fillBounds(g)
-    // קו CE מקווקו בתוך הקופסה
     if showBox and not na(gt)
-        array.push(dLn, line.new(g.originT, (gb + gt) / 2, time, (gb + gt) / 2, xloc = xloc.bar_time, color = color.new(col, 50), style = line.style_dashed, width = 1))
-    if showBox and not na(gt)
-        array.push(dBx, box.new(left = g.originT, top = gt, right = time, bottom = gb, xloc = xloc.bar_time, border_color = color.new(col, 45), border_width = 1, bgcolor = color.new(col, boxTransp), text = txt, text_color = col, text_size = lblSize, text_halign = text.align_right, text_valign = text.align_center))
+        array.push(dBx, box.new(left = g.originT, top = gt, right = time, bottom = gb, xloc = xloc.bar_time, border_color = color.new(col, 100), border_width = 0, bgcolor = color.new(col, boxTransp), text = txt, text_color = col, text_size = lblSize, text_halign = text.align_center, text_valign = text.align_center))
     else
         array.push(dLb, label.new(g.fTime, close, up ? "\n\n" + txt : txt + "\n\n", xloc = xloc.bar_time, yloc = up ? yloc.belowbar : yloc.abovebar, style = label.style_none, textcolor = col, size = lblSize))
     if fillMark == "קו אנכי"
