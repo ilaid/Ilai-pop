@@ -18,6 +18,10 @@ indicator("Sav FX - True Open Stats", shorttitle = "TO Stats", overlay = true)
 //      came back before the period ended
 //    • across the four: when at least one came back, did all four come back;
 //      and when all four were one-sided, did one / all of them come back
+//    • no touch at all before the check point: how often it came back after
+//    • in which quarter of the level's life the touches happen (2nd / 3rd / 4th)
+//    • mostly one side by 75% of the life (other side at most 15% of closes):
+//      how often price still visits the open in the last quarter
 //
 //  Same New York wall clock grid as the indicator. A period is counted once
 //  it has ended; the one in progress is left out. Put it on a CME index future
@@ -37,6 +41,8 @@ shiftMs = int(shiftH * 3600000)
 g_t = "Test"
 cpPct  = input.float(25, "Check point (% of the level's life)", minval = 1, maxval = 95, step = 5, group = g_t, tooltip = "How far into the level's life to check whether price has stayed on one side.")
 tolPct = input.float(5, "One-sided = other side at most (% of closes)", minval = 0, maxval = 49, step = 1, group = g_t, tooltip = "0 = price never closed on the other side of the open. 5 = up to 5% of the closes on the other side still counts as one-sided.")
+
+tolMost = input.float(15, "Mostly one side = other side at most (% of closes)", minval = 0, maxval = 49, step = 1, group = g_t, tooltip = "For the late-return test: by 75% of the level's life price spent at most this share of closes on the other side. 15% of a day is roughly two hours.")
 
 g_l = "Levels"
 useTNcP = input.bool(true, "TNcP", inline = "l1", group = g_l)
@@ -188,6 +194,13 @@ var cpD  = array.new_bool(N, false)  // check point passed
 var cpOk = array.new_bool(N, false)  // check point passed with candles to judge
 var os   = array.new_bool(N, false)  // one-sided at the check point
 var rAc  = array.new_bool(N, false)  // touched at or after the check point
+var ntc  = array.new_bool(N, false)  // no touch at all before the check point
+var q2   = array.new_bool(N, false)  // touched in the 2nd quarter of its life
+var q3   = array.new_bool(N, false)  // ... 3rd quarter
+var q4   = array.new_bool(N, false)  // ... last quarter
+var d75  = array.new_bool(N, false)  // 75% passed
+var ok75 = array.new_bool(N, false)  // 75% passed with candles to judge
+var most = array.new_bool(N, false)  // mostly one side by 75%
 
 // totals over all finished periods
 var sCyc = array.new_int(N, 0)
@@ -199,6 +212,13 @@ var sCp  = array.new_int(N, 0)
 var sCpR = array.new_int(N, 0)
 var sOs  = array.new_int(N, 0)
 var sOsR = array.new_int(N, 0)
+var sNt  = array.new_int(N, 0)
+var sNtR = array.new_int(N, 0)
+var sQ2  = array.new_int(N, 0)
+var sQ3  = array.new_int(N, 0)
+var sQ4  = array.new_int(N, 0)
+var sM   = array.new_int(N, 0)
+var sMR  = array.new_int(N, 0)
 
 // totals across the four, per level
 var mCyc   = array.new_int(NL, 0)   // periods all four had
@@ -207,6 +227,12 @@ var mAll   = array.new_int(NL, 0)   // all four touched again
 var mOs    = array.new_int(NL, 0)   // all four one-sided at the check point
 var mOsAny = array.new_int(NL, 0)   // ...and at least one came back after it
 var mOsAll = array.new_int(NL, 0)   // ...and all four came back after it
+var mNt    = array.new_int(NL, 0)   // none of the four touched before the check point
+var mNtAny = array.new_int(NL, 0)
+var mNtAll = array.new_int(NL, 0)
+var mM     = array.new_int(NL, 0)   // all four mostly one side by 75%
+var mMAny  = array.new_int(NL, 0)   // ...and at least one touched in the last quarter
+var mMAll  = array.new_int(NL, 0)
 
 inc(array<int> arr, int k) =>
     array.set(arr, k, array.get(arr, k) + 1)
@@ -223,6 +249,11 @@ for i = 0 to NL - 1
     vCp = 0
     vO  = 0
     vOR = 0
+    vNt  = 0
+    vNtR = 0
+    v75  = 0
+    vM   = 0
+    vMR  = 0
     for a = 0 to 3
         k = a * NL + i
         if array.get(act, k) and array.get(cidA, k) != cid
@@ -238,6 +269,26 @@ for i = 0 to NL - 1
                     vT += 1
                     inc(sRet, k)
                     array.set(sTT, k, array.get(sTT, k) + (array.get(tT, k) - array.get(tS, k)))
+                if array.get(q2, k)
+                    inc(sQ2, k)
+                if array.get(q3, k)
+                    inc(sQ3, k)
+                if array.get(q4, k)
+                    inc(sQ4, k)
+                if array.get(ok75, k)
+                    v75 += 1
+                    if array.get(most, k)
+                        vM += 1
+                        inc(sM, k)
+                        if array.get(q4, k)
+                            vMR += 1
+                            inc(sMR, k)
+                if array.get(cpOk, k) and array.get(ntc, k)
+                    vNt += 1
+                    inc(sNt, k)
+                    if array.get(rAc, k)
+                        vNtR += 1
+                        inc(sNtR, k)
                 if array.get(cpOk, k)
                     vCp += 1
                     inc(sCp, k)
@@ -261,6 +312,18 @@ for i = 0 to NL - 1
                 inc(mOsAny, i)
             if vOR == 4
                 inc(mOsAll, i)
+        if vCp == 4 and vNt == 4
+            inc(mNt, i)
+            if vNtR > 0
+                inc(mNtAny, i)
+            if vNtR == 4
+                inc(mNtAll, i)
+        if v75 == 4 and vM == 4
+            inc(mM, i)
+            if vMR > 0
+                inc(mMAny, i)
+            if vMR == 4
+                inc(mMAll, i)
 
     // 2. open a new period, or follow the running one
     t    = array.get(TG, i)
@@ -282,6 +345,13 @@ for i = 0 to NL - 1
                 array.set(cpOk, k, false)
                 array.set(os, k, false)
                 array.set(rAc, k, false)
+                array.set(ntc, k, false)
+                array.set(q2, k, false)
+                array.set(q3, k, false)
+                array.set(q4, k, false)
+                array.set(d75, k, false)
+                array.set(ok75, k, false)
+                array.set(most, k, false)
         else if array.get(act, k)
             c = array.get(CC, a)
             if not na(c)
@@ -293,12 +363,26 @@ for i = 0 to NL - 1
                     if b > 0
                         array.set(cpOk, k, true)
                         array.set(os, k, math.min(array.get(nA, k), array.get(nBe, k)) <= tolPct / 100 * b)
+                        array.set(ntc, k, not array.get(tch, k))
+                fr = (time - array.get(tS, k)) / array.get(LIFE, i)
+                if not array.get(d75, k) and fr >= 0.75
+                    array.set(d75, k, true)
+                    b = array.get(nB, k)
+                    if b > 0
+                        array.set(ok75, k, true)
+                        array.set(most, k, math.min(array.get(nA, k), array.get(nBe, k)) <= tolMost / 100 * b)
                 touch = array.get(LL, a) <= lv and array.get(HH, a) >= lv
                 if touch and not array.get(tch, k)
                     array.set(tch, k, true)
                     array.set(tT, k, time)
                 if touch and array.get(cpOk, k)
                     array.set(rAc, k, true)
+                if touch and fr >= 0.25 and fr < 0.5
+                    array.set(q2, k, true)
+                if touch and fr >= 0.5 and fr < 0.75
+                    array.set(q3, k, true)
+                if touch and fr >= 0.75
+                    array.set(q4, k, true)
                 inc(nB, k)
                 if c > lv
                     inc(nA, k)
@@ -328,7 +412,7 @@ wide(int r, string txt) =>
 
 if barstate.islast
     table.delete(tb)
-    tb := table.new(tbPos, 5, 1 + NL * 10, frame_color = tbBord, frame_width = 1, border_color = tbBord, border_width = 1)
+    tb := table.new(tbPos, 5, 1 + NL * 17, frame_color = tbBord, frame_width = 1, border_color = tbBord, border_width = 1)
     cpS = str.tostring(cpPct) + "%"
 
     hdr = array.from("", "YM", "ES", "NQ", "RTY")
@@ -349,6 +433,11 @@ if barstate.islast
             label4(r + 4, "חזר אחרי " + cpS)
             label4(r + 5, "חד-צדדי ב-" + cpS)
             label4(r + 6, "מהם חזרו")
+            label4(r + 7, "לא נגע בכלל עד " + cpS)
+            label4(r + 8, "מהם חזרו")
+            label4(r + 9, "נגע ברבע 2 / 3 / 4")
+            label4(r + 10, "רוב הזמן בצד אחד עד 75%")
+            label4(r + 11, "מהם חזרו ברבע האחרון")
             for a = 0 to 3
                 k  = a * NL + i
                 cy = array.get(sCyc, k)
@@ -360,12 +449,21 @@ if barstate.islast
                 cell(a + 1, r + 4, pct(array.get(sCpR, k), array.get(sCp, k)), tbText)
                 cell(a + 1, r + 5, pct(array.get(sOs, k), array.get(sCp, k)), tbText)
                 cell(a + 1, r + 6, pct(array.get(sOsR, k), array.get(sOs, k)) + "  (" + str.tostring(array.get(sOs, k)) + ")", tbText)
+                cell(a + 1, r + 7, pct(array.get(sNt, k), array.get(sCp, k)), tbText)
+                cell(a + 1, r + 8, pct(array.get(sNtR, k), array.get(sNt, k)) + "  (" + str.tostring(array.get(sNt, k)) + ")", tbText)
+                cell(a + 1, r + 9, pct(array.get(sQ2, k), cy) + " / " + pct(array.get(sQ3, k), cy) + " / " + pct(array.get(sQ4, k), cy), tbText)
+                cell(a + 1, r + 10, pct(array.get(sM, k), cy), tbText)
+                cell(a + 1, r + 11, pct(array.get(sMR, k), array.get(sM, k)) + "  (" + str.tostring(array.get(sM, k)) + ")", tbText)
 
-            label4(r + 7, "כש-1 חזר: חזרו כל ה-4")
-            wide(r + 7, pct(array.get(mAll, i), array.get(mAny, i)) + "   (" + str.tostring(array.get(mAll, i)) + " / " + str.tostring(array.get(mAny, i)) + ")")
-            label4(r + 8, "כל ה-4 חד-צדדיים: חזר 1 / חזרו כולם")
-            wide(r + 8, pct(array.get(mOsAny, i), array.get(mOs, i)) + " / " + pct(array.get(mOsAll, i), array.get(mOs, i)) + "   (" + str.tostring(array.get(mOs, i)) + ")")
-            r += 9
+            label4(r + 12, "כש-1 חזר: חזרו כל ה-4")
+            wide(r + 12, pct(array.get(mAll, i), array.get(mAny, i)) + "   (" + str.tostring(array.get(mAll, i)) + " / " + str.tostring(array.get(mAny, i)) + ")")
+            label4(r + 13, "כל ה-4 חד-צדדיים: חזר 1 / חזרו כולם")
+            wide(r + 13, pct(array.get(mOsAny, i), array.get(mOs, i)) + " / " + pct(array.get(mOsAll, i), array.get(mOs, i)) + "   (" + str.tostring(array.get(mOs, i)) + ")")
+            label4(r + 14, "כל ה-4 לא נגעו עד " + cpS + ": חזר 1 / כולם")
+            wide(r + 14, pct(array.get(mNtAny, i), array.get(mNt, i)) + " / " + pct(array.get(mNtAll, i), array.get(mNt, i)) + "   (" + str.tostring(array.get(mNt, i)) + ")")
+            label4(r + 15, "כל ה-4 רוב הזמן בצד אחד: חזר ברבע האחרון 1 / כולם")
+            wide(r + 15, pct(array.get(mMAny, i), array.get(mM, i)) + " / " + pct(array.get(mMAll, i), array.get(mM, i)) + "   (" + str.tostring(array.get(mM, i)) + ")")
+            r += 16
 
 // Pine needs at least one output
 plot(0, "", display = display.none, editable = false)
