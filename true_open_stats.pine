@@ -1,0 +1,371 @@
+//@version=5
+indicator("Sav FX - True Open Stats", shorttitle = "TO Stats", overlay = true)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  TRUE OPEN STATS
+//
+//  A research tool, not tied to the lines indicator. It walks back over all
+//  the history on the chart and measures, for every true open and separately
+//  for YM, ES, NQ and RTY (each against ITS OWN open):
+//
+//    • how often price comes back to TOUCH the open before its period ends
+//      (any candle after the opening one whose high/low reaches the open)
+//    • how long that took on average
+//    • what share of the period's candles closed above / below the open
+//    • at the check point (default: 25% into the level's life): if price has
+//      stayed on ONE side - the other side had at most X% of the closes so far
+//      (default 5%, 0 = never closed on the other side) - how often it still
+//      came back before the period ended
+//    • across the four: when at least one came back, did all four come back;
+//      and when all four were one-sided, did one / all of them come back
+//
+//  Same New York wall clock grid as the indicator. A period is counted once
+//  it has ended; the one in progress is left out. Put it on a CME index future
+//  (ES, NQ, YM, RTY or their micros) so the candles line up.
+//
+//  The levels counted follow the chart timeframe, like the lines: TNcP & TMcO
+//  on 1m, T90O & TDO on 5m, TWO & TMO on 15m-1H. Lower timeframe = more precise
+//  but less history, so check the "cycles" row before trusting a number.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+
+// ───────────────────────────────── inputs ─────────────────────────────────────
+shiftH = input.float(0, "Shift From New York (hours)", minval = -12, maxval = 12, step = 0.25, tooltip = "Leave on 0.")
+gridTZ  = "America/New_York"
+shiftMs = int(shiftH * 3600000)
+
+g_t = "Test"
+cpPct  = input.float(25, "Check point (% of the level's life)", minval = 1, maxval = 95, step = 5, group = g_t, tooltip = "How far into the level's life to check whether price has stayed on one side.")
+tolPct = input.float(5, "One-sided = other side at most (% of closes)", minval = 0, maxval = 49, step = 1, group = g_t, tooltip = "0 = price never closed on the other side of the open. 5 = up to 5% of the closes on the other side still counts as one-sided.")
+
+g_l = "Levels"
+useTNcP = input.bool(true, "TNcP", inline = "l1", group = g_l)
+useTMcO = input.bool(true, "TMcO", inline = "l1", group = g_l)
+useT90O = input.bool(true, "T90O", inline = "l1", group = g_l)
+useTDO  = input.bool(true, "TDO",  inline = "l2", group = g_l)
+useTWO  = input.bool(true, "TWO",  inline = "l2", group = g_l)
+useTMO  = input.bool(true, "TMO",  inline = "l2", group = g_l)
+
+g_s = "Symbols"
+symYM  = input.symbol("CBOT_MINI:YM1!", "YM",  group = g_s)
+symES  = input.symbol("CME_MINI:ES1!",  "ES",  group = g_s)
+symNQ  = input.symbol("CME_MINI:NQ1!",  "NQ",  group = g_s)
+symRTY = input.symbol("CME_MINI:RTY1!", "RTY", group = g_s)
+
+g_tb = "Table"
+tbPosIn  = input.string("Top Right", "Position", options = ["Top Left", "Top Center", "Top Right", "Middle Left", "Middle Right", "Bottom Left", "Bottom Center", "Bottom Right"], group = g_tb)
+tbSizeIn = input.string("Small", "Text size", options = ["Tiny", "Small", "Normal", "Large"], group = g_tb)
+tbBg     = input.color(color.white, "Background", inline = "c", group = g_tb)
+tbText   = input.color(color.black, "Text",       inline = "c", group = g_tb)
+tbSoft   = input.color(color.gray,  "Labels",     inline = "c", group = g_tb)
+tbBord   = input.color(color.new(color.gray, 60), "Lines", inline = "c", group = g_tb)
+
+tbPos = switch tbPosIn
+    "Top Left"      => position.top_left
+    "Top Center"    => position.top_center
+    "Top Right"     => position.top_right
+    "Middle Left"   => position.middle_left
+    "Middle Right"  => position.middle_right
+    "Bottom Left"   => position.bottom_left
+    "Bottom Center" => position.bottom_center
+    => position.bottom_right
+tbSize = tbSizeIn == "Tiny" ? size.tiny : tbSizeIn == "Small" ? size.small : tbSizeIn == "Large" ? size.large : size.normal
+
+
+// ─────────────────────────── the grid: 18:00 onwards ──────────────────────────
+MS_DAY  = 86400000
+MS_6H   = 21600000
+MS_90   = 5400000
+MS_225  = 1350000
+MS_5625 = 337500
+
+// Every level's opening instant and the id of the container it belongs to,
+// off the New York wall clock. Order everywhere: TNcP, TMcO, T90O, TDO, TWO,
+// TMO, TYO, T4YO.
+grid() =>
+    adj = time + shiftMs
+    tod = (hour(adj, gridTZ) * 3600 + minute(adj, gridTZ) * 60 + second(adj, gridTZ)) * 1000 + adj % 1000
+    md  = (tod - 18 * 3600000 + MS_DAY) % MS_DAY
+
+    dayStart = time - md
+    l6       = time - md % MS_6H
+    l90      = time - md % MS_90
+    l225     = time - md % MS_225
+
+    tday   = adj + MS_6H
+    dw     = dayofweek(tday, gridTZ)
+    rawDay = dw == 1 ? 7 : dw - 1
+
+    weekStart = dayStart - (rawDay - 1) * MS_DAY
+
+    tdayMid = timestamp(gridTZ, year(tday, gridTZ), month(tday, gridTZ), dayofmonth(tday, gridTZ), 12, 0, 0)
+    tueTs   = tdayMid + (2 - rawDay) * MS_DAY
+
+    mth = month(tday, gridTZ)
+    yr  = year(tday, gridTZ)
+
+    tgtTNcP = l225 + MS_5625
+    tgtTMcO = l90  + MS_225
+    tgtT90O = l6   + MS_90
+    tgtTDO  = dayStart + MS_6H
+    tgtTWO  = weekStart + MS_DAY
+
+    wkY         = year(tueTs, gridTZ)
+    wkM         = month(tueTs, gridTZ)
+    firstNoon   = timestamp(gridTZ, wkY, wkM, 1, 12, 0, 0)
+    firstTueDom = ((3 - dayofweek(firstNoon, gridTZ) + 7) % 7) + 1
+    wk2SunNoon  = timestamp(gridTZ, wkY, wkM, firstTueDom + 7, 12, 0, 0) - 2 * MS_DAY
+    tgtTMO      = timestamp(gridTZ, year(wk2SunNoon, gridTZ), month(wk2SunNoon, gridTZ), dayofmonth(wk2SunNoon, gridTZ), 18, 0, 0) - shiftMs
+
+    qtYearB  = mth >= 4 ? yr : yr - 1
+    tgtTYO   = timestamp(gridTZ, qtYearB, 3, 31, 18, 0, 0) - shiftMs
+    cycStart = yr - ((yr - 2023) % 4 + 4) % 4
+    tgtT4YO  = timestamp(gridTZ, cycStart, 12, 31, 18, 0, 0) - shiftMs
+
+    [tgtTNcP, tgtTMcO, tgtT90O, tgtTDO, tgtTWO, tgtTMO, tgtTYO, tgtT4YO, l225, l90, l6, dayStart, tgtTWO, tgtTMO, qtYearB, cycStart]
+
+
+// ──────────────────────────── levels on this timeframe ────────────────────────
+// order: TNcP, TMcO, T90O, TDO, TWO, TMO
+NL = 6
+NAMES = array.from("TNcP", "TMcO", "T90O", "TDO", "TWO", "TMO")
+
+tfMin = timeframe.in_seconds() / 60.0
+band1 = tfMin < 1
+band2 = tfMin >= 1  and tfMin < 5
+band3 = tfMin >= 5  and tfMin < 15
+band4 = tfMin >= 15 and tfMin < 60
+band5 = tfMin >= 60 and tfMin < 1440
+band6 = tfMin >= 1440
+
+inTF = array.from(
+     useTNcP and (band1 or band2),
+     useTMcO and (band1 or band2),
+     useT90O and (band1 or band2 or band3 or band4),
+     useTDO  and (band2 or band3 or band4 or band5),
+     useTWO  and (band3 or band4 or band5),
+     useTMO  and (band4 or band5 or band6))
+
+// how long each level lives, from its open to the end of its container, used
+// only to place the check point. Day: midnight to the 17:00 close. Week: Monday
+// 18:00 to Friday 17:00. Month: roughly the three weeks after the 2nd week opens.
+LIFE = array.from(MS_225 - MS_5625, MS_90 - MS_225, MS_6H - MS_90, 17 * 3600000, 4 * MS_DAY - 3600000, 23 * MS_DAY)
+
+[g0, g1, g2, g3, g4, g5, g6, g7, j0, j1, j2, j3, j4, j5, j6, j7] = grid()
+TG = array.from(g0, g1, g2, g3, g4, g5)
+ID = array.from(j0, j1, j2, j3, j4, j5)
+
+
+// ──────────────────────────── the four indices ────────────────────────────────
+// gaps_on: na when that index has no candle at this time, so a level is never
+// taken off another candle's open
+[yO, yH, yL, yC] = request.security(symYM,  timeframe.period, [open, high, low, close], gaps = barmerge.gaps_on, ignore_invalid_symbol = true)
+[eO, eH, eL, eC] = request.security(symES,  timeframe.period, [open, high, low, close], gaps = barmerge.gaps_on, ignore_invalid_symbol = true)
+[nO, nH, nL, nC] = request.security(symNQ,  timeframe.period, [open, high, low, close], gaps = barmerge.gaps_on, ignore_invalid_symbol = true)
+[rO, rH, rL, rC] = request.security(symRTY, timeframe.period, [open, high, low, close], gaps = barmerge.gaps_on, ignore_invalid_symbol = true)
+
+OO = array.from(yO, eO, nO, rO)
+HH = array.from(yH, eH, nH, rH)
+LL = array.from(yL, eL, nL, rL)
+CC = array.from(yC, eC, nC, rC)
+
+
+// ──────────────────────────────── bookkeeping ─────────────────────────────────
+// one slot per index per level: k = asset * NL + level
+N = 4 * NL
+
+// the period in progress
+var lp   = array.new_float(N, na)    // the open
+var act  = array.new_bool(N, false)  // a period is running
+var cidA = array.new_int(N, 0)       // which container it belongs to
+var tS   = array.new_int(N, 0)       // when it opened
+var nB   = array.new_int(N, 0)       // candles after the opening one
+var nA   = array.new_int(N, 0)       // of those, closed above
+var nBe  = array.new_int(N, 0)       // of those, closed below
+var tch  = array.new_bool(N, false)  // touched again
+var tT   = array.new_int(N, 0)       // when it first touched again
+var cpD  = array.new_bool(N, false)  // check point passed
+var cpOk = array.new_bool(N, false)  // check point passed with candles to judge
+var os   = array.new_bool(N, false)  // one-sided at the check point
+var rAc  = array.new_bool(N, false)  // touched at or after the check point
+
+// totals over all finished periods
+var sCyc = array.new_int(N, 0)
+var sRet = array.new_int(N, 0)
+var sTT  = array.new_float(N, 0)
+var sAb  = array.new_float(N, 0)
+var sBe  = array.new_float(N, 0)
+var sCp  = array.new_int(N, 0)
+var sCpR = array.new_int(N, 0)
+var sOs  = array.new_int(N, 0)
+var sOsR = array.new_int(N, 0)
+
+// totals across the four, per level
+var mCyc   = array.new_int(NL, 0)   // periods all four had
+var mAny   = array.new_int(NL, 0)   // at least one touched again
+var mAll   = array.new_int(NL, 0)   // all four touched again
+var mOs    = array.new_int(NL, 0)   // all four one-sided at the check point
+var mOsAny = array.new_int(NL, 0)   // ...and at least one came back after it
+var mOsAll = array.new_int(NL, 0)   // ...and all four came back after it
+
+inc(array<int> arr, int k) =>
+    array.set(arr, k, array.get(arr, k) + 1)
+
+prevT = time[1]
+
+for i = 0 to NL - 1
+    cid = array.get(ID, i)
+
+    // 1. close the periods whose container has ended
+    ended = false
+    vC  = 0
+    vT  = 0
+    vCp = 0
+    vO  = 0
+    vOR = 0
+    for a = 0 to 3
+        k = a * NL + i
+        if array.get(act, k) and array.get(cidA, k) != cid
+            ended := true
+            array.set(act, k, false)
+            b = array.get(nB, k)
+            if b > 0
+                vC += 1
+                inc(sCyc, k)
+                array.set(sAb, k, array.get(sAb, k) + float(array.get(nA, k)) / b)
+                array.set(sBe, k, array.get(sBe, k) + float(array.get(nBe, k)) / b)
+                if array.get(tch, k)
+                    vT += 1
+                    inc(sRet, k)
+                    array.set(sTT, k, array.get(sTT, k) + (array.get(tT, k) - array.get(tS, k)))
+                if array.get(cpOk, k)
+                    vCp += 1
+                    inc(sCp, k)
+                    if array.get(rAc, k)
+                        inc(sCpR, k)
+                    if array.get(os, k)
+                        vO += 1
+                        inc(sOs, k)
+                        if array.get(rAc, k)
+                            vOR += 1
+                            inc(sOsR, k)
+    if ended and vC == 4
+        inc(mCyc, i)
+        if vT > 0
+            inc(mAny, i)
+        if vT == 4
+            inc(mAll, i)
+        if vCp == 4 and vO == 4
+            inc(mOs, i)
+            if vOR > 0
+                inc(mOsAny, i)
+            if vOR == 4
+                inc(mOsAll, i)
+
+    // 2. open a new period, or follow the running one
+    t    = array.get(TG, i)
+    fire = time >= t and prevT < t
+    for a = 0 to 3
+        k = a * NL + i
+        if fire
+            o = array.get(OO, a)
+            if not na(o)
+                array.set(lp, k, o)
+                array.set(act, k, true)
+                array.set(cidA, k, cid)
+                array.set(tS, k, time)
+                array.set(nB, k, 0)
+                array.set(nA, k, 0)
+                array.set(nBe, k, 0)
+                array.set(tch, k, false)
+                array.set(cpD, k, false)
+                array.set(cpOk, k, false)
+                array.set(os, k, false)
+                array.set(rAc, k, false)
+        else if array.get(act, k)
+            c = array.get(CC, a)
+            if not na(c)
+                lv = array.get(lp, k)
+                // the check point is judged on the candles before it
+                if not array.get(cpD, k) and time - array.get(tS, k) >= cpPct / 100 * array.get(LIFE, i)
+                    array.set(cpD, k, true)
+                    b = array.get(nB, k)
+                    if b > 0
+                        array.set(cpOk, k, true)
+                        array.set(os, k, math.min(array.get(nA, k), array.get(nBe, k)) <= tolPct / 100 * b)
+                touch = array.get(LL, a) <= lv and array.get(HH, a) >= lv
+                if touch and not array.get(tch, k)
+                    array.set(tch, k, true)
+                    array.set(tT, k, time)
+                if touch and array.get(cpOk, k)
+                    array.set(rAc, k, true)
+                inc(nB, k)
+                if c > lv
+                    inc(nA, k)
+                else if c < lv
+                    inc(nBe, k)
+
+
+// ──────────────────────────────── the table ───────────────────────────────────
+pct(float x, float n) =>
+    n > 0 ? str.tostring(100 * x / n, "#") + "%" : "—"
+
+fmtT(float ms) =>
+    m = ms / 60000
+    na(ms) ? "—" : m < 120 ? str.tostring(m, "#") + "m" : m < 2880 ? str.tostring(m / 60, "#.#") + "h" : str.tostring(m / 1440, "#.#") + "d"
+
+var table tb = na
+
+cell(int c, int r, string txt, color clr) =>
+    table.cell(tb, c, r, txt, text_color = clr, bgcolor = tbBg, text_size = tbSize)
+
+label4(int r, string txt) =>
+    table.cell(tb, 0, r, txt, text_color = tbSoft, bgcolor = tbBg, text_size = tbSize, text_halign = text.align_right)
+
+wide(int r, string txt) =>
+    table.cell(tb, 1, r, txt, text_color = tbText, bgcolor = tbBg, text_size = tbSize)
+    table.merge_cells(tb, 1, r, 4, r)
+
+if barstate.islast
+    table.delete(tb)
+    tb := table.new(tbPos, 5, 1 + NL * 10, frame_color = tbBord, frame_width = 1, border_color = tbBord, border_width = 1)
+    cpS = str.tostring(cpPct) + "%"
+
+    hdr = array.from("", "YM", "ES", "NQ", "RTY")
+    for c = 0 to 4
+        cell(c, 0, array.get(hdr, c), tbText)
+
+    r = 1
+    for i = 0 to NL - 1
+        if array.get(inTF, i)
+            table.cell(tb, 0, r, array.get(NAMES, i), text_color = tbText, bgcolor = color.new(tbSoft, 85), text_size = tbSize)
+            table.merge_cells(tb, 0, r, 4, r)
+            r += 1
+
+            label4(r,     "מחזורים")
+            label4(r + 1, "חזר לפתיחה")
+            label4(r + 2, "זמן ממוצע עד החזרה")
+            label4(r + 3, "נרות מעל / מתחת")
+            label4(r + 4, "חזר אחרי " + cpS)
+            label4(r + 5, "חד-צדדי ב-" + cpS)
+            label4(r + 6, "מהם חזרו")
+            for a = 0 to 3
+                k  = a * NL + i
+                cy = array.get(sCyc, k)
+                rt = array.get(sRet, k)
+                cell(a + 1, r,     str.tostring(cy), tbText)
+                cell(a + 1, r + 1, pct(rt, cy), tbText)
+                cell(a + 1, r + 2, rt > 0 ? fmtT(array.get(sTT, k) / rt) : "—", tbText)
+                cell(a + 1, r + 3, cy > 0 ? pct(array.get(sAb, k), cy) + " / " + pct(array.get(sBe, k), cy) : "—", tbText)
+                cell(a + 1, r + 4, pct(array.get(sCpR, k), array.get(sCp, k)), tbText)
+                cell(a + 1, r + 5, pct(array.get(sOs, k), array.get(sCp, k)), tbText)
+                cell(a + 1, r + 6, pct(array.get(sOsR, k), array.get(sOs, k)) + "  (" + str.tostring(array.get(sOs, k)) + ")", tbText)
+
+            label4(r + 7, "כש-1 חזר: חזרו כל ה-4")
+            wide(r + 7, pct(array.get(mAll, i), array.get(mAny, i)) + "   (" + str.tostring(array.get(mAll, i)) + " / " + str.tostring(array.get(mAny, i)) + ")")
+            label4(r + 8, "כל ה-4 חד-צדדיים: חזר 1 / חזרו כולם")
+            wide(r + 8, pct(array.get(mOsAny, i), array.get(mOs, i)) + " / " + pct(array.get(mOsAll, i), array.get(mOs, i)) + "   (" + str.tostring(array.get(mOs, i)) + ")")
+            r += 9
+
+// Pine needs at least one output
+plot(0, "", display = display.none, editable = false)
