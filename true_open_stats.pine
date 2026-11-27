@@ -364,7 +364,7 @@ for i = 0 to NL - 1
                         array.set(cpOk, k, true)
                         array.set(os, k, math.min(array.get(nA, k), array.get(nBe, k)) <= tolPct / 100 * b)
                         array.set(ntc, k, not array.get(tch, k))
-                fr = (time - array.get(tS, k)) / array.get(LIFE, i)
+                fr = float(time - array.get(tS, k)) / array.get(LIFE, i)
                 if not array.get(d75, k) and fr >= 0.75
                     array.set(d75, k, true)
                     b = array.get(nB, k)
