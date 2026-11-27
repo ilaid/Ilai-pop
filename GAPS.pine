@@ -90,6 +90,9 @@ retBox    = input.bool(true, "קופסה שחזרו אליה — מסגרת בל
 tgtOnly   = input.bool(false, "הצג רק גאפי יעד (תת-המחזור הקודם)", tooltip = "הכי נקי: רק הגאפים שהתת-מחזור הנוכחי אמור לחזור אליהם.", group = grpRet)
 retCorner = input.bool(true, "שורת חזרה בפינה (כל נכס לחוד)", group = grpRet)
 retPos    = input.string("באמצע משמאל", "מיקום", options = ["באמצע משמאל", "באמצע מימין", "למטה משמאל", "למטה מימין", "למעלה משמאל", "למעלה מימין"], group = grpRet)
+retVOff   = input.int(0, "הזזה למטה (+) / למעלה (−)", minval = -20, maxval = 20, tooltip = "בשורות ריקות. כשהטבלה באמצע — כל 2 שורות מזיזות בערך שורה אחת.", group = grpRet)
+retHOff   = input.int(0, "הזזה הצידה (עמודות)", minval = 0, maxval = 10, tooltip = "עמודות ריקות לפני הטבלה — מרחיק אותה מהקצה.", group = grpRet)
+retSize   = input.string("זעיר", "גודל כתב", options = ["זעיר", "קטן", "רגיל"], group = grpRet)
 
 // באילו מסגרות זמן להציג — כל מסגרת בנפרד
 grpTf  = "מסגרות להצגה"
@@ -783,11 +786,15 @@ if barstate.islast
 // ═══════════════════════════════════════════════════════════════════
 
 retPosV = retPos == "באמצע מימין" ? position.middle_right : retPos == "למטה משמאל" ? position.bottom_left : retPos == "למטה מימין" ? position.bottom_right : retPos == "למעלה משמאל" ? position.top_left : retPos == "למעלה מימין" ? position.top_right : position.middle_left
-var table retTbl = table.new(retPosV, 5, 2, bgcolor = color.new(color.black, 100), frame_width = 0, border_width = 0)
+retSz   = retSize == "קטן" ? size.small : retSize == "רגיל" ? size.normal : size.tiny
+var table retTbl = table.new(retPosV, 15, 22, bgcolor = color.new(color.black, 100), frame_width = 0, border_width = 0)
 
 if barstate.islast and retCorner
-    table.clear(retTbl, 0, 0, 4, 1)
-    int col = 1
+    table.clear(retTbl, 0, 0, 14, 21)
+    // הזזה: שורות/עמודות ריקות (נקודה שקופה, כדי שיישמר הגודל)
+    int r0  = math.max(retVOff, 0)
+    int c0  = retHOff
+    int col = c0 + 1
     if tgtRef != -1 and f_tfOn(tfClass)
         for a = 0 to (use4 ? 3 : 2)
             bool hd = array.get(hasD, a)
@@ -798,8 +805,18 @@ if barstate.islast and retCorner
                 string nm = a == 0 ? nm1 : a == 1 ? nm2 : a == 2 ? nm3 : nm4
                 string tx = (rd ? "▲" : "") + (ru ? "▼" : "") + (rd or ru ? "" : "·")
                 color  cc = rd and ru ? chart.fg_color : rd ? colBull : ru ? colBear : color.gray
-                table.cell(retTbl, col, 0, nm, text_color = color.gray, text_size = size.small)
-                table.cell(retTbl, col, 1, tx, text_color = cc, text_size = size.small)
+                table.cell(retTbl, col, r0, nm, text_color = color.gray, text_size = retSz)
+                table.cell(retTbl, col, r0 + 1, tx, text_color = cc, text_size = retSz)
                 col += 1
-    if col > 1
-        table.cell(retTbl, 0, 1, "Refuel", text_color = color.gray, text_size = size.small)
+    if col > c0 + 1
+        table.cell(retTbl, c0, r0 + 1, "Refuel", text_color = color.gray, text_size = retSz)
+        color clr = color.new(color.black, 100)
+        if retVOff > 0
+            for r = 0 to retVOff - 1
+                table.cell(retTbl, c0, r, ".", text_color = clr, text_size = retSz)
+        if retVOff < 0
+            for r = 2 to 1 - retVOff
+                table.cell(retTbl, c0, r, ".", text_color = clr, text_size = retSz)
+        if c0 > 0
+            for c = 0 to c0 - 1
+                table.cell(retTbl, c, r0, ".", text_color = clr, text_size = retSz)
