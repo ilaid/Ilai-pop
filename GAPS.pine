@@ -780,24 +780,24 @@ if barstate.islast
             if f_ownShown(og) and not array.get(merged, i)
                 // קולקטיבי שכבר מצויר — לא שוב. קולקטיבי חי שלא מצויר — בצבעים ובשמות שלו.
                 bool   dup  = false
-                string legs = ""
+                string lgTx = ""
                 string ht   = ""
                 int    kOf  = 0
                 if og.collId != 0 and array.size(gaps) > 0
                     for j = 0 to array.size(gaps) - 1
                         Gap gk = array.get(gaps, j)
                         if gk.id == og.collId
-                            legs := f_legsTxt(gk)
+                            lgTx := f_legsTxt(gk)
                             ht   := f_hitTxt(gk)
                             kOf  := gk.kind
                             if f_collShown(gk)
                                 dup := true
                 if not dup
-                    bool  isColl = legs != ""
+                    bool  isColl = lgTx != ""
                     color oCol   = isColl ? f_gapCol(kOf, og.dir) : og.dir == 1 ? ownBull : ownBear
                     if not isColl and og.hit and og.refId == tgtRef
                         ht := " ↩"
-                    f_box(og.origin, og.top, og.bot, oCol, f_subName(tfClass, og.birthT) + " " + f_bornTxt(tfClass, og.birthT) + " " + (isColl ? legs : ownName) + (og.volImb ? " V" : "") + ht, retBox and ht != "")
+                    f_box(og.origin, og.top, og.bot, oCol, f_subName(tfClass, og.birthT) + " " + f_bornTxt(tfClass, og.birthT) + " " + (isColl ? lgTx : ownName) + (og.volImb ? " V" : "") + ht, retBox and ht != "")
 
 // ═══════════════════════════════════════════════════════════════════
 // שורת החזרה בפינה — כל נכס לחוד: חזר לגאפ שלו מתת-המחזור הקודם?
