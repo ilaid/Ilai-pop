@@ -1,8 +1,10 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0
-// QT Strategy v0.1 — אסטרטגיה אחת: נזילות → שבירות קורלציה → כניסה בדקה.
+// QT Strategy v0.2 — אסטרטגיה אחת: נזילות → שבירות קורלציה → כניסה בדקה.
 // הכל מחושב בכל נר, כדי שיהיה בקטסט (Strategy Tester) ובהמשך התראות לברוקר.
 //
-// הרצה: גרף MNQ (או MES) של דקה אחת.
+// הרצה: גרף MNQ (או MES) של 1m (או 5m — אז בלי שבירות/טריגר של 1m).
+// על הגרף: תווית בכל טריגר באזור — על מה מסתמך ולמה נכנס / לא; קופסאות סיכון/יעד;
+// תווית יציאה עם הסיבה (יעד / סטופ / סוף זמן) והתוצאה.
 //
 // 1. נזילות (נכס הגרף): גבוה/נמוך של המחזור הקודם, וגאפים של המחזור הקודם
 //    (חוק התדלוק) — סשן (15m) · יום (1H) · שבוע (4H).
@@ -23,7 +25,7 @@
 //
 // v0.1 — עוד לא: Fill (גאפ קולקטיבי), HSSMT, If–Then, פולבקים, מסגרת גבוהה גוברת.
 //@version=6
-strategy("QT Strategy v0.1", shorttitle = "QT Strat", overlay = true, initial_capital = 10000, default_qty_type = strategy.fixed, default_qty_value = 1, commission_type = strategy.commission.cash_per_contract, commission_value = 0.62, slippage = 1, max_labels_count = 50, max_lines_count = 50)
+strategy("QT Strategy v0.2", shorttitle = "QT Strat", overlay = true, initial_capital = 10000, default_qty_type = strategy.fixed, default_qty_value = 1, commission_type = strategy.commission.cash_per_contract, commission_value = 0.62, slippage = 1, max_labels_count = 500, max_lines_count = 50, max_boxes_count = 300)
 
 // ══════════════════════════════════════════════════════════════
 // הגדרות
@@ -34,11 +36,14 @@ symYM = input.symbol("CBOT_MINI:MYM1!", "נכס 3", group = GS)
 
 GE = "כניסה"
 needN   = input.int(2, "שבירות תומכות — מינימום", minval = 1, maxval = 6, group = GE)
-use5    = input.bool(true, "תומכות מ-5m", group = GE, inline = "tf")
+use1    = input.bool(true, "תומכות מ-1m", group = GE, inline = "tf")
+use5    = input.bool(true, "5m", group = GE, inline = "tf")
 use15   = input.bool(true, "15m", group = GE, inline = "tf")
 use60   = input.bool(true, "1H", group = GE, inline = "tf")
-trigPSP = input.bool(true, "טריגר: PSP 1m", group = GE, inline = "tr")
-trigSS  = input.bool(true, "SSMT 1m", group = GE, inline = "tr")
+trig1   = input.bool(true, "טריגר מ-1m", group = GE, inline = "tr")
+trig5   = input.bool(true, "5m", group = GE, inline = "tr")
+trigPSP = input.bool(true, "סוג טריגר: PSP", group = GE, inline = "ty")
+trigSS  = input.bool(true, "SSMT", group = GE, inline = "ty")
 zoneWin = input.int(90, "האזור תקף (דקות)", minval = 5, maxval = 600, group = GE)
 zS      = input.bool(true, "אזור: סשן", group = GE, inline = "z")
 zD      = input.bool(true, "יום", group = GE, inline = "z")
@@ -59,7 +64,8 @@ maxDay = input.int(3, "מקסימום עסקאות ביום", minval = 1, maxval
 GV = "תצוגה"
 tblPos   = input.string("למטה משמאל", "טבלת מצב", options = ["למטה משמאל", "למטה מימין", "למעלה משמאל", "למעלה מימין"], group = GV)
 showZone = input.bool(true, "צבע רקע כשאזור נזילות פעיל", group = GV)
-showTrig = input.bool(true, "סמן טריגר 1m בתוך אזור", group = GV)
+showWhy  = input.bool(true, "תווית בכל טריגר באזור — על מה מסתמך ולמה נכנס / לא", group = GV)
+showBox  = input.bool(true, "קופסאות סיכון / יעד בעסקה", group = GV)
 
 GG = "הגדרת גאפ (זהה ל-SSMT Fill)"
 fvgOn        = input.bool(true, "FVG", group = GG)
@@ -477,9 +483,16 @@ f_htf(string sym, string tf) =>
 [bo1, bh1, bl1, bc1] = request.security(symES, timeframe.period, [open, high, low, close])
 [co1, ch1, cl1, cc1] = request.security(symYM, timeframe.period, [open, high, low, close])
 
-is1m = timeframe.in_seconds() == 60
+chSec = timeframe.in_seconds()
+is1m  = chSec == 60
+is5m  = chSec == 300
+okTF  = is1m or is5m
 
-e5.step(ta5, ao5, ah5, al5, ac5, bo5, bh5, bl5, bc5, co5, ch5, cl5, cc5)
+// בגרף 5m — המנוע של 5m מקבל את נרות הגרף ישירות (בלי איחור של נר)
+if is5m
+    e5.step(time, open, high, low, close, bo1, bh1, bl1, bc1, co1, ch1, cl1, cc1)
+else
+    e5.step(ta5, ao5, ah5, al5, ac5, bo5, bh5, bl5, bc5, co5, ch5, cl5, cc5)
 e15.step(ta15, ao15, ah15, al15, ac15, bo15, bh15, bl15, bc15, co15, ch15, cl15, cc15)
 e60.step(ta60, ao60, ah60, al60, ac60, bo60, bh60, bl60, bc60, co60, ch60, cl60, cc60)
 if is1m
@@ -489,61 +502,82 @@ e5.pspKill(high, low)
 e15.pspKill(high, low)
 e60.pspKill(high, low)
 
+CLSN = array.from("", "1m", "5m", "15m", "1H")
+
+f_hm(int t) =>
+    str.format_time(t, "HH:mm", TZ)
+
+f_px(float p) =>
+    str.tostring(p, format.mintick)
+
 // ══════════════════════════════════════════════════════════════
-// אזור נזילות
+// אזור נזילות: [כיוון, מה קרה]
 // ══════════════════════════════════════════════════════════════
 f_zone(Lv s) =>
-    int z = 0
+    int    z  = 0
+    string tx = ""
     if s.on
         if s.eHT == time
-            z := -1
+            z  := -1
+            tx := "לקח גבוה " + s.pN
         if s.eLT == time
-            z := 1
+            z  := 1
+            tx := "לקח נמוך " + s.pN
         if s.valid
             for g in s.gaps
                 if g.sub == s.pS and g.touchT == time
-                    z := g.bot > close[1] ? -1 : g.top < close[1] ? 1 : z
-    z
+                    int zz = g.bot > close[1] ? -1 : g.top < close[1] ? 1 : 0
+                    if zz != 0
+                        z  := zz
+                        tx := "חזר לגאפ של " + s.pN
+    [z, tx]
 
-var int zT   = 0
-var int zDir = 0
-var string zNm = ""
-zs = f_zone(LS)
-zd = f_zone(LD)
-zw = f_zone(LW)
+var int    zT   = 0
+var int    zDir = 0
+var string zTx  = ""
+[zs, zsT] = f_zone(LS)
+[zd, zdT] = f_zone(LD)
+[zw, zwT] = f_zone(LW)
 if zs != 0
     zT   := time
     zDir := zs
-    zNm  := "סשן"
+    zTx  := zsT
 if zd != 0
     zT   := time
     zDir := zd
-    zNm  := "יום"
+    zTx  := zdT
 if zw != 0
     zT   := time
     zDir := zw
-    zNm  := "שבוע"
+    zTx  := zwT
 
-// שבירות תומכות: [כמה (מסגרת × סוג), יש חדשה מאז האזור]
-f_supp(int D, int zt) =>
-    int  n     = 0
-    bool fresh = false
-    for k = 0 to 2
-        Eng  e  = k == 0 ? e5 : k == 1 ? e15 : e60
-        bool on = k == 0 ? use5 : k == 1 ? use15 : use60
+// שבירות תומכות: [כמה (מסגרת × סוג), יש חדשה מאז האזור, רשימה]
+// הטריגר עצמו (נרשם בנר הזה במסגרת exCls) לא נספר כתומכת.
+f_supp(int D, int zt, int exCls) =>
+    int    n     = 0
+    bool   fresh = false
+    string tx    = ""
+    for k = 0 to 3
+        Eng  e  = k == 0 ? e1 : k == 1 ? e5 : k == 2 ? e15 : e60
+        bool on = k == 0 ? (use1 and is1m) : k == 1 ? use5 : k == 2 ? use15 : use60
         if on and f_dir(e) == D
-            bool hS = false
-            bool hP = false
+            int tS = 0
+            int tP = 0
             for b in e.bk
-                if b.dir == D
+                if b.dir == D and not (e.cls == exCls and b.rt == time)
                     if b.typ == 1
-                        hS := true
+                        tS := math.max(tS, b.t)
                     else
-                        hP := true
+                        tP := math.max(tP, b.t)
                     if b.rt >= zt
                         fresh := true
-            n += (hS ? 1 : 0) + (hP ? 1 : 0)
-    [n, fresh]
+            if tS > 0
+                n  += 1
+                tx += (tx == "" ? "" : " · ") + CLSN.get(e.cls) + " SSMT " + f_hm(tS)
+            if tP > 0
+                n  += 1
+                tx += (tx == "" ? "" : " · ") + CLSN.get(e.cls) + " PSP " + f_hm(tP)
+    [n, fresh, tx]
 
 // יעד: הנזילות הקרובה בכיוון D, לפחות minD מהמחיר
 f_target(int D, float px, float minD) =>
@@ -563,6 +597,7 @@ f_target(int D, float px, float minD) =>
                             best := na(best) or math.abs(ge - px) < math.abs(best - px) ? ge : best
     best
 
+
 // ══════════════════════════════════════════════════════════════
 // עסקאות
 // ══════════════════════════════════════════════════════════════
@@ -576,10 +611,13 @@ if na(lastDay) or dSub != lastDay
 
 var float tStop = na
 var float tTgt  = na
-var string sig  = ""
+var float tEnt  = na
+var bool  byTime = false
+var box   bxR   = na
+var box   bxG   = na
 
-[nBear, fBear] = f_supp(-1, zT)
-[nBull, fBull] = f_supp(1, zT)
+[nBear, fBear, sBear] = f_supp(-1, zT, 0)
+[nBull, fBull, sBull] = f_supp(1, zT, 0)
 
 // אבחון: כמה אזורים, כמה טריגרים בתוך אזור, ולמה לא נכנסנו
 var int cZone = 0
@@ -593,48 +631,98 @@ var int cOk   = 0
 if zs != 0 or zd != 0 or zw != 0
     cZone += 1
 
-zOnNow  = zDir != 0 and time - zT <= zoneWin * 60000
-trigNow = is1m and zOnNow and e1.newRT == time and e1.newDir == zDir and ((e1.newTyp == 2 and trigPSP) or (e1.newTyp == 1 and trigSS))
+f_trig(Eng e, bool on, int D) =>
+    on and e.newRT == time and e.newDir == D and ((e.newTyp == 2 and trigPSP) or (e.newTyp == 1 and trigSS))
+
+zOnNow  = okTF and zDir != 0 and time - zT <= zoneWin * 60000
 zDirNow = zDir
+tr1     = zOnNow and is1m and f_trig(e1, trig1, zDir)
+tr5     = zOnNow and not tr1 and f_trig(e5, trig5, zDir)
+trigNow = tr1 or tr5
 
 if trigNow
     cTrig += 1
+    Eng   tE    = tr1 ? e1 : e5
     int   D     = zDir
-    int   n     = D == 1 ? nBull : nBear
-    bool  fresh = D == 1 ? fBull : fBear
-    float stp   = D == -1 ? e1.newStop + bufTk * syminfo.mintick : e1.newStop - bufTk * syminfo.mintick
+    [n, fresh, sTx] = f_supp(D, zT, tE.cls)
+    float stp   = D == -1 ? tE.newStop + bufTk * syminfo.mintick : tE.newStop - bufTk * syminfo.mintick
     float risk  = math.abs(close - stp)
     bool  rOk   = risk > 0 and risk <= maxRsk and (D == -1 ? stp > close : stp < close)
     float tgt   = rOk ? f_target(D, close, minRR * risk) : na
+    bool  fb    = false
     if rOk and na(tgt) and useFb
         tgt := close + D * fbRR * risk
-    if strategy.position_size != 0 or not inSess or (noFri and dBlk) or dayN >= maxDay
+        fb  := true
+    string why = ""
+    bool   go  = false
+    if strategy.position_size != 0
         cTime += 1
+        why := "✗ כבר בעסקה"
+    else if not inSess or (noFri and dBlk)
+        cTime += 1
+        why := "✗ מחוץ לשעות המסחר"
+    else if dayN >= maxDay
+        cTime += 1
+        why := "✗ הגיע למקסימום עסקאות היום"
     else if n < needN
         cNoN += 1
+        why := "✗ חסרות שבירות תומכות (" + str.tostring(n) + "/" + str.tostring(needN) + ")"
     else if not fresh
         cNoF += 1
+        why := "✗ אין שבירה תומכת חדשה מאז האזור"
     else if not rOk
         cRisk += 1
+        why := "✗ סטופ גדול מדי (" + str.tostring(math.round(risk, 2)) + " נק')"
     else if na(tgt)
         cTgt += 1
+        why := "✗ אין יעד נזילות במרחק " + str.tostring(minRR) + "R"
     else
+        go := true
         cOk += 1
+        float rr = math.abs(tgt - close) / risk
+        why := "✓ כניסה " + f_px(close) + "\nסטופ " + f_px(stp) + " (מעבר לנר הטריגר)\nיעד " + f_px(tgt) + (fb ? " (קבוע " : " (נזילות · ") + str.tostring(math.round(rr, 1)) + "R)"
         string id = D == 1 ? "L" : "S"
-        strategy.entry(id, D == 1 ? strategy.long : strategy.short, comment = (D == 1 ? "▲ " : "▼ ") + zNm + " · " + str.tostring(n) + " שבירות · " + (e1.newTyp == 2 ? "PSP" : "SSMT"))
-        strategy.exit(id + " x", id, stop = stp, limit = tgt)
-        tStop := stp
-        tTgt  := tgt
-        dayN  += 1
-        zDir  := 0
+        strategy.entry(id, D == 1 ? strategy.long : strategy.short, comment = (D == 1 ? "קנייה" : "מכירה"))
+        strategy.exit(id + " x", id, stop = stp, limit = tgt, comment_profit = "יעד", comment_loss = "סטופ")
+        tStop  := stp
+        tTgt   := tgt
+        tEnt   := close
+        byTime := false
+        dayN   += 1
+        zDir   := 0
+        if showBox
+            bxR := box.new(bar_index, D == 1 ? close : stp, bar_index + 1, D == 1 ? stp : close, border_color = na, bgcolor = color.new(#ef5350, 82))
+            bxG := box.new(bar_index, D == 1 ? tgt : close, bar_index + 1, D == 1 ? close : tgt, border_color = na, bgcolor = color.new(#26a69a, 82))
+    if showWhy or go
+        string txt = (D == 1 ? "▲ " : "▼ ") + "טריגר " + (tE.newTyp == 2 ? "PSP " : "SSMT ") + CLSN.get(tE.cls) + "\nאזור: " + zTx + " (לפני " + str.tostring(math.round((time - zT) / 60000)) + " דק')\nתומכות: " + (sTx == "" ? "אין" : sTx) + "\n" + why
+        color  lc  = go ? color.new(#f0b400, 0) : color.new(#787b86, 20)
+        label.new(bar_index, D == -1 ? high : low, txt, style = D == -1 ? label.style_label_down : label.style_label_up, color = lc, textcolor = go ? color.black : color.white, size = go ? size.normal : size.small, textalign = text.align_right)
 
 bgcolor(showZone and zOnNow ? color.new(zDirNow == 1 ? #26a69a : #ef5350, 92) : na, title = "אזור נזילות")
-plotshape(showTrig and trigNow and zDirNow == -1, "טריגר ▼", shape.triangledown, location.abovebar, color.new(#ef5350, 30), size = size.tiny)
-plotshape(showTrig and trigNow and zDirNow == 1, "טריגר ▲", shape.triangleup, location.belowbar, color.new(#26a69a, 30), size = size.tiny)
 
 if strategy.position_size != 0 and not inSess
     strategy.close_all(comment = "סוף שעות המסחר")
-if strategy.position_size == 0 and strategy.position_size[1] == 0
+    byTime := true
+
+// קופסאות הסיכון/יעד נמשכות עד היציאה
+if strategy.position_size != 0 or strategy.position_size[1] != 0
+    if not na(bxR)
+        bxR.set_right(bar_index)
+    if not na(bxG)
+        bxG.set_right(bar_index)
+
+// יציאה: תווית עם הסיבה והתוצאה
+var int lastCT = 0
+if strategy.closedtrades > lastCT
+    lastCT := strategy.closedtrades
+    int   k  = strategy.closedtrades - 1
+    float ep = strategy.closedtrades.entry_price(k)
+    float xp = strategy.closedtrades.exit_price(k)
+    int   dr = strategy.closedtrades.size(k) > 0 ? 1 : -1
+    float pt = (xp - ep) * dr
+    string rs = byTime ? "סוף שעות המסחר" : (not na(tTgt) and math.abs(xp - tTgt) <= math.abs(xp - tStop)) ? "יעד ✓" : "סטופ ✗"
+    color  xc = pt >= 0 ? color.new(#26a69a, 0) : color.new(#ef5350, 0)
+    label.new(bar_index, dr == 1 ? high : low, "יציאה: " + rs + "\n" + (pt >= 0 ? "+" : "") + str.tostring(math.round(pt, 2)) + " נק' · " + (strategy.closedtrades.profit(k) >= 0 ? "+$" : "-$") + str.tostring(math.round(math.abs(strategy.closedtrades.profit(k)), 2)), style = dr == 1 ? label.style_label_down : label.style_label_up, color = xc, textcolor = color.white, size = size.normal)
     tStop := na
     tTgt  := na
 
@@ -656,12 +744,12 @@ f_dCol(Eng e) =>
 
 if barstate.islast
     st.clear(0, 0, 1, 8)
-    if not is1m
-        st.cell(0, 0, "QT Strategy רצה על גרף של דקה אחת", text_color = #f0b400, text_size = size.small, bgcolor = CLR)
+    if not okTF
+        st.cell(0, 0, "QT Strategy רצה על גרף של 1m או 5m", text_color = #f0b400, text_size = size.small, bgcolor = CLR)
     else
         st.cell(0, 0, "QT Strat", text_color = #787b86, text_size = size.small, bgcolor = CLR)
         st.cell(0, 1, "1m", text_color = #787b86, text_size = size.small, bgcolor = CLR)
-        st.cell(1, 1, f_dTx(e1), text_color = f_dCol(e1), text_size = size.small, bgcolor = CLR)
+        st.cell(1, 1, is1m ? f_dTx(e1) : "—", text_color = f_dCol(e1), text_size = size.small, bgcolor = CLR)
         st.cell(0, 2, "5m", text_color = #787b86, text_size = size.small, bgcolor = CLR)
         st.cell(1, 2, f_dTx(e5), text_color = f_dCol(e5), text_size = size.small, bgcolor = CLR)
         st.cell(0, 3, "15m", text_color = #787b86, text_size = size.small, bgcolor = CLR)
@@ -669,11 +757,11 @@ if barstate.islast
         st.cell(0, 4, "1H", text_color = #787b86, text_size = size.small, bgcolor = CLR)
         st.cell(1, 4, f_dTx(e60), text_color = f_dCol(e60), text_size = size.small, bgcolor = CLR)
         bool zOn = zDir != 0 and time - zT <= zoneWin * 60000
-        string zTx = zOn ? (zDir == 1 ? "▲ " : "▼ ") + zNm + " · לפני " + str.tostring(math.round((time - zT) / 60000)) + " דק'" : "אין"
+        string zt2 = zOn ? (zDir == 1 ? "▲ " : "▼ ") + zTx + " · לפני " + str.tostring(math.round((time - zT) / 60000)) + " דק'" : "אין"
         st.cell(0, 5, "אזור", text_color = #787b86, text_size = size.small, bgcolor = CLR)
-        st.cell(1, 5, zTx, text_color = zOn ? (zDir == 1 ? #26a69a : #ef5350) : #787b86, text_size = size.small, bgcolor = CLR)
+        st.cell(1, 5, zt2, text_color = zOn ? (zDir == 1 ? #26a69a : #ef5350) : #787b86, text_size = size.small, bgcolor = CLR)
         st.cell(0, 6, "תומכות", text_color = #787b86, text_size = size.small, bgcolor = CLR)
-        st.cell(1, 6, "▲" + str.tostring(nBull) + "  ▼" + str.tostring(nBear), text_color = #b2b5be, text_size = size.small, bgcolor = CLR)
+        st.cell(1, 6, "▲" + str.tostring(nBull) + (sBull != "" ? " (" + sBull + ")" : "") + "\n▼" + str.tostring(nBear) + (sBear != "" ? " (" + sBear + ")" : ""), text_color = #b2b5be, text_size = size.small, bgcolor = CLR, text_halign = text.align_left)
         st.cell(0, 7, "מאז ההתחלה", text_color = #787b86, text_size = size.small, bgcolor = CLR)
         st.cell(1, 7, str.tostring(cZone) + " אזורים · " + str.tostring(cTrig) + " טריגרים באזור · " + str.tostring(cOk) + " עסקאות", text_color = #b2b5be, text_size = size.small, bgcolor = CLR)
         st.cell(0, 8, "למה לא", text_color = #787b86, text_size = size.small, bgcolor = CLR)
