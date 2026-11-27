@@ -1,5 +1,5 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0
-// QT Strategy v0.2 — אסטרטגיה אחת: נזילות → שבירות קורלציה → כניסה בדקה.
+// QT Strategy v0.3 — אסטרטגיה אחת: נזילות → שבירות קורלציה → כניסה בדקה.
 // הכל מחושב בכל נר, כדי שיהיה בקטסט (Strategy Tester) ובהמשך התראות לברוקר.
 //
 // הרצה: גרף MNQ (או MES) של 1m (או 5m — אז בלי שבירות/טריגר של 1m).
@@ -23,9 +23,14 @@
 //    סטופ: מעבר לנר השבירה של הטריגר. יעד: הנזילות הקרובה בכיוון שמרוחקת
 //    לפחות R מינימלי; אין — יחס קבוע (אפשרות).
 //
-// v0.1 — עוד לא: Fill (גאפ קולקטיבי), HSSMT, If–Then, פולבקים, מסגרת גבוהה גוברת.
+// בלי הצצה לעתיד (נבדק):
+//   • כל ההחלטות בסגירת הנר; הכניסה — בפתיחת הנר הבא (process_orders_on_close = false).
+//   • מסגרות גבוהות: רק נרות סגורים ([1], בלי lookahead) — נר 15m נכנס לחישוב רק אחרי שנסגר.
+//   • PSP נרשם רק אחרי שהנר שאחרי הסווינג נסגר; הסטופ מעבר לנר הסווינג.
+//   • יציאה בתוך הנר: use_bar_magnifier (במנוי שתומך) כדי לדעת מה נגע קודם — סטופ או יעד.
+// עוד לא: Fill (גאפ קולקטיבי), HSSMT, If–Then, פולבקים, מסגרת גבוהה גוברת.
 //@version=6
-strategy("QT Strategy v0.2", shorttitle = "QT Strat", overlay = true, initial_capital = 10000, default_qty_type = strategy.fixed, default_qty_value = 1, commission_type = strategy.commission.cash_per_contract, commission_value = 0.62, slippage = 1, max_labels_count = 500, max_lines_count = 50, max_boxes_count = 300)
+strategy("QT Strategy v0.3", shorttitle = "QT Strat", overlay = true, initial_capital = 10000, default_qty_type = strategy.fixed, default_qty_value = 1, commission_type = strategy.commission.cash_per_contract, commission_value = 0.62, slippage = 1, process_orders_on_close = false, use_bar_magnifier = true, max_labels_count = 500, max_lines_count = 50, max_boxes_count = 300)
 
 // ══════════════════════════════════════════════════════════════
 // הגדרות
@@ -66,6 +71,9 @@ tblPos   = input.string("למטה משמאל", "טבלת מצב", options = ["ל
 showZone = input.bool(true, "צבע רקע כשאזור נזילות פעיל", group = GV)
 showWhy  = input.bool(true, "תווית בכל טריגר באזור — על מה מסתמך ולמה נכנס / לא", group = GV)
 showBox  = input.bool(true, "קופסאות סיכון / יעד בעסקה", group = GV)
+showRej  = input.bool(true, "סימון ✗ בטריגר שלא נכנס (הסבר במעבר עכבר)", group = GV)
+showMk   = input.bool(true, "סמן את השבירות של כל כניסה (טריגר + תומכות)", group = GV)
+showStat = input.bool(true, "סטטיסטיקה לפי סשן ושעה", group = GV)
 
 GG = "הגדרת גאפ (זהה ל-SSMT Fill)"
 fvgOn        = input.bool(true, "FVG", group = GG)
@@ -332,6 +340,7 @@ type Eng
     int          newDir  = 0
     int          newTyp  = 0
     float        newStop = na
+    int          newBT   = 0      // זמן נר השבירה האחרונה (לסימון)
 
 f_newEng(int cls, int lv) =>
     Eng.new(cls = cls, lv = lv, o = array.new<float>(9, na), h = array.new<float>(9, na), l = array.new<float>(9, na), c = array.new<float>(9, na), tt = array.new<int>(3, 0), pH = array.new<float>(3, na), pL = array.new<float>(3, na), nH = array.new<float>(3, na), nL = array.new<float>(3, na), bk = array.new<Brk>())
@@ -342,6 +351,7 @@ method reg(Eng e, Brk b, float stp) =>
     e.newDir  := b.dir
     e.newTyp  := b.typ
     e.newStop := stp
+    e.newBT   := b.t
     while e.bk.size() > 30
         e.bk.shift()
     0
@@ -631,6 +641,32 @@ var int cOk   = 0
 if zs != 0 or zd != 0 or zw != 0
     cZone += 1
 
+// סימון על הגרף: השבירה שעשתה את הטריגר, והחדשה מכל סוג בכל מסגרת תומכת
+f_mk(int t, float y, string tx, int D, bool big) =>
+    if t > 0 and not na(y)
+        label.new(t, y, tx, xloc = xloc.bar_time, style = D == -1 ? label.style_label_down : label.style_label_up, color = color.new(D == 1 ? #26a69a : #ef5350, big ? 0 : 55), textcolor = color.white, size = size.tiny)
+    0
+
+f_marks(int D, Eng tE) =>
+    f_mk(tE.newBT, tE.newStop, "טריגר " + (tE.newTyp == 2 ? "PSP " : "SSMT ") + CLSN.get(tE.cls), D, true)
+    for k = 0 to 3
+        Eng  e  = k == 0 ? e1 : k == 1 ? e5 : k == 2 ? e15 : e60
+        bool on = k == 0 ? (use1 and is1m) : k == 1 ? use5 : k == 2 ? use15 : use60
+        if on and f_dir(e) == D
+            Brk bS = na
+            Brk bP = na
+            for b in e.bk
+                if b.dir == D and not (e.cls == tE.cls and b.rt == time)
+                    if b.typ == 1 and (na(bS) or b.t > bS.t)
+                        bS := b
+                    if b.typ == 2 and (na(bP) or b.t > bP.t)
+                        bP := b
+            if not na(bS)
+                f_mk(bS.t, bS.r0, CLSN.get(e.cls) + " SSMT", D, false)
+            if not na(bP)
+                f_mk(bP.t, bP.lvl, CLSN.get(e.cls) + " PSP", D, false)
+    0
+
 f_trig(Eng e, bool on, int D) =>
     on and e.newRT == time and e.newDir == D and ((e.newTyp == 2 and trigPSP) or (e.newTyp == 1 and trigSS))
 
@@ -680,7 +716,7 @@ if trigNow
         go := true
         cOk += 1
         float rr = math.abs(tgt - close) / risk
-        why := "✓ כניסה " + f_px(close) + "\nסטופ " + f_px(stp) + " (מעבר לנר הטריגר)\nיעד " + f_px(tgt) + (fb ? " (קבוע " : " (נזילות · ") + str.tostring(math.round(rr, 1)) + "R)"
+        why := "✓ החלטה בסגירת הנר (" + f_px(close) + ") · כניסה בפתיחת הנר הבא\nסטופ " + f_px(stp) + " (מעבר לנר הטריגר)\nיעד " + f_px(tgt) + (fb ? " (קבוע " : " (נזילות · ") + str.tostring(math.round(rr, 1)) + "R)"
         string id = D == 1 ? "L" : "S"
         strategy.entry(id, D == 1 ? strategy.long : strategy.short, comment = (D == 1 ? "קנייה" : "מכירה"))
         strategy.exit(id + " x", id, stop = stp, limit = tgt, comment_profit = "יעד", comment_loss = "סטופ")
@@ -693,10 +729,13 @@ if trigNow
         if showBox
             bxR := box.new(bar_index, D == 1 ? close : stp, bar_index + 1, D == 1 ? stp : close, border_color = na, bgcolor = color.new(#ef5350, 82))
             bxG := box.new(bar_index, D == 1 ? tgt : close, bar_index + 1, D == 1 ? close : tgt, border_color = na, bgcolor = color.new(#26a69a, 82))
-    if showWhy or go
-        string txt = (D == 1 ? "▲ " : "▼ ") + "טריגר " + (tE.newTyp == 2 ? "PSP " : "SSMT ") + CLSN.get(tE.cls) + "\nאזור: " + zTx + " (לפני " + str.tostring(math.round((time - zT) / 60000)) + " דק')\nתומכות: " + (sTx == "" ? "אין" : sTx) + "\n" + why
-        color  lc  = go ? color.new(#f0b400, 0) : color.new(#787b86, 20)
-        label.new(bar_index, D == -1 ? high : low, txt, style = D == -1 ? label.style_label_down : label.style_label_up, color = lc, textcolor = go ? color.black : color.white, size = go ? size.normal : size.small, textalign = text.align_right)
+    string full = (D == 1 ? "▲ " : "▼ ") + "טריגר " + (tE.newTyp == 2 ? "PSP " : "SSMT ") + CLSN.get(tE.cls) + " " + f_hm(tE.newBT) + "\nאזור: " + zTx + " (לפני " + str.tostring(math.round((time - zT) / 60000)) + " דק')\nתומכות: " + (sTx == "" ? "אין" : sTx) + "\n" + why
+    if go
+        label.new(bar_index, D == -1 ? high : low, D == 1 ? "▲ כניסה" : "▼ כניסה", style = D == -1 ? label.style_label_down : label.style_label_up, color = color.new(#f0b400, 0), textcolor = color.black, size = size.small, tooltip = full)
+        if showMk
+            f_marks(D, tE)
+    else if showWhy and showRej
+        label.new(bar_index, D == -1 ? high : low, "✗", style = D == -1 ? label.style_label_down : label.style_label_up, color = color.new(#787b86, 70), textcolor = color.white, size = size.tiny, tooltip = full)
 
 bgcolor(showZone and zOnNow ? color.new(zDirNow == 1 ? #26a69a : #ef5350, 92) : na, title = "אזור נזילות")
 
@@ -711,20 +750,61 @@ if strategy.position_size != 0 or strategy.position_size[1] != 0
     if not na(bxG)
         bxG.set_right(bar_index)
 
-// יציאה: תווית עם הסיבה והתוצאה
+// יציאה: תווית קטנה (פרטים במעבר עכבר) + סטטיסטיקה לפי סשן ושעת הכניסה
+var array<int>   hCnt = array.new<int>(24, 0)
+var array<int>   hWin = array.new<int>(24, 0)
+var array<float> hPts = array.new<float>(24, 0.0)
+var array<int>   sCnt = array.new<int>(4, 0)
+var array<int>   sWin = array.new<int>(4, 0)
+var array<float> sPts = array.new<float>(4, 0.0)
 var int lastCT = 0
 if strategy.closedtrades > lastCT
+    for k = lastCT to strategy.closedtrades - 1
+        float ep = strategy.closedtrades.entry_price(k)
+        float xp = strategy.closedtrades.exit_price(k)
+        int   dr = strategy.closedtrades.size(k) > 0 ? 1 : -1
+        float pt = (xp - ep) * dr
+        float pf = strategy.closedtrades.profit(k)
+        int   et = strategy.closedtrades.entry_time(k)
+        string rs = byTime ? "סוף שעות המסחר" : (not na(tTgt) and math.abs(xp - tTgt) <= math.abs(xp - tStop)) ? "יעד" : "סטופ"
+        string sh = rs == "יעד" ? "✓" : rs == "סטופ" ? "✗" : "⏱"
+        string tip = "יציאה: " + rs + "\nכניסה בפועל " + f_px(ep) + " (" + f_hm(et) + ")\nיציאה " + f_px(xp) + "\n" + (pt >= 0 ? "+" : "") + str.tostring(math.round(pt, 2)) + " נק' · " + (pf >= 0 ? "+$" : "-$") + str.tostring(math.round(math.abs(pf), 2))
+        label.new(bar_index, dr == 1 ? high : low, "יציאה " + sh + " " + (pt >= 0 ? "+" : "") + str.tostring(math.round(pt, 1)), style = dr == 1 ? label.style_label_down : label.style_label_up, color = color.new(pt >= 0 ? #26a69a : #ef5350, 0), textcolor = color.white, size = size.small, tooltip = tip)
+        int hr = hour(et, TZ)
+        hCnt.set(hr, hCnt.get(hr) + 1)
+        hWin.set(hr, hWin.get(hr) + (pt > 0 ? 1 : 0))
+        hPts.set(hr, hPts.get(hr) + pt)
+        [s3, c3x, p3, b3x, n3] = f_cyc(3, et)
+        sCnt.set(p3, sCnt.get(p3) + 1)
+        sWin.set(p3, sWin.get(p3) + (pt > 0 ? 1 : 0))
+        sPts.set(p3, sPts.get(p3) + pt)
     lastCT := strategy.closedtrades
-    int   k  = strategy.closedtrades - 1
-    float ep = strategy.closedtrades.entry_price(k)
-    float xp = strategy.closedtrades.exit_price(k)
-    int   dr = strategy.closedtrades.size(k) > 0 ? 1 : -1
-    float pt = (xp - ep) * dr
-    string rs = byTime ? "סוף שעות המסחר" : (not na(tTgt) and math.abs(xp - tTgt) <= math.abs(xp - tStop)) ? "יעד ✓" : "סטופ ✗"
-    color  xc = pt >= 0 ? color.new(#26a69a, 0) : color.new(#ef5350, 0)
-    label.new(bar_index, dr == 1 ? high : low, "יציאה: " + rs + "\n" + (pt >= 0 ? "+" : "") + str.tostring(math.round(pt, 2)) + " נק' · " + (strategy.closedtrades.profit(k) >= 0 ? "+$" : "-$") + str.tostring(math.round(math.abs(strategy.closedtrades.profit(k)), 2)), style = dr == 1 ? label.style_label_down : label.style_label_up, color = xc, textcolor = color.white, size = size.normal)
     tStop := na
     tTgt  := na
+
+var table sx = table.new(position.top_right, 4, 30, border_width = 0)
+f_sRow(int r, string a, int n, int w, float p) =>
+    color c = p >= 0 ? #26a69a : #ef5350
+    sx.cell(0, r, a, text_color = #787b86, text_size = size.small, bgcolor = color.new(color.black, 100))
+    sx.cell(1, r, str.tostring(n), text_color = #b2b5be, text_size = size.small, bgcolor = color.new(color.black, 100))
+    sx.cell(2, r, n > 0 ? str.tostring(math.round(100.0 * w / n)) + "%" : "", text_color = #b2b5be, text_size = size.small, bgcolor = color.new(color.black, 100))
+    sx.cell(3, r, (p >= 0 ? "+" : "") + str.tostring(math.round(p, 1)), text_color = c, text_size = size.small, bgcolor = color.new(color.black, 100))
+    r + 1
+
+if barstate.islast and showStat
+    sx.clear(0, 0, 3, 29)
+    int r = 0
+    sx.cell(0, r, "כניסה ב-", text_color = #787b86, text_size = size.small, bgcolor = color.new(color.black, 100))
+    sx.cell(1, r, "עסקאות", text_color = #787b86, text_size = size.small, bgcolor = color.new(color.black, 100))
+    sx.cell(2, r, "הצלחה", text_color = #787b86, text_size = size.small, bgcolor = color.new(color.black, 100))
+    sx.cell(3, r, "נק'", text_color = #787b86, text_size = size.small, bgcolor = color.new(color.black, 100))
+    r += 1
+    for i = 0 to 3
+        if sCnt.get(i) > 0
+            r := f_sRow(r, SES.get(i), sCnt.get(i), sWin.get(i), sPts.get(i))
+    for i = 0 to 23
+        if hCnt.get(i) > 0
+            r := f_sRow(r, (i < 10 ? "0" : "") + str.tostring(i) + ":00", hCnt.get(i), hWin.get(i), hPts.get(i))
 
 plot(strategy.position_size != 0 ? tStop : na, "סטופ", color.new(#ef5350, 0), 1, plot.style_linebr)
 plot(strategy.position_size != 0 ? tTgt : na, "יעד", color.new(#26a69a, 0), 1, plot.style_linebr)
