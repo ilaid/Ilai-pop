@@ -1,5 +1,5 @@
 //@version=5
-indicator("QT Gaps | Collective + Chart", overlay = true, max_boxes_count = 300)
+indicator("QT Gaps | Collective + Chart", overlay = true, max_boxes_count = 300, max_labels_count = 300)
 
 // ═══════════════════════════════════════════════════════════════════
 // QT Gaps — רק תצוגה של גאפים חיים, בלי שבירות
@@ -82,7 +82,11 @@ ownBear   = input.color(#ffa726, "דובי", group = grpOwn)
 grpLook   = "מראה"
 fillTr    = input.int(85, "שקיפות המילוי", minval = 0, maxval = 98, group = grpLook)
 edgeTr    = input.int(85, "שקיפות המסגרת", minval = 0, maxval = 100, tooltip = "כמו המילוי = מסגרת חלקה.", group = grpLook)
-showTxt   = input.bool(true, "כיתוב בקופסה", group = grpLook)
+showTxt   = input.bool(true, "כיתוב לגאפ", group = grpLook)
+capPos    = input.string("בפנים", "מיקום הכיתוב", options = ["בפנים", "מעל הקופסה", "מתחת לקופסה", "מימין לקופסה"], group = grpLook)
+capH      = input.string("שמאל", "צד", options = ["שמאל", "מרכז", "ימין"], tooltip = "בפנים / מעל / מתחת: באיזה צד של הקופסה.", group = grpLook)
+capV      = input.string("למעלה", "גובה (כשבפנים)", options = ["למעלה", "באמצע", "למטה"], group = grpLook)
+capSize   = input.string("זעיר", "גודל הכיתוב", options = ["זעיר", "קטן", "רגיל"], group = grpLook)
 showCE    = input.bool(false, "קו CE (חצי גאפ)", group = grpLook)
 
 grpRet    = "חזרה לגאפ (תדלוק)"
@@ -705,11 +709,25 @@ drawOwn  = ownMode  != "כבוי" and f_tfOn(tfClass) and (ownMode  == "תמיד
 f_gapCol(int kind, int dir) =>
     kind == 1 ? colPair : dir == 1 ? colBull : colBear
 
-var array<box>  bxs = array.new<box>()
-var array<line> lns = array.new<line>()
+var array<box>   bxs = array.new<box>()
+var array<line>  lns = array.new<line>()
+var array<label> lbs = array.new<label>()
 
+capSz  = capSize == "קטן" ? size.small : capSize == "רגיל" ? size.normal : size.tiny
+capHal = capH == "מרכז" ? text.align_center : capH == "ימין" ? text.align_right : text.align_left
+capVal = capV == "באמצע" ? text.align_center : capV == "למטה" ? text.align_bottom : text.align_top
+capIn  = capPos == "בפנים"
+
+// כיתוב בפנים — טקסט של הקופסה. בחוץ — תווית שקופה מעל / מתחת / מימין.
 f_box(int x1, float top, float bot, color c, string txt, bool hollow) =>
-    array.push(bxs, box.new(x1, top, bar_index, bot, border_color = color.new(c, hollow ? 30 : edgeTr), border_width = 1, bgcolor = color.new(c, hollow ? 100 : fillTr), text = showTxt ? txt : "", text_color = color.new(c, 20), text_size = size.tiny, text_halign = text.align_left, text_valign = text.align_top))
+    array.push(bxs, box.new(x1, top, bar_index, bot, border_color = color.new(c, hollow ? 30 : edgeTr), border_width = 1, bgcolor = color.new(c, hollow ? 100 : fillTr), text = showTxt and capIn ? txt : "", text_color = color.new(c, 20), text_size = capSz, text_halign = capHal, text_valign = capVal))
+    if showTxt and not capIn
+        int   xm = capH == "שמאל" ? x1 : capH == "ימין" ? bar_index : int((x1 + bar_index) / 2)
+        bool  rt = capPos == "מימין לקופסה"
+        int   lx = rt ? bar_index : xm
+        float ly = rt ? (top + bot) / 2 : capPos == "מעל הקופסה" ? top : bot
+        string st = rt ? label.style_label_left : capPos == "מעל הקופסה" ? label.style_label_down : label.style_label_up
+        array.push(lbs, label.new(lx, ly, txt, style = st, color = color.new(c, 100), textcolor = color.new(c, 20), size = capSz))
     if showCE
         array.push(lns, line.new(x1, (top + bot) / 2, bar_index, (top + bot) / 2, color = color.new(c, 50), style = line.style_dashed, width = 1))
     0
@@ -733,6 +751,8 @@ if barstate.islast
         box.delete(array.pop(bxs))
     while array.size(lns) > 0
         line.delete(array.pop(lns))
+    while array.size(lbs) > 0
+        label.delete(array.pop(lbs))
     // גאפים של הגרף שהתאחדו עם קולקטיבי — לא מצוירים בנפרד
     array<bool> merged = array.new_bool(array.size(owns), false)
     if drawColl and array.size(gaps) > 0
