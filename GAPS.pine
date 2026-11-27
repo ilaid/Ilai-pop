@@ -29,6 +29,14 @@ indicator("QT Gaps | Collective + Chart", overlay = true, max_boxes_count = 300)
 //   1m/5m — רבעים/מיקרו קודמים · Mo — שנים קודמות במחזור
 //   1D — רבעי-רבע קודמים בתוך הרבע השבועי · 1W — רבעים שבועיים קודמים בשנה
 // ברירת המחדל: רק דרוכים (כמו הישן). כיבוי = גם גאפים מתת-המחזור הנוכחי.
+//
+// חוק התדלוק — חזרה לגאפ: כל תת-מחזור חוזר לגאפ של תת-המחזור הקודם באותו
+// מיכל (London → Asia · שלישי → שני · שבוע 3 → 2). חזרה = כל נגיעה בפתיל,
+// ונספרת רק בתת-המחזור שמיד אחרי. בתת-המחזור הראשון של מיכל אין יעד.
+//   קופסה: גאפ יעד שחזרו אליו הופך למסגרת בלבד, עם ↩ ומי חזר.
+//     שלישייה שורית — נספרים 1·2 · שלישייה דובית — 1·2·3 · זוג — 3·4.
+//   פינה: כל נכס לחוד — האם חזר לגאפ כלשהו שלו (קולקטיבי או לא) מהמחזור
+//     הקודם. ▼ = חזר לגאפ מתחת (שורי) · ▲ = לגאפ מעל (דובי) · אפור = עוד לא.
 // ═══════════════════════════════════════════════════════════════════
 
 // ═══════════════════════════════════════════════════════════════════
@@ -75,6 +83,12 @@ fillTr    = input.int(85, "שקיפות המילוי", minval = 0, maxval = 98, 
 edgeTr    = input.int(85, "שקיפות המסגרת", minval = 0, maxval = 100, tooltip = "כמו המילוי = מסגרת חלקה.", group = grpLook)
 showTxt   = input.bool(true, "כיתוב בקופסה", group = grpLook)
 showCE    = input.bool(false, "קו CE (חצי גאפ)", group = grpLook)
+
+grpRet    = "חזרה לגאפ (תדלוק)"
+retBox    = input.bool(true, "קופסה שחזרו אליה — מסגרת בלבד", tooltip = "גאפ של תת-המחזור הקודם שחזרו אליו בתת-המחזור הנוכחי.", group = grpRet)
+tgtOnly   = input.bool(false, "הצג רק גאפי יעד (תת-המחזור הקודם)", tooltip = "הכי נקי: רק הגאפים שהתת-מחזור הנוכחי אמור לחזור אליהם.", group = grpRet)
+retCorner = input.bool(true, "שורת חזרה בפינה (כל נכס לחוד)", group = grpRet)
+retPos    = input.string("למטה משמאל", "מיקום", options = ["למטה משמאל", "למטה מימין", "למעלה משמאל", "למעלה מימין"], group = grpRet)
 
 // באילו מסגרות זמן להציג — כל מסגרת בנפרד
 grpTf  = "מסגרות להצגה"
@@ -329,6 +343,9 @@ type Gap
     float  drwTop
     bool   volImb   = false
     bool   armed    = false
+    bool   hitA     = false   // חזרה בתת-המחזור שאחרי, לכל משבצת
+    bool   hitB     = false
+    bool   hitC     = false
 
 type OwnGap
     int    dir
@@ -340,9 +357,20 @@ type OwnGap
     bool   armed
     bool   volImb
     int    collId   // הקולקטיבי שנולד איתו באותו נר, 0 = אין
+    bool   hit      = false   // הגרף חזר אליו בתת-המחזור שאחרי
+
+// רגל של נכס אחד — לשורת החזרה בפינה (כל גאפ של הנכס, קולקטיבי או לא)
+type Leg
+    int    asset    // 0..3
+    int    dir
+    float  bot
+    float  top
+    int    refId
+    int    birth
 
 var array<Gap>    gaps = array.new<Gap>()
 var array<OwnGap> owns = array.new<OwnGap>()
+var array<Leg>    legs = array.new<Leg>()
 var int gapCounter = 0
 
 // שם הנכס שיושב במשבצת
@@ -497,6 +525,26 @@ method track(Gap g, int rf, float cC, bool canExit) =>
 method isDead(Gap g, float cA, float cB) =>
     g.dir == 1 ? ((not na(g.aBot) and not na(cA) and cA < g.aBot) or (not na(g.bBot) and not na(cB) and cB < g.bBot)) : ((not na(g.aTop) and not na(cA) and cA > g.aTop) or (not na(g.bTop) and not na(cB) and cB > g.bTop))
 
+// ── יעד החזרה: תת-המחזור הקודם, באותו מיכל. בתת-המחזור הראשון של מיכל — אין. ──
+var int tgtRef = -1
+if newRefCycle
+    tgtRef := newLifeCycle ? -1 : nz(refCycleId[1], -1)
+    if array.size(legs) > 0
+        for i = array.size(legs) - 1 to 0
+            if array.get(legs, i).refId != tgtRef and array.get(legs, i).refId != refCycleId
+                array.remove(legs, i)
+
+// נגיעה: פתיל שנכנס לגאפ (שורי — מלמטה למעלה מתחת למחיר; דובי — מלמעלה)
+f_touch(int d, float bot, float top, float h, float l) =>
+    not na(top) and not na(h) and (d == 1 ? l <= top : h >= bot)
+
+f_hiA(int a) =>
+    a == 0 ? a1H : a == 1 ? a2H : a == 2 ? a3H : a4H
+f_loA(int a) =>
+    a == 0 ? a1L : a == 1 ? a2L : a == 2 ? a3L : a4L
+f_clA(int a) =>
+    a == 0 ? a1C : a == 1 ? a2C : a == 2 ? a3C : a4C
+
 // ── החלפת מיכל + זרע (1m · 5m · 1H) ──
 var bool seedActive = false
 var int  seedRefId  = 0
@@ -539,6 +587,16 @@ if array.size(gaps) > 0
         if barstate.isconfirmed and bar_index > gu.birth and gu.isDead(cA, cB)
             array.remove(gaps, i)
         else
+            // חזרה — רק בתת-המחזור שאחרי, כל משבצת לפי הנכס שלה
+            if gu.refId == tgtRef and bar_index > gu.birth
+                int sa = k0 ? 0 : 2
+                int sb = k0 ? 1 : 3
+                if f_touch(gu.dir, gu.aBot, gu.aTop, f_hiA(sa), f_loA(sa))
+                    gu.hitA := true
+                if f_touch(gu.dir, gu.bBot, gu.bTop, f_hiA(sb), f_loA(sb))
+                    gu.hitB := true
+                if k0 and f_touch(gu.dir, gu.cBot, gu.cTop, a3H, a3L)
+                    gu.hitC := true
             bool cOut = gu.track(refCycleId, a3C, barstate.isconfirmed and bar_index > gu.birth)
             // בגרף של נכס 3 — הנכס של הגרף יצא מהגאפ, ולכן אין לו קופסה
             if cOut and k0 and chartIdx == 2
@@ -546,13 +604,16 @@ if array.size(gaps) > 0
                 gu.drwTop := na
 
 // ── גאפים של הגרף: דריכה ו-IFVG ──
-if barstate.isconfirmed and array.size(owns) > 0
+if array.size(owns) > 0
     for i = array.size(owns) - 1 to 0
         OwnGap og = array.get(owns, i)
-        if og.dir == 1 ? close < og.bot : close > og.top
-            array.remove(owns, i)
-        else if not og.armed and og.refId != refCycleId
-            og.armed := true
+        if og.refId == tgtRef and f_touch(og.dir, og.bot, og.top, high, low)
+            og.hit := true
+        if barstate.isconfirmed
+            if og.dir == 1 ? close < og.bot : close > og.top
+                array.remove(owns, i)
+            else if not og.armed and og.refId != refCycleId
+                og.armed := true
 
 // ═══════════════════════════════════════════════════════════════════
 // זיהוי — קולקטיביים (שלישייה וזוג) וגאפ של הגרף, באותו נר
@@ -614,6 +675,45 @@ if ownMode != "כבוי" and barstate.isconfirmed and tfClass != 0 and bar_index
             if array.size(owns) > maxGaps
                 array.remove(owns, 0)
 
+// ── רגליים של כל נכס לחוד — לשורת החזרה בפינה ──
+if retCorner and barstate.isconfirmed and tfClass != 0 and bar_index > 2
+    array<float> RB = array.from(b1u, b1d, b2u, b2d, b3u, b3d, b4u, b4d)
+    array<float> RT = array.from(t1u, t1d, t2u, t2d, t3u, t3d, t4u, t4d)
+    array<bool>  RF = array.from(f1u, f1d, f2u, f2d, f3u, f3d, f4u, f4d)
+    array<bool>  RM = array.from(m1u, m1d, m2u, m2d, m3u, m3d, m4u, m4d)
+    for j = 0 to 7
+        float lt = array.get(RT, j)
+        if not na(lt)
+            bool lNow = (newRefCycle and array.get(RM, j)) or not array.get(RF, j)
+            if not (newLifeCycle and not lNow)
+                array.push(legs, Leg.new(int(j / 2), j % 2 == 0 ? 1 : -1, array.get(RB, j), lt, lNow ? refCycleId : refCycleId[1], bar_index))
+    while array.size(legs) > 200
+        array.remove(legs, 0)
+
+// מצב לכל נכס בתת-המחזור הנוכחי: יש יעד מתחת/מעל, וחזר אליו
+var array<bool> hasD = array.new_bool(4, false)
+var array<bool> hasU = array.new_bool(4, false)
+var array<bool> retD = array.new_bool(4, false)
+var array<bool> retU = array.new_bool(4, false)
+if newRefCycle
+    for a = 0 to 3
+        array.set(hasD, a, false)
+        array.set(hasU, a, false)
+        array.set(retD, a, false)
+        array.set(retU, a, false)
+if retCorner and array.size(legs) > 0
+    for i = array.size(legs) - 1 to 0
+        Leg lg = array.get(legs, i)
+        int a  = lg.asset
+        if lg.refId == tgtRef
+            array.set(lg.dir == 1 ? hasD : hasU, a, true)
+            if bar_index > lg.birth and f_touch(lg.dir, lg.bot, lg.top, f_hiA(a), f_loA(a))
+                array.set(lg.dir == 1 ? retD : retU, a, true)
+        // IFVG של הנכס — הרגל מתה
+        float lc = f_clA(a)
+        if barstate.isconfirmed and bar_index > lg.birth and not na(lc) and (lg.dir == 1 ? lc < lg.bot : lc > lg.top)
+            array.remove(legs, i)
+
 // ═══════════════════════════════════════════════════════════════════
 // ציור — רק בנר האחרון: מוחקים הכול ומציירים מחדש
 // ═══════════════════════════════════════════════════════════════════
@@ -629,19 +729,25 @@ f_gapCol(int kind, int dir) =>
 var array<box>  bxs = array.new<box>()
 var array<line> lns = array.new<line>()
 
-f_box(int x1, float top, float bot, color c, string txt) =>
-    array.push(bxs, box.new(x1, top, bar_index, bot, border_color = color.new(c, edgeTr), border_width = 1, bgcolor = color.new(c, fillTr), text = showTxt ? txt : "", text_color = color.new(c, 20), text_size = size.tiny, text_halign = text.align_left, text_valign = text.align_top))
+f_box(int x1, float top, float bot, color c, string txt, bool hollow) =>
+    array.push(bxs, box.new(x1, top, bar_index, bot, border_color = color.new(c, hollow ? 30 : edgeTr), border_width = 1, bgcolor = color.new(c, hollow ? 100 : fillTr), text = showTxt ? txt : "", text_color = color.new(c, 20), text_size = size.tiny, text_halign = text.align_left, text_valign = text.align_top))
     if showCE
         array.push(lns, line.new(x1, (top + bot) / 2, bar_index, (top + bot) / 2, color = color.new(c, 50), style = line.style_dashed, width = 1))
     0
 
 // קולקטיבי מצויר?
 f_collShown(Gap g) =>
-    drawColl and not na(g.drwTop) and (g.armed or not collArm)
+    drawColl and not na(g.drwTop) and (g.armed or not collArm) and (not tgtOnly or g.refId == tgtRef)
 
 // גאפ של הגרף מצויר?
 f_ownShown(OwnGap og) =>
-    drawOwn and (og.armed or not ownArm)
+    drawOwn and (og.armed or not ownArm) and (not tgtOnly or og.refId == tgtRef)
+
+// מי חזר לגאפ קולקטיבי — רק מי שנספר: שלישייה שורית 1·2, דובית 1·2·3, זוג 3·4
+f_hitTxt(Gap g) =>
+    bool c = g.hitC and g.kind == 0 and g.dir == -1
+    string s = (g.hitA ? f_slotName(g.kind, 0) : "") + (g.hitA and (g.hitB or c) ? "+" : "") + (g.hitB ? f_slotName(g.kind, 1) : "") + (g.hitB and c ? "+" : "") + (c ? f_slotName(g.kind, 2) : "")
+    g.refId == tgtRef and s != "" ? " ↩ " + s : ""
 
 if barstate.islast
     while array.size(bxs) > 0
@@ -666,7 +772,8 @@ if barstate.islast
                             bot := math.min(bot, ow.bot)
                             x1  := math.min(x1, ow.origin)
                             array.set(merged, j, true)
-                f_box(x1, top, bot, f_gapCol(gz.kind, gz.dir), f_subName(tfClass, gz.birthT) + " " + f_bornTxt(tfClass, gz.birthT) + " " + f_legsTxt(gz) + (gz.volImb ? " V" : ""))
+                string ht = f_hitTxt(gz)
+                f_box(x1, top, bot, f_gapCol(gz.kind, gz.dir), f_subName(tfClass, gz.birthT) + " " + f_bornTxt(tfClass, gz.birthT) + " " + f_legsTxt(gz) + (gz.volImb ? " V" : "") + ht, retBox and ht != "")
     if drawOwn and array.size(owns) > 0
         for i = 0 to array.size(owns) - 1
             OwnGap og = array.get(owns, i)
@@ -674,16 +781,47 @@ if barstate.islast
                 // קולקטיבי שכבר מצויר — לא שוב. קולקטיבי חי שלא מצויר — בצבעים ובשמות שלו.
                 bool   dup  = false
                 string legs = ""
+                string ht   = ""
                 int    kOf  = 0
                 if og.collId != 0 and array.size(gaps) > 0
                     for j = 0 to array.size(gaps) - 1
                         Gap gk = array.get(gaps, j)
                         if gk.id == og.collId
                             legs := f_legsTxt(gk)
+                            ht   := f_hitTxt(gk)
                             kOf  := gk.kind
                             if f_collShown(gk)
                                 dup := true
                 if not dup
                     bool  isColl = legs != ""
                     color oCol   = isColl ? f_gapCol(kOf, og.dir) : og.dir == 1 ? ownBull : ownBear
-                    f_box(og.origin, og.top, og.bot, oCol, f_subName(tfClass, og.birthT) + " " + f_bornTxt(tfClass, og.birthT) + " " + (isColl ? legs : ownName) + (og.volImb ? " V" : ""))
+                    if not isColl and og.hit and og.refId == tgtRef
+                        ht := " ↩"
+                    f_box(og.origin, og.top, og.bot, oCol, f_subName(tfClass, og.birthT) + " " + f_bornTxt(tfClass, og.birthT) + " " + (isColl ? legs : ownName) + (og.volImb ? " V" : "") + ht, retBox and ht != "")
+
+// ═══════════════════════════════════════════════════════════════════
+// שורת החזרה בפינה — כל נכס לחוד: חזר לגאפ שלו מתת-המחזור הקודם?
+// ▼ = לגאפ מתחת (שורי) · ▲ = לגאפ מעל (דובי) · אפור = יש יעד, עוד לא חזר.
+// נכס בלי גאפ במחזור הקודם — לא מופיע. אין יעד בכלל — השורה ריקה.
+// ═══════════════════════════════════════════════════════════════════
+
+retPosV = retPos == "למטה מימין" ? position.bottom_right : retPos == "למעלה משמאל" ? position.top_left : retPos == "למעלה מימין" ? position.top_right : position.bottom_left
+var table retTbl = table.new(retPosV, 5, 1, bgcolor = color.new(color.black, 100), frame_width = 0, border_width = 0)
+
+if barstate.islast and retCorner
+    table.clear(retTbl, 0, 0, 4, 0)
+    bool any = false
+    if tgtRef != -1 and f_tfOn(tfClass)
+        for a = 0 to (use4 ? 3 : 2)
+            bool hd = array.get(hasD, a)
+            bool hu = array.get(hasU, a)
+            if hd or hu
+                bool   rd = array.get(retD, a)
+                bool   ru = array.get(retU, a)
+                string nm = a == 0 ? nm1 : a == 1 ? nm2 : a == 2 ? nm3 : nm4
+                string tx = nm + (rd ? "▼" : "") + (ru ? "▲" : "") + (rd or ru ? "" : "·")
+                color  cc = rd and ru ? chart.fg_color : rd ? colBull : ru ? colBear : color.gray
+                table.cell(retTbl, a + 1, 0, tx, text_color = cc, text_size = size.tiny)
+                any := true
+    if any
+        table.cell(retTbl, 0, 0, "↩", text_color = color.gray, text_size = size.tiny)
