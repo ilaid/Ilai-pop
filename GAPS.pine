@@ -35,8 +35,11 @@ indicator("QT Gaps | Collective + Chart", overlay = true, max_boxes_count = 300)
 // ונספרת רק בתת-המחזור שמיד אחרי. בתת-המחזור הראשון של מיכל אין יעד.
 //   קופסה: גאפ יעד שחזרו אליו הופך למסגרת בלבד, עם ↩ ומי חזר.
 //     שלישייה שורית — נספרים 1·2 · שלישייה דובית — 1·2·3 · זוג — 3·4.
-//   פינה: כל נכס לחוד — האם חזר לגאפ כלשהו שלו (קולקטיבי או לא) מהמחזור
-//     הקודם. ▼ = חזר לגאפ מתחת (שורי) · ▲ = לגאפ מעל (דובי) · אפור = עוד לא.
+//   טבלה (באמצע משמאל): כל נכס לחוד — האם חזר לגאפ חי שלו (קולקטיבי או לא)
+//     מהמחזור הקודם. החץ = הכיוון שהחזרה מתדלקת: ▲ = חזר לגאפ שורי (מתחת) ·
+//     ▼ = לגאפ דובי (מעל) · אפור = עוד לא. גאפ שהנכס הפך ל-IFVG — נמחק.
+//
+// גאפ = FVG בגבולות הפתילים, או VI (מ-4 טיקים, ברצף). בלי הרחבה לגופים.
 // ═══════════════════════════════════════════════════════════════════
 
 // ═══════════════════════════════════════════════════════════════════
@@ -55,9 +58,7 @@ settleIn  = input.string("כבוי — כמו הגרף", "Settlement כסגיר�
 grpGap = "הגדרת גאפ"
 fvgOn        = input.bool(true, "זהה FVG (שלושה נרות)", group = grpGap)
 volImbOn     = input.bool(true, "זהה VI — גאפ סגירה/פתיחה בין שני נרות", tooltip = "רווח בין הסגירה של נר לפתיחה של הבא, ברצף (שני הנרות לכיוון הרווח), מסף הטיקים.", group = grpGap)
-extendBodies = input.bool(true, "הרחב גאפים לגופי הנרות", tooltip = "כבוי = FVG נשאר בגבולות הפתילים, ו-VI לא מתאחד איתו.", group = grpGap)
 viMinTicks   = input.int(4, "VI לבד — מינימום טיקים", minval = 1, maxval = 100, group = grpGap)
-viMergeTicks = input.int(1, "הרחבה — מינימום טיקים", minval = 1, maxval = 100, group = grpGap)
 use3         = input.bool(true, "כלול את נכס 3 בשלישייה", group = grpGap)
 maxGaps      = input.int(60, "מקסימום גאפים לכל סוג", minval = 5, maxval = 140, group = grpGap)
 
@@ -88,7 +89,7 @@ grpRet    = "חזרה לגאפ (תדלוק)"
 retBox    = input.bool(true, "קופסה שחזרו אליה — מסגרת בלבד", tooltip = "גאפ של תת-המחזור הקודם שחזרו אליו בתת-המחזור הנוכחי.", group = grpRet)
 tgtOnly   = input.bool(false, "הצג רק גאפי יעד (תת-המחזור הקודם)", tooltip = "הכי נקי: רק הגאפים שהתת-מחזור הנוכחי אמור לחזור אליהם.", group = grpRet)
 retCorner = input.bool(true, "שורת חזרה בפינה (כל נכס לחוד)", group = grpRet)
-retPos    = input.string("למטה משמאל", "מיקום", options = ["למטה משמאל", "למטה מימין", "למעלה משמאל", "למעלה מימין"], group = grpRet)
+retPos    = input.string("באמצע משמאל", "מיקום", options = ["באמצע משמאל", "באמצע מימין", "למטה משמאל", "למטה מימין", "למעלה משמאל", "למעלה מימין"], group = grpRet)
 
 // באילו מסגרות זמן להציג — כל מסגרת בנפרד
 grpTf  = "מסגרות להצגה"
@@ -367,6 +368,7 @@ type Leg
     float  top
     int    refId
     int    birth
+    bool   hit      = false
 
 var array<Gap>    gaps = array.new<Gap>()
 var array<OwnGap> owns = array.new<OwnGap>()
@@ -437,55 +439,32 @@ f_bornTxt(int c, int t) =>
 // ═══════════════════════════════════════════════════════════════════
 // רגל אחת — הגאפ של נכס אחד בכיוון אחד, בנר הנוכחי
 //
-// נרות: 1 = (o2,h2,l2,c2) · 2 = (o1,c1) · 3 = (o0,h0,l0,c0)
-// שלושה מתגים נפרדים:
-//   fvgOn        — FVG של שלושה נרות, בגבולות הפתילים.
-//   volImbOn     — VI בין נר 2 לנר 3 כגאפ בפני עצמו (מ-viMinTicks). **רצף**:
-//                  שני הנרות לכיוון הרווח, אלא אם הנר פותח תת-מחזור (edge).
-//   extendBodies — הרחבת FVG: לגוף בשני הצדדים (מ-viMergeTicks), VI בין נר 1
-//                  לנר 2, ו-VI בין נר 2 לנר 3 שמתאחד איתו. כבוי = אין הרחבה.
-// מחזיר [תחתון, עליון, FVG?, הרחבת-VI?, VI-לבד?]. עליון na = אין רגל.
-// אותה פונקציה לגרף, למנועים, לגבולות הציור ולגאפים של הגרף — כך הם זהים.
+// נרות: 1 = (h2,l2) · 2 = (o1,c1) · 3 = (o0,h0,l0,c0)
+//   fvgOn    — FVG של שלושה נרות, בגבולות הפתילים (בלי הרחבה לגופים).
+//   volImbOn — VI בין נר 2 לנר 3 (מ-viMinTicks), רק כשלנכס אין FVG באותו נר.
+//              **רצף**: שני הנרות לכיוון הרווח, אלא אם הנר פותח תת-מחזור (edge).
+// מחזיר [תחתון, עליון, FVG?, VI?]. עליון na = אין רגל.
 // ═══════════════════════════════════════════════════════════════════
 
-f_leg(int d, bool ok, float o0, float h0, float l0, float c0, float o1, float c1, float h2, float l2, float c2, float o2, float tk, bool edge) =>
+f_leg(int d, bool ok, float o0, float h0, float l0, float c0, float o1, float c1, float h2, float l2, float tk, bool edge) =>
     float b  = na
     float t  = na
     int   ti = math.round(math.abs(o0 - c1) / tk)
-    int   pi = math.round(math.abs(o1 - c2) / tk)
     bool  f  = fvgOn and ok and (d == 1 ? l0 > h2 : h0 < l2)
     // רווח סגירה/פתיחה בין נר 2 לנר 3, ברצף (או בנר שפותח תת-מחזור)
     bool  r  = ok and (d == 1 ? (o0 > c1 and (edge or (c1 > o1 and c0 > o0))) : (o0 < c1 and (edge or (c1 < o1 and c0 < o0))))
-    // הרחבות — רק כשההרחבה דלוקה
-    bool  m  = extendBodies and r and ti >= viMergeTicks
-    bool  p  = extendBodies and pi >= viMergeTicks and (d == 1 ? (o1 > c2 and c2 > o2 and c1 > o1) : (o1 < c2 and c2 < o2 and c1 < o1))
-    // VI כגאפ בפני עצמו — רק כש-VI דלוק
-    bool  v  = volImbOn and r and ti >= viMinTicks
+    bool  v  = volImbOn and r and ti >= viMinTicks and not f
     if f
-        if d == 1
-            b := (extendBodies and o1 > h2 and pi >= viMergeTicks) ? c2 : h2
-            t := (extendBodies and l0 > c1 and ti >= viMergeTicks) ? o0 : l0
-            if p
-                b := math.min(b, c2)
-        else
-            t := (extendBodies and o1 < l2 and pi >= viMergeTicks) ? c2 : l2
-            b := (extendBodies and h0 < c1 and ti >= viMergeTicks) ? o0 : h0
-            if p
-                t := math.max(t, c2)
-    // VI מתאחד עם FVG רק כשההרחבה דלוקה. בלי הרחבה — FVG נשאר בגבולות
-    // הפתילים, ו-VI נספר רק כשאין FVG באותו נכס.
-    if (f and m) or (v and (not f or extendBodies))
-        if d == 1
-            b := na(b) ? c1 : math.min(b, c1)
-            t := na(t) ? o0 : math.max(t, o0)
-        else
-            t := na(t) ? c1 : math.max(t, c1)
-            b := na(b) ? o0 : math.min(b, o0)
-    [b, t, f, m, v]
+        b := d == 1 ? h2 : h0
+        t := d == 1 ? l0 : l2
+    if v
+        b := d == 1 ? c1 : o0
+        t := d == 1 ? o0 : c1
+    [b, t, f, v]
 
 // הרגליים של ארבעת הנכסים בשני הכיוונים יושבות במערכים, אינדקס = נכס*2 +
 // (0 שורי / 1 דובי). מכאן נבנה הגאפ של קבוצה: שלישייה (kind 0) או זוג (1).
-// מחזיר [כיוון, aBot, aTop, bBot, bTop, cBot, cTop, anyFvg, anyVi].
+// מחזיר [כיוון, aBot, aTop, bBot, bTop, cBot, cTop, anyFvg, anyVi]. LM = VI של כל רגל.
 f_group(int kind, array<float> LB, array<float> LT, array<bool> LF, array<bool> LM) =>
     int  sa   = kind == 0 ? 0 : 2
     int  sb   = kind == 0 ? 1 : 3
@@ -624,18 +603,18 @@ ok2 = not na(a2H[2]) and not na(a2O[1]) and not na(a2C)
 ok3 = not na(a3H[2]) and not na(a3O[1]) and not na(a3C)
 ok4 = use4 and not na(a4H[2]) and not na(a4O[1]) and not na(a4C)
 
-[b1u, t1u, f1u, m1u, v1u] = f_leg(1, ok1, a1O, a1H, a1L, a1C, a1O[1], a1C[1], a1H[2], a1L[2], a1C[2], a1O[2], tk1, newRefCycle)
-[b1d, t1d, f1d, m1d, v1d] = f_leg(-1, ok1, a1O, a1H, a1L, a1C, a1O[1], a1C[1], a1H[2], a1L[2], a1C[2], a1O[2], tk1, newRefCycle)
-[b2u, t2u, f2u, m2u, v2u] = f_leg(1, ok2, a2O, a2H, a2L, a2C, a2O[1], a2C[1], a2H[2], a2L[2], a2C[2], a2O[2], tk2, newRefCycle)
-[b2d, t2d, f2d, m2d, v2d] = f_leg(-1, ok2, a2O, a2H, a2L, a2C, a2O[1], a2C[1], a2H[2], a2L[2], a2C[2], a2O[2], tk2, newRefCycle)
-[b3u, t3u, f3u, m3u, v3u] = f_leg(1, ok3, a3O, a3H, a3L, a3C, a3O[1], a3C[1], a3H[2], a3L[2], a3C[2], a3O[2], tk3, newRefCycle)
-[b3d, t3d, f3d, m3d, v3d] = f_leg(-1, ok3, a3O, a3H, a3L, a3C, a3O[1], a3C[1], a3H[2], a3L[2], a3C[2], a3O[2], tk3, newRefCycle)
-[b4u, t4u, f4u, m4u, v4u] = f_leg(1, ok4, a4O, a4H, a4L, a4C, a4O[1], a4C[1], a4H[2], a4L[2], a4C[2], a4O[2], tk4, newRefCycle)
-[b4d, t4d, f4d, m4d, v4d] = f_leg(-1, ok4, a4O, a4H, a4L, a4C, a4O[1], a4C[1], a4H[2], a4L[2], a4C[2], a4O[2], tk4, newRefCycle)
+[b1u, t1u, f1u, v1u] = f_leg(1, ok1, a1O, a1H, a1L, a1C, a1O[1], a1C[1], a1H[2], a1L[2], tk1, newRefCycle)
+[b1d, t1d, f1d, v1d] = f_leg(-1, ok1, a1O, a1H, a1L, a1C, a1O[1], a1C[1], a1H[2], a1L[2], tk1, newRefCycle)
+[b2u, t2u, f2u, v2u] = f_leg(1, ok2, a2O, a2H, a2L, a2C, a2O[1], a2C[1], a2H[2], a2L[2], tk2, newRefCycle)
+[b2d, t2d, f2d, v2d] = f_leg(-1, ok2, a2O, a2H, a2L, a2C, a2O[1], a2C[1], a2H[2], a2L[2], tk2, newRefCycle)
+[b3u, t3u, f3u, v3u] = f_leg(1, ok3, a3O, a3H, a3L, a3C, a3O[1], a3C[1], a3H[2], a3L[2], tk3, newRefCycle)
+[b3d, t3d, f3d, v3d] = f_leg(-1, ok3, a3O, a3H, a3L, a3C, a3O[1], a3C[1], a3H[2], a3L[2], tk3, newRefCycle)
+[b4u, t4u, f4u, v4u] = f_leg(1, ok4, a4O, a4H, a4L, a4C, a4O[1], a4C[1], a4H[2], a4L[2], tk4, newRefCycle)
+[b4d, t4d, f4d, v4d] = f_leg(-1, ok4, a4O, a4H, a4L, a4C, a4O[1], a4C[1], a4H[2], a4L[2], tk4, newRefCycle)
 
 // הגאפ של הגרף עצמו — לגבולות הציור ולגאפים של הגרף
-[cBu, cTu, cFu, cMu, cVu] = f_leg(1, true, open, high, low, close, open[1], close[1], high[2], low[2], close[2], open[2], syminfo.mintick, newRefCycle)
-[cBd, cTd, cFd, cMd, cVd] = f_leg(-1, true, open, high, low, close, open[1], close[1], high[2], low[2], close[2], open[2], syminfo.mintick, newRefCycle)
+[cBu, cTu, cFu, cVu] = f_leg(1, true, open, high, low, close, open[1], close[1], high[2], low[2], syminfo.mintick, newRefCycle)
+[cBd, cTd, cFd, cVd] = f_leg(-1, true, open, high, low, close, open[1], close[1], high[2], low[2], syminfo.mintick, newRefCycle)
 
 var int collBar = -1
 var int collDir = 0
@@ -645,7 +624,7 @@ if barstate.isconfirmed and tfClass != 0 and bar_index > 2
     array<float> LB = array.from(b1u, b1d, b2u, b2d, b3u, b3d, b4u, b4d)
     array<float> LT = array.from(t1u, t1d, t2u, t2d, t3u, t3d, t4u, t4d)
     array<bool>  LF = array.from(f1u, f1d, f2u, f2d, f3u, f3d, f4u, f4d)
-    array<bool>  LM = array.from(m1u, m1d, m2u, m2d, m3u, m3d, m4u, m4d)
+    array<bool>  LM = array.from(v1u, v1d, v2u, v2d, v3u, v3d, v4u, v4d)
     for k = 0 to 1
         [d, ab, at, bb, bt, xb, xt, anyF, anyV] = f_group(k, LB, LT, LF, LM)
         // FVG — לפי הנר האמצעי. גאפ מעבר או כולו VI — שייך לסייקל שהוא פותח.
@@ -668,7 +647,7 @@ if ownMode != "כבוי" and barstate.isconfirmed and tfClass != 0 and bar_index
     int oDir = cFu ? 1 : cFd ? -1 : not na(cTu) ? 1 : not na(cTd) ? -1 : 0
     if oDir != 0
         bool oF   = oDir == 1 ? cFu : cFd
-        bool oV   = oDir == 1 ? (cVu or (cFu and cMu)) : (cVd or (cFd and cMd))
+        bool oV   = oDir == 1 ? cVu : cVd
         bool oNow = (newRefCycle and oV) or not oF
         if not (newLifeCycle and not keepLast and not oNow)
             array.push(owns, OwnGap.new(oDir, oDir == 1 ? cBu : cBd, oDir == 1 ? cTu : cTd, oNow ? refCycleId : refCycleId[1], oNow ? time : time[1], oF ? bar_index - 2 : bar_index - 1, false, not oF, collBar == bar_index and collDir == oDir ? collId : 0))
@@ -680,7 +659,7 @@ if retCorner and barstate.isconfirmed and tfClass != 0 and bar_index > 2
     array<float> RB = array.from(b1u, b1d, b2u, b2d, b3u, b3d, b4u, b4d)
     array<float> RT = array.from(t1u, t1d, t2u, t2d, t3u, t3d, t4u, t4d)
     array<bool>  RF = array.from(f1u, f1d, f2u, f2d, f3u, f3d, f4u, f4d)
-    array<bool>  RM = array.from(m1u, m1d, m2u, m2d, m3u, m3d, m4u, m4d)
+    array<bool>  RM = array.from(v1u, v1d, v2u, v2d, v3u, v3d, v4u, v4d)
     for j = 0 to 7
         float lt = array.get(RT, j)
         if not na(lt)
@@ -690,29 +669,26 @@ if retCorner and barstate.isconfirmed and tfClass != 0 and bar_index > 2
     while array.size(legs) > 200
         array.remove(legs, 0)
 
-// מצב לכל נכס בתת-המחזור הנוכחי: יש יעד מתחת/מעל, וחזר אליו
-var array<bool> hasD = array.new_bool(4, false)
-var array<bool> hasU = array.new_bool(4, false)
-var array<bool> retD = array.new_bool(4, false)
-var array<bool> retU = array.new_bool(4, false)
-if newRefCycle
-    for a = 0 to 3
-        array.set(hasD, a, false)
-        array.set(hasU, a, false)
-        array.set(retD, a, false)
-        array.set(retU, a, false)
+// מצב לכל נכס בתת-המחזור הנוכחי — רק מרגליים חיות: רגל שהנכס הפך ל-IFVG
+// נמחקת, ואיתה גם ה"חזר" שלה.
+array<bool> hasD = array.new_bool(4, false)
+array<bool> hasU = array.new_bool(4, false)
+array<bool> retD = array.new_bool(4, false)
+array<bool> retU = array.new_bool(4, false)
 if retCorner and array.size(legs) > 0
     for i = array.size(legs) - 1 to 0
-        Leg lg = array.get(legs, i)
-        int a  = lg.asset
-        if lg.refId == tgtRef
-            array.set(lg.dir == 1 ? hasD : hasU, a, true)
-            if bar_index > lg.birth and f_touch(lg.dir, lg.bot, lg.top, f_hiA(a), f_loA(a))
-                array.set(lg.dir == 1 ? retD : retU, a, true)
-        // IFVG של הנכס — הרגל מתה
+        Leg   lg = array.get(legs, i)
+        int   a  = lg.asset
         float lc = f_clA(a)
+        // IFVG של הנכס — הרגל מתה
         if barstate.isconfirmed and bar_index > lg.birth and not na(lc) and (lg.dir == 1 ? lc < lg.bot : lc > lg.top)
             array.remove(legs, i)
+        else if lg.refId == tgtRef
+            array.set(lg.dir == 1 ? hasD : hasU, a, true)
+            if bar_index > lg.birth and f_touch(lg.dir, lg.bot, lg.top, f_hiA(a), f_loA(a))
+                lg.hit := true
+            if lg.hit
+                array.set(lg.dir == 1 ? retD : retU, a, true)
 
 // ═══════════════════════════════════════════════════════════════════
 // ציור — רק בנר האחרון: מוחקים הכול ומציירים מחדש
@@ -800,17 +776,18 @@ if barstate.islast
                     f_box(og.origin, og.top, og.bot, oCol, f_subName(tfClass, og.birthT) + " " + f_bornTxt(tfClass, og.birthT) + " " + (isColl ? lgTx : ownName) + (og.volImb ? " V" : "") + ht, retBox and ht != "")
 
 // ═══════════════════════════════════════════════════════════════════
-// שורת החזרה בפינה — כל נכס לחוד: חזר לגאפ שלו מתת-המחזור הקודם?
-// ▼ = לגאפ מתחת (שורי) · ▲ = לגאפ מעל (דובי) · אפור = יש יעד, עוד לא חזר.
-// נכס בלי גאפ במחזור הקודם — לא מופיע. אין יעד בכלל — השורה ריקה.
+// טבלת החזרה — כל נכס לחוד: חזר לגאפ חי שלו מתת-המחזור הקודם?
+// החץ = הכיוון שהחזרה אמורה לתדלק: ▲ = חזר לגאפ שורי (מתחת) · ▼ = לגאפ דובי
+// (מעל) · נקודה אפורה = יש יעד, עוד לא חזר. נכס בלי גאפ חי במחזור הקודם —
+// לא מופיע. אין יעד בכלל — הטבלה ריקה.
 // ═══════════════════════════════════════════════════════════════════
 
-retPosV = retPos == "למטה מימין" ? position.bottom_right : retPos == "למעלה משמאל" ? position.top_left : retPos == "למעלה מימין" ? position.top_right : position.bottom_left
-var table retTbl = table.new(retPosV, 5, 1, bgcolor = color.new(color.black, 100), frame_width = 0, border_width = 0)
+retPosV = retPos == "באמצע מימין" ? position.middle_right : retPos == "למטה משמאל" ? position.bottom_left : retPos == "למטה מימין" ? position.bottom_right : retPos == "למעלה משמאל" ? position.top_left : retPos == "למעלה מימין" ? position.top_right : position.middle_left
+var table retTbl = table.new(retPosV, 5, 2, bgcolor = color.new(color.black, 100), frame_width = 0, border_width = 0)
 
 if barstate.islast and retCorner
-    table.clear(retTbl, 0, 0, 4, 0)
-    bool any = false
+    table.clear(retTbl, 0, 0, 4, 1)
+    int col = 1
     if tgtRef != -1 and f_tfOn(tfClass)
         for a = 0 to (use4 ? 3 : 2)
             bool hd = array.get(hasD, a)
@@ -819,9 +796,10 @@ if barstate.islast and retCorner
                 bool   rd = array.get(retD, a)
                 bool   ru = array.get(retU, a)
                 string nm = a == 0 ? nm1 : a == 1 ? nm2 : a == 2 ? nm3 : nm4
-                string tx = nm + (rd ? "▼" : "") + (ru ? "▲" : "") + (rd or ru ? "" : "·")
+                string tx = (rd ? "▲" : "") + (ru ? "▼" : "") + (rd or ru ? "" : "·")
                 color  cc = rd and ru ? chart.fg_color : rd ? colBull : ru ? colBear : color.gray
-                table.cell(retTbl, a + 1, 0, tx, text_color = cc, text_size = size.tiny)
-                any := true
-    if any
-        table.cell(retTbl, 0, 0, "↩", text_color = color.gray, text_size = size.tiny)
+                table.cell(retTbl, col, 0, nm, text_color = color.gray, text_size = size.small)
+                table.cell(retTbl, col, 1, tx, text_color = cc, text_size = size.small)
+                col += 1
+    if col > 1
+        table.cell(retTbl, 0, 1, "Refuel", text_color = color.gray, text_size = size.small)
