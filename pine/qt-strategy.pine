@@ -27,10 +27,11 @@
 //   • כל ההחלטות בסגירת הנר; הכניסה — בפתיחת הנר הבא (process_orders_on_close = false).
 //   • מסגרות גבוהות: רק נרות סגורים ([1], בלי lookahead) — נר 15m נכנס לחישוב רק אחרי שנסגר.
 //   • PSP נרשם רק אחרי שהנר שאחרי הסווינג נסגר; הסטופ מעבר לנר הסווינג.
-//   • יציאה בתוך הנר: use_bar_magnifier (במנוי שתומך) כדי לדעת מה נגע קודם — סטופ או יעד.
+//   • יציאה בתוך הנר: TradingView מנחש מה נגע קודם (סטופ או יעד). במנוי Premium אפשר
+//     להפעיל ב-Strategy Tester "Bar Magnifier" / detalization כדי לבדוק בנתונים קטנים יותר.
 // עוד לא: Fill (גאפ קולקטיבי), HSSMT, If–Then, פולבקים, מסגרת גבוהה גוברת.
 //@version=6
-strategy("QT Strategy v0.3", shorttitle = "QT Strat", overlay = true, initial_capital = 10000, default_qty_type = strategy.fixed, default_qty_value = 1, commission_type = strategy.commission.cash_per_contract, commission_value = 0.62, slippage = 1, process_orders_on_close = false, use_bar_magnifier = true, max_labels_count = 500, max_lines_count = 50, max_boxes_count = 300)
+strategy("QT Strategy v0.3", shorttitle = "QT Strat", overlay = true, initial_capital = 10000, default_qty_type = strategy.fixed, default_qty_value = 1, commission_type = strategy.commission.cash_per_contract, commission_value = 0.62, slippage = 1, process_orders_on_close = false, max_labels_count = 500, max_lines_count = 50, max_boxes_count = 300)
 
 // ══════════════════════════════════════════════════════════════
 // הגדרות
