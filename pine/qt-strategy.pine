@@ -1,5 +1,5 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0
-// QT Strategy v0.4 — אסטרטגיה אחת: נזילות → שבירות קורלציה → כניסה בדקה.
+// QT Strategy v0.5 — אסטרטגיה אחת: נזילות → שבירות קורלציה → כניסה בדקה.
 // הכל מחושב בכל נר, כדי שיהיה בקטסט (Strategy Tester) ובהמשך התראות לברוקר.
 //
 // הרצה: גרף MNQ (או MES) של 1m (או 5m — אז בלי שבירות/טריגר של 1m).
@@ -31,7 +31,7 @@
 //     להפעיל ב-Strategy Tester "Bar Magnifier" / detalization כדי לבדוק בנתונים קטנים יותר.
 // עוד לא: Fill (גאפ קולקטיבי), HSSMT, If–Then, פולבקים, מסגרת גבוהה גוברת.
 //@version=6
-strategy("QT Strategy v0.4", shorttitle = "QT Strat", overlay = true, initial_capital = 10000, default_qty_type = strategy.fixed, default_qty_value = 1, commission_type = strategy.commission.cash_per_contract, commission_value = 0.62, slippage = 1, process_orders_on_close = false, margin_long = 0, margin_short = 0, max_labels_count = 500, max_lines_count = 500, max_boxes_count = 300)
+strategy("QT Strategy v0.5", shorttitle = "QT Strat", overlay = true, initial_capital = 10000, default_qty_type = strategy.fixed, default_qty_value = 1, commission_type = strategy.commission.cash_per_contract, commission_value = 0.62, slippage = 1, process_orders_on_close = false, margin_long = 0, margin_short = 0, max_labels_count = 500, max_lines_count = 500, max_boxes_count = 300)
 
 // ══════════════════════════════════════════════════════════════
 // הגדרות
@@ -54,6 +54,7 @@ zoneWin = input.int(90, "האזור תקף (דקות)", minval = 5, maxval = 600
 zS      = input.bool(true, "אזור: סשן", group = GE, inline = "z")
 zD      = input.bool(true, "יום", group = GE, inline = "z")
 zW      = input.bool(true, "שבוע", group = GE, inline = "z")
+z90     = input.bool(true, "90 דק'", group = GE, inline = "z")
 
 GX = "סטופ ויעד"
 bufTk  = input.int(2, "סטופ — טיקים מעבר לנר", minval = 0, maxval = 40, group = GX)
@@ -61,6 +62,16 @@ maxRsk = input.float(40, "סיכון מקסימלי (נקודות)", minval = 1,
 minRR  = input.float(1.5, "יעד — מרחק מינימלי (R)", minval = 0.5, step = 0.1, group = GX)
 useFb  = input.bool(true, "אין נזילות מתאימה — יעד קבוע", group = GX, inline = "fb")
 fbRR   = input.float(2.0, "R", minval = 0.5, step = 0.1, group = GX, inline = "fb")
+qtyN   = input.int(1, "חוזים", minval = 1, maxval = 50, group = GX, tooltip = "ליעד חלקי צריך לפחות 2.")
+
+GM = "ניהול עסקה"
+beOn  = input.bool(true, "סטופ לברייק-איבן אחרי", group = GM, inline = "be")
+beR   = input.float(1.0, "R", minval = 0.2, step = 0.1, group = GM, inline = "be")
+beTk  = input.int(2, "ברייק-איבן + טיקים (רווח קטן)", minval = 0, maxval = 80, group = GM)
+beOpp = input.bool(true, "ברייק-איבן גם בשבירה נגדית 1m/5m אחרי הכניסה (כשבעסקה ברווח)", group = GM)
+tp1On = input.bool(false, "יעד חלקי", group = GM, inline = "tp")
+tp1R  = input.float(1.0, "ב-R", minval = 0.2, step = 0.1, group = GM, inline = "tp")
+tp1P  = input.int(50, "%", minval = 10, maxval = 90, group = GM, inline = "tp")
 
 GT = "זמן"
 sess   = input.session("0200-1600", "שעות מסחר (ניו יורק)", group = GT, tooltip = "מחוץ לשעות — אין כניסות, ופוזיציה פתוחה נסגרת.")
@@ -289,13 +300,16 @@ f_go(Lv s, string tf) =>
 var Lv LS = Lv.new(lv = 3, on = zS, gaps = array.new<MG>())
 var Lv LD = Lv.new(lv = 4, on = zD, gaps = array.new<MG>())
 var Lv LW = Lv.new(lv = 5, on = zW, gaps = array.new<MG>())
+var Lv L9 = Lv.new(lv = 2, on = z90, gaps = array.new<MG>())
 
 f_go(LS, "15")
 f_go(LD, "60")
 f_go(LW, "240")
+f_go(L9, "5")
 LS.upd(high, low)
 LD.upd(high, low)
 LW.upd(high, low)
+L9.upd(high, low)
 
 // ══════════════════════════════════════════════════════════════
 // שבירות קורלציה — מנוע לכל מסגרת. נכסים: 0 = הגרף · 1 = נכס 2 · 2 = נכס 3
@@ -549,6 +563,7 @@ var string zTx  = ""
 [zs, zsT] = f_zone(LS)
 [zd, zdT] = f_zone(LD)
 [zw, zwT] = f_zone(LW)
+[z9, z9T] = f_zone(L9)
 if zs != 0
     zT   := time
     zDir := zs
@@ -557,6 +572,10 @@ if zd != 0
     zT   := time
     zDir := zd
     zTx  := zdT
+if z9 != 0 and zs == 0 and zd == 0 and zw == 0
+    zT   := time
+    zDir := z9
+    zTx  := z9T
 if zw != 0
     zT   := time
     zDir := zw
@@ -593,8 +612,8 @@ f_supp(int D, int zt, int exCls) =>
 // יעד: הנזילות הקרובה בכיוון D, לפחות minD מהמחיר
 f_target(int D, float px, float minD) =>
     float best = na
-    for k = 0 to 2
-        Lv s = k == 0 ? LS : k == 1 ? LD : LW
+    for k = 0 to 3
+        Lv s = k == 0 ? LS : k == 1 ? LD : k == 2 ? LW : L9
         if s.on
             float ex = D == -1 ? s.eL : s.eH
             bool  tk = D == -1 ? s.eLT > 0 : s.eHT > 0
@@ -626,6 +645,15 @@ var float tEnt  = na
 var bool  byTime = false
 var box   bxR   = na
 var box   bxG   = na
+// מצב העסקה הפתוחה (לניהול)
+var string pId    = ""
+var int    pDir   = 0
+var float  pR     = na
+var float  pEnt   = na
+var float  pTgt   = na
+var float  pTp1   = na
+var int    pT     = 0
+var bool   beDone = false
 
 [nBear, fBear, sBear] = f_supp(-1, zT, 0)
 [nBull, fBull, sBull] = f_supp(1, zT, 0)
@@ -634,12 +662,14 @@ var box   bxG   = na
 var int cZone = 0
 var int cTrig = 0
 var int cTime = 0
+var int cPos  = 0
+var int cHrs  = 0
 var int cNoN  = 0
 var int cNoF  = 0
 var int cRisk = 0
 var int cTgt  = 0
 var int cOk   = 0
-if zs != 0 or zd != 0 or zw != 0
+if zs != 0 or zd != 0 or zw != 0 or z9 != 0
     cZone += 1
 
 // סימון על הגרף: השבירה שעשתה את הטריגר, והחדשה מכל סוג בכל מסגרת תומכת
@@ -693,10 +723,10 @@ if trigNow
     string why = ""
     bool   go  = false
     if strategy.position_size != 0
-        cTime += 1
+        cPos += 1
         why := "✗ כבר בעסקה"
     else if not inSess or (noFri and dBlk)
-        cTime += 1
+        cHrs += 1
         why := "✗ מחוץ לשעות המסחר"
     else if dayN >= maxDay
         cTime += 1
@@ -719,8 +749,18 @@ if trigNow
         float rr = math.abs(tgt - close) / risk
         why := "✓ החלטה בסגירת הנר (" + f_px(close) + ") · כניסה בפתיחת הנר הבא\nסטופ " + f_px(stp) + " (מעבר לנר הטריגר)\nיעד " + f_px(tgt) + (fb ? " (קבוע " : " (נזילות · ") + str.tostring(math.round(rr, 1)) + "R)"
         string id = D == 1 ? "L" : "S"
-        strategy.entry(id, D == 1 ? strategy.long : strategy.short, comment = (D == 1 ? "קנייה" : "מכירה"))
+        strategy.entry(id, D == 1 ? strategy.long : strategy.short, qty = qtyN, comment = (D == 1 ? "קנייה" : "מכירה"))
+        if tp1On and qtyN >= 2
+            strategy.exit(id + " tp1", id, qty_percent = tp1P, stop = stp, limit = close + D * tp1R * risk, comment_profit = "יעד חלקי", comment_loss = "סטופ")
         strategy.exit(id + " x", id, stop = stp, limit = tgt, comment_profit = "יעד", comment_loss = "סטופ")
+        pId    := id
+        pDir   := D
+        pR     := risk
+        pEnt   := close
+        pTgt   := tgt
+        pTp1   := close + D * tp1R * risk
+        pT     := time
+        beDone := false
         tStop  := stp
         tTgt   := tgt
         tEnt   := close
@@ -737,6 +777,28 @@ if trigNow
             f_marks(D, tE)
     else if showWhy and showRej
         label.new(bar_index, D == -1 ? high : low, "✗", style = D == -1 ? label.style_label_down : label.style_label_up, color = color.new(#787b86, 70), textcolor = color.white, size = size.tiny, tooltip = full)
+
+// ══════════════════════════════════════════════════════════════
+// ניהול עסקה: ברייק-איבן אחרי X R / אחרי יעד חלקי / בשבירה נגדית כשברווח
+// ══════════════════════════════════════════════════════════════
+bool  inPos = strategy.position_size != 0 and pDir != 0
+float avgP  = strategy.position_avg_price
+if inPos and not beDone and beOn
+    bool hitR  = pDir == 1 ? high - avgP >= beR * pR : avgP - low >= beR * pR
+    bool part  = tp1On and qtyN >= 2 and math.abs(strategy.position_size) < qtyN
+    bool oppBk = beOpp and time > pT and ((e1.newRT == time and e1.newDir == -pDir) or (e5.newRT == time and e5.newDir == -pDir)) and (pDir == 1 ? close > avgP : close < avgP)
+    if hitR or part or oppBk
+        float be = avgP + pDir * beTk * syminfo.mintick
+        // רק אם הסטופ החדש עדיין בצד הנכון של המחיר
+        if pDir == 1 ? be < close : be > close
+            beDone := true
+            tStop  := be
+            if tp1On and qtyN >= 2 and not part
+                strategy.exit(pId + " tp1", pId, qty_percent = tp1P, stop = be, limit = pTp1, comment_profit = "יעד חלקי", comment_loss = "ברייק-איבן")
+            strategy.exit(pId + " x", pId, stop = be, limit = pTgt, comment_profit = "יעד", comment_loss = "ברייק-איבן")
+            label.new(bar_index, pDir == 1 ? low : high, "BE", style = pDir == 1 ? label.style_label_up : label.style_label_down, color = color.new(#2962ff, 20), textcolor = color.white, size = size.tiny, tooltip = hitR ? "הסטופ הוזז לכניסה: המחיר הגיע ל-" + str.tostring(beR) + "R" : part ? "הסטופ הוזז לכניסה אחרי יעד חלקי" : "הסטופ הוזז לכניסה: שבירה נגדית ב-1m/5m")
+if strategy.position_size == 0
+    pDir := 0
 
 bgcolor(showZone and zOnNow ? color.new(zDirNow == 1 ? #26a69a : #ef5350, 92) : na, title = "אזור נזילות")
 
@@ -767,15 +829,16 @@ if strategy.closedtrades > lastCT
         float pt = (xp - ep) * dr
         float pf = strategy.closedtrades.profit(k)
         int   et = strategy.closedtrades.entry_time(k)
-        string rs = byTime ? "סוף שעות המסחר" : (not na(tTgt) and math.abs(xp - tTgt) <= math.abs(xp - tStop)) ? "יעד" : "סטופ"
-        string sh = rs == "יעד" ? "✓" : rs == "סטופ" ? "✗" : "⏱"
+        string rs = strategy.closedtrades.exit_comment(k)
+        rs := rs == "" ? (byTime ? "סוף שעות המסחר" : "סטופ") : rs
+        string sh = rs == "יעד" or rs == "יעד חלקי" ? "✓" : rs == "סטופ" ? "✗" : rs == "ברייק-איבן" ? "BE" : "⏱"
         string tip = "יציאה: " + rs + "\nכניסה בפועל " + f_px(ep) + " (" + f_hm(et) + ")\nיציאה " + f_px(xp) + "\n" + (pt >= 0 ? "+" : "") + str.tostring(math.round(pt, 2)) + " נק' · " + (pf >= 0 ? "+$" : "-$") + str.tostring(math.round(math.abs(pf), 2))
         int   eb = strategy.closedtrades.entry_bar_index(k)
         int   xb = strategy.closedtrades.exit_bar_index(k)
         color xc = pt >= 0 ? #26a69a : #ef5350
         // חץ מהכניסה ליציאה, ותווית עם התוצאה בנר היציאה
         line.new(eb, ep, xb, xp, color = xc, width = 2, style = line.style_arrow_right)
-        label.new(xb, xp, (rs == "יעד" ? "יעד ✓ " : rs == "סטופ" ? "סטופ ✗ " : "סוף זמן ⏱ ") + (pt >= 0 ? "+" : "") + str.tostring(math.round(pt, 1)) + " נק'", style = dr == 1 ? (pt >= 0 ? label.style_label_down : label.style_label_up) : (pt >= 0 ? label.style_label_up : label.style_label_down), color = color.new(xc, 0), textcolor = color.white, size = size.small, tooltip = tip)
+        label.new(xb, xp, rs + " " + sh + " " + (pt >= 0 ? "+" : "") + str.tostring(math.round(pt, 1)) + " נק'", style = dr == 1 ? (pt >= 0 ? label.style_label_down : label.style_label_up) : (pt >= 0 ? label.style_label_up : label.style_label_down), color = color.new(xc, 0), textcolor = color.white, size = size.small, tooltip = tip)
         if not na(bxR) and k == strategy.closedtrades - 1
             bxR.set_right(xb)
             bxG.set_right(xb)
@@ -854,4 +917,4 @@ if barstate.islast
         st.cell(0, 7, "מאז ההתחלה", text_color = #787b86, text_size = size.small, bgcolor = CLR)
         st.cell(1, 7, str.tostring(cZone) + " אזורים · " + str.tostring(cTrig) + " טריגרים באזור · " + str.tostring(cOk) + " עסקאות", text_color = #b2b5be, text_size = size.small, bgcolor = CLR)
         st.cell(0, 8, "למה לא", text_color = #787b86, text_size = size.small, bgcolor = CLR)
-        st.cell(1, 8, "חסרות שבירות " + str.tostring(cNoN) + " · אין חדשה " + str.tostring(cNoF) + " · סיכון " + str.tostring(cRisk) + " · יעד " + str.tostring(cTgt) + " · זמן/פוזיציה " + str.tostring(cTime), text_color = #b2b5be, text_size = size.small, bgcolor = CLR)
+        st.cell(1, 8, "חסרות שבירות " + str.tostring(cNoN) + " · אין חדשה " + str.tostring(cNoF) + " · סיכון " + str.tostring(cRisk) + " · יעד " + str.tostring(cTgt) + " · כבר בעסקה " + str.tostring(cPos) + " · מחוץ לשעות " + str.tostring(cHrs) + " · מקס' ליום " + str.tostring(cTime), text_color = #b2b5be, text_size = size.small, bgcolor = CLR)
