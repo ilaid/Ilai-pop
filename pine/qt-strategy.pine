@@ -1,5 +1,5 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0
-// QT Strategy v0.3 — אסטרטגיה אחת: נזילות → שבירות קורלציה → כניסה בדקה.
+// QT Strategy v0.4 — אסטרטגיה אחת: נזילות → שבירות קורלציה → כניסה בדקה.
 // הכל מחושב בכל נר, כדי שיהיה בקטסט (Strategy Tester) ובהמשך התראות לברוקר.
 //
 // הרצה: גרף MNQ (או MES) של 1m (או 5m — אז בלי שבירות/טריגר של 1m).
@@ -31,7 +31,7 @@
 //     להפעיל ב-Strategy Tester "Bar Magnifier" / detalization כדי לבדוק בנתונים קטנים יותר.
 // עוד לא: Fill (גאפ קולקטיבי), HSSMT, If–Then, פולבקים, מסגרת גבוהה גוברת.
 //@version=6
-strategy("QT Strategy v0.3", shorttitle = "QT Strat", overlay = true, initial_capital = 10000, default_qty_type = strategy.fixed, default_qty_value = 1, commission_type = strategy.commission.cash_per_contract, commission_value = 0.62, slippage = 1, process_orders_on_close = false, max_labels_count = 500, max_lines_count = 50, max_boxes_count = 300)
+strategy("QT Strategy v0.4", shorttitle = "QT Strat", overlay = true, initial_capital = 10000, default_qty_type = strategy.fixed, default_qty_value = 1, commission_type = strategy.commission.cash_per_contract, commission_value = 0.62, slippage = 1, process_orders_on_close = false, margin_long = 0, margin_short = 0, max_labels_count = 500, max_lines_count = 500, max_boxes_count = 300)
 
 // ══════════════════════════════════════════════════════════════
 // הגדרות
@@ -770,7 +770,15 @@ if strategy.closedtrades > lastCT
         string rs = byTime ? "סוף שעות המסחר" : (not na(tTgt) and math.abs(xp - tTgt) <= math.abs(xp - tStop)) ? "יעד" : "סטופ"
         string sh = rs == "יעד" ? "✓" : rs == "סטופ" ? "✗" : "⏱"
         string tip = "יציאה: " + rs + "\nכניסה בפועל " + f_px(ep) + " (" + f_hm(et) + ")\nיציאה " + f_px(xp) + "\n" + (pt >= 0 ? "+" : "") + str.tostring(math.round(pt, 2)) + " נק' · " + (pf >= 0 ? "+$" : "-$") + str.tostring(math.round(math.abs(pf), 2))
-        label.new(bar_index, dr == 1 ? high : low, "יציאה " + sh + " " + (pt >= 0 ? "+" : "") + str.tostring(math.round(pt, 1)), style = dr == 1 ? label.style_label_down : label.style_label_up, color = color.new(pt >= 0 ? #26a69a : #ef5350, 0), textcolor = color.white, size = size.small, tooltip = tip)
+        int   eb = strategy.closedtrades.entry_bar_index(k)
+        int   xb = strategy.closedtrades.exit_bar_index(k)
+        color xc = pt >= 0 ? #26a69a : #ef5350
+        // חץ מהכניסה ליציאה, ותווית עם התוצאה בנר היציאה
+        line.new(eb, ep, xb, xp, color = xc, width = 2, style = line.style_arrow_right)
+        label.new(xb, xp, (rs == "יעד" ? "יעד ✓ " : rs == "סטופ" ? "סטופ ✗ " : "סוף זמן ⏱ ") + (pt >= 0 ? "+" : "") + str.tostring(math.round(pt, 1)) + " נק'", style = dr == 1 ? (pt >= 0 ? label.style_label_down : label.style_label_up) : (pt >= 0 ? label.style_label_up : label.style_label_down), color = color.new(xc, 0), textcolor = color.white, size = size.small, tooltip = tip)
+        if not na(bxR) and k == strategy.closedtrades - 1
+            bxR.set_right(xb)
+            bxG.set_right(xb)
         int hr = hour(et, TZ)
         hCnt.set(hr, hCnt.get(hr) + 1)
         hWin.set(hr, hWin.get(hr) + (pt > 0 ? 1 : 0))
